@@ -1,6 +1,7 @@
 require('dotenv').config();
 const cron = require('node-cron');
 const discover = require('./discover');
+const discoverCustom = require('./discoverCustom');
 const apply = require('./apply');
 
 const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 * * * *';     // every hour by default
@@ -15,9 +16,11 @@ console.log('=================================================');
 // Run once immediately on startup so you see activity right away,
 // then settle into the scheduled cadence.
 discover.run().catch(err => console.error('[startup discover]', err));
+discoverCustom.run().catch(err => console.error('[startup discoverCustom]', err));
 
 cron.schedule(DISCOVER_CRON, () => {
   discover.run().catch(err => console.error('[scheduled discover]', err));
+  discoverCustom.run().catch(err => console.error('[scheduled discoverCustom]', err));
 });
 
 cron.schedule(APPLY_CRON, () => {
