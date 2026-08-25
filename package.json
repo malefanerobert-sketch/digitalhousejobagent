@@ -1,0 +1,19 @@
+{
+  "name": "digitalhouse-jobagent-worker",
+  "version": "1.0.0",
+  "description": "Background worker that discovers job postings from Greenhouse/Lever boards, matches them to user profiles, and (in automatic mode) submits applications.",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "discover": "node discover.js",
+    "apply": "node apply.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.47.0"
+  }
+}
