@@ -14,10 +14,6 @@ function humanDelay() {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Downloads the seeker's resume from its stored URL (Supabase Storage, or any
-// public URL) to a local temp file, since Playwright's setInputFiles() needs
-// an actual file on disk, not a URL. Returns the local path, or null if there
-// was no resume_url to fetch. Caller is responsible for cleaning the file up.
 async function downloadResumeToTemp(resumeUrl, seekerId) {
   if (!resumeUrl) return null;
   const res = await fetch(resumeUrl);
@@ -47,10 +43,29 @@ async function logResult(match, result, notes) {
     .eq('id', match.id);
 }
 
+async function detectCaptcha(page) {
+  return await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
+}
+
+async function attachResume(resumeInput, seeker) {
+  if (!resumeInput) return { attached: false };
+  if (!seeker.resume_url) {
+    return { attached: false, error: 'This form requires a resume file, but this seeker has no resume_url on record.' };
+  }
+  let tempResumePath = null;
+  try {
+    tempResumePath = await downloadResumeToTemp(seeker.resume_url, seeker.id);
+    await resumeInput.setInputFiles(tempResumePath);
+    await humanDelay();
+    return { attached: true };
+  } catch (err) {
+    return { attached: false, error: `Resume attach failed: ${err.message}` };
+  } finally {
+    cleanupTemp(tempResumePath);
+  }
+}
+
 // Greenhouse job pages use a fairly consistent embedded application form.
-// Field names/ids can vary slightly between boards, so this tries a few
-// common selectors and bails out cleanly (logging needs_manual_action)
-// rather than guessing and submitting something wrong.
 async function applyOnGreenhouse(page, seeker) {
   await page.waitForLoadState('networkidle');
 
@@ -73,24 +88,10 @@ async function applyOnGreenhouse(page, seeker) {
   await email.fill(seeker.dedicated_email || '');
   await humanDelay();
 
-  let tempResumePath = null;
-  if (resumeInput && seeker.resume_url) {
-    try {
-      tempResumePath = await downloadResumeToTemp(seeker.resume_url, seeker.id);
-      await resumeInput.setInputFiles(tempResumePath);
-      await humanDelay();
-    } catch (err) {
-      return { ok: false, reason: `Resume attach failed: ${err.message}` };
-    } finally {
-      cleanupTemp(tempResumePath);
-    }
-  } else if (resumeInput && !seeker.resume_url) {
-    return { ok: false, reason: 'This form requires a resume file, but this seeker has no resume_url on record.' };
-  }
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Detect obvious CAPTCHA / bot-check before submitting
-  const captcha = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
-  if (captcha) {
+  if (await detectCaptcha(page)) {
     return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
@@ -106,9 +107,8 @@ async function applyOnGreenhouse(page, seeker) {
   return { ok: true };
 }
 
-// Lever's hosted application forms use a different, but similarly consistent,
-// structure across every company on the platform: name="name", name="email",
-// name="phone", and a resume dropzone with an underlying file input.
+// Lever's hosted application forms: name="name", name="email", name="phone",
+// and a resume dropzone with an underlying file input.
 async function applyOnLever(page, seeker) {
   await page.waitForLoadState('networkidle');
 
@@ -131,23 +131,145 @@ async function applyOnLever(page, seeker) {
     await humanDelay();
   }
 
-  let tempResumePath = null;
-  if (resumeInput && seeker.resume_url) {
-    try {
-      tempResumePath = await downloadResumeToTemp(seeker.resume_url, seeker.id);
-      await resumeInput.setInputFiles(tempResumePath);
-      await humanDelay();
-    } catch (err) {
-      return { ok: false, reason: `Resume attach failed: ${err.message}` };
-    } finally {
-      cleanupTemp(tempResumePath);
-    }
-  } else if (resumeInput && !seeker.resume_url) {
-    return { ok: false, reason: 'This form requires a resume file, but this seeker has no resume_url on record.' };
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
-  const captcha = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
-  if (captcha) {
+  const submitBtn = await page.$('button[type="submit"]');
+  if (!submitBtn) {
+    return { ok: false, reason: 'Could not find a submit button on this form.' };
+  }
+
+  await humanDelay();
+  await submitBtn.click();
+  await page.waitForLoadState('networkidle');
+
+  return { ok: true };
+}
+
+// SmartRecruiters hosted apply pages typically use name="firstName",
+// name="lastName", name="email", and a file input for the resume/CV.
+async function applyOnSmartRecruiters(page, seeker) {
+  await page.waitForLoadState('networkidle');
+
+  const firstName = await page.$('input[name="firstName"], #firstName');
+  const lastName = await page.$('input[name="lastName"], #lastName');
+  const email = await page.$('input[name="email"], #email');
+  const resumeInput = await page.$('input[type="file"]');
+
+  if (!firstName || !lastName || !email) {
+    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
+  }
+
+  const [given, ...rest] = seeker.full_name.trim().split(' ');
+  const surname = rest.join(' ') || given;
+
+  await firstName.fill(given);
+  await humanDelay();
+  await lastName.fill(surname);
+  await humanDelay();
+  await email.fill(seeker.dedicated_email || '');
+  await humanDelay();
+
+  const phoneField = await page.$('input[name="phoneNumber"], input[name="phone"]');
+  if (phoneField && seeker.phone) {
+    await phoneField.fill(seeker.phone);
+    await humanDelay();
+  }
+
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  }
+
+  const submitBtn = await page.$('button[type="submit"]');
+  if (!submitBtn) {
+    return { ok: false, reason: 'Could not find a submit button on this form.' };
+  }
+
+  await humanDelay();
+  await submitBtn.click();
+  await page.waitForLoadState('networkidle');
+
+  return { ok: true };
+}
+
+// Ashby's hosted job application forms are React-driven; fields are usually
+// exposed with name/id attributes containing "name" and "email".
+async function applyOnAshby(page, seeker) {
+  await page.waitForLoadState('networkidle');
+
+  const nameField = await page.$('input[name*="name" i], input[id*="name" i]');
+  const emailField = await page.$('input[type="email"], input[name*="email" i]');
+  const resumeInput = await page.$('input[type="file"]');
+
+  if (!nameField || !emailField) {
+    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
+  }
+
+  await nameField.fill(seeker.full_name);
+  await humanDelay();
+  await emailField.fill(seeker.dedicated_email || '');
+  await humanDelay();
+
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  }
+
+  const submitBtn = await page.$('button[type="submit"]');
+  if (!submitBtn) {
+    return { ok: false, reason: 'Could not find a submit button on this form.' };
+  }
+
+  await humanDelay();
+  await submitBtn.click();
+  await page.waitForLoadState('networkidle');
+
+  return { ok: true };
+}
+
+// Workable's hosted apply forms typically use name="candidate[name]" or
+// separate first/last name fields, plus name="candidate[email]".
+async function applyOnWorkable(page, seeker) {
+  await page.waitForLoadState('networkidle');
+
+  const fullNameField = await page.$('input[name="candidate[name]"]');
+  const firstName = await page.$('input[name="candidate[firstname]"]');
+  const lastName = await page.$('input[name="candidate[lastname]"]');
+  const emailField = await page.$('input[name="candidate[email]"], input[type="email"]');
+  const resumeInput = await page.$('input[type="file"]');
+
+  if (!emailField || (!fullNameField && (!firstName || !lastName))) {
+    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
+  }
+
+  if (fullNameField) {
+    await fullNameField.fill(seeker.full_name);
+    await humanDelay();
+  } else {
+    const [given, ...rest] = seeker.full_name.trim().split(' ');
+    const surname = rest.join(' ') || given;
+    await firstName.fill(given);
+    await humanDelay();
+    await lastName.fill(surname);
+    await humanDelay();
+  }
+
+  await emailField.fill(seeker.dedicated_email || '');
+  await humanDelay();
+
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+
+  if (await detectCaptcha(page)) {
     return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
@@ -166,14 +288,12 @@ async function applyOnLever(page, seeker) {
 async function run() {
   console.log(`[apply] starting run at ${new Date().toISOString()}`);
 
-  // Pull matches that are either explicitly approved by the user, OR belong to a
-  // seeker whose mode is 'automatic' and are still pending.
   const { data: pending, error } = await supabase
     .from('job_matches')
     .select('*, job_seekers(*), job_sources(*)')
     .in('status', ['approved', 'pending'])
     .eq('is_custom_source', false) // custom (AI-extracted) sources are discovery-only, never auto-applied
-    .limit(MAX_PER_RUN * 3); // over-fetch a bit, filter below
+    .limit(MAX_PER_RUN * 3);
 
   if (error) { console.error('[apply] failed to load job_matches:', error.message); return; }
   if (!pending || pending.length === 0) { console.log('[apply] nothing to process'); return; }
@@ -203,13 +323,19 @@ async function run() {
         result = await applyOnGreenhouse(page, seeker);
       } else if (source?.source_type === 'lever') {
         result = await applyOnLever(page, seeker);
+      } else if (source?.source_type === 'smartrecruiters') {
+        result = await applyOnSmartRecruiters(page, seeker);
+      } else if (source?.source_type === 'ashby') {
+        result = await applyOnAshby(page, seeker);
+      } else if (source?.source_type === 'workable') {
+        result = await applyOnWorkable(page, seeker);
       } else {
         result = { ok: false, reason: `Auto-apply not yet implemented for source type "${source?.source_type}".` };
       }
 
       if (result.ok) {
         console.log(`[apply]  ✔ submitted`);
-        await logResult(match, 'success', 'Submitted via Greenhouse form automation.');
+        await logResult(match, 'success', `Submitted via ${source?.source_type} form automation.`);
       } else if (result.captcha) {
         console.log(`[apply]  ⚠ captcha — needs manual action`);
         await logResult(match, 'captcha_blocked', result.reason);
