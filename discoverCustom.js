@@ -90,6 +90,9 @@ function scoreMatch(job, keywords) {
 async function run() {
   console.log(`[discover] starting run at ${new Date().toISOString()}`);
 
+  await aiMatch.loadSettings(supabase);
+  console.log(`[discover] AI-powered matching: ${aiMatch.isEnabled() ? 'ON (shared DigitalHouse key)' : 'OFF (keyword matching only — set it in Dispatch Admin > AI settings)'}`);
+
   const { data: sources, error: srcErr } = await supabase
     .from('job_sources')
     .select('*')
@@ -111,10 +114,6 @@ async function run() {
   if (!seekers || seekers.length === 0) {
     console.log('[discover] no active job_seekers yet — nothing to match against.');
     return;
-  }
-
-  for (const seeker of seekers) {
-    console.log(`[discover] matching for ${seeker.full_name} — AI: ${aiMatch.isEnabled(seeker) ? `ON (${seeker.ai_provider})` : 'OFF (keyword matching only)'}`);
   }
 
   for (const source of sources) {
@@ -152,8 +151,8 @@ async function run() {
         let finalScore = keywordScore;
         let matchReason = null;
 
-        if (aiMatch.isEnabled(seeker)) {
-          const aiResult = await aiMatch.scoreWithAI(seeker, job);
+        if (aiMatch.isEnabled()) {
+          const aiResult = await aiMatch.scoreWithAI(seeker.resume_text, job);
           if (aiResult) {
             finalScore = aiResult.score;
             matchReason = aiResult.reason;
