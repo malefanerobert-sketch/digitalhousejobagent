@@ -293,6 +293,7 @@ async function run() {
     .select('*, job_seekers(*), job_sources(*)')
     .in('status', ['approved', 'pending'])
     .eq('is_custom_source', false) // custom (AI-extracted) sources are discovery-only, never auto-applied
+            .order('status', { ascending: true })
     .limit(MAX_PER_RUN * 3);
 
   if (error) { console.error('[apply] failed to load job_matches:', error.message); return; }
