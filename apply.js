@@ -354,17 +354,38 @@ async function run() {
     .from('job_matches')
     .select('*, job_seekers(*), job_sources(*)')
     .in('status', ['approved', 'pending'])
-    .eq('is_custom_source', false) // custom (AI-extracted) sources are discovery-only, never auto-applied
-            .order('status', { ascending: true })
+    // watched/custom-source postings now go through the same auto-apply
+    // attempt as any other source — they only land in the user's
+    // application report if the agent actually can't submit them.
+    .order('status', { ascending: true })
     .limit(MAX_PER_RUN * 3);
 
   if (error) { console.error('[apply] failed to load job_matches:', error.message); return; }
   if (!pending || pending.length === 0) { console.log('[apply] nothing to process'); return; }
 
+  // Don't keep retrying a posting that already hit a structural wall (a
+  // CAPTCHA, or a form layout the agent doesn't recognize) — that won't
+  // change on a retry, and retrying it anyway is what was piling up long
+  // runs of duplicate entries for the same company in the application
+  // report. This is checked independently of job_matches.status so it
+  // holds even if a match gets re-queued as pending/approved later.
+  const seekerIds = [...new Set(pending.map(m => m.job_seeker_id).filter(Boolean))];
+  const { data: terminalLogs } = await supabase
+    .from('application_log')
+    .select('job_seeker_id, job_matches(job_url)')
+    .in('job_seeker_id', seekerIds)
+    .in('result', ['captcha_blocked', 'needs_manual_action']);
+  const alreadyTerminal = new Set(
+    (terminalLogs || [])
+      .filter(l => l.job_matches?.job_url)
+      .map(l => `${l.job_seeker_id}|${l.job_matches.job_url}`)
+  );
+
   const toProcess = pending.filter(m => {
     const blockedCompanies = m.job_seekers?.blocked_companies || [];
     const isBlockedCompany = blockedCompanies.some(b => b.toLowerCase() === (m.company_name || '').toLowerCase());
     if (isBlockedCompany) return false;
+    if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
   }).slice(0, MAX_PER_RUN);
 
@@ -395,6 +416,8 @@ async function run() {
         result = await applyOnAshby(page, seeker);
       } else if (source?.source_type === 'workable') {
         result = await applyOnWorkable(page, seeker);
+      } else if (match.is_custom_source) {
+        result = { ok: false, reason: 'This came from a watched company page whose form layout the agent doesn\'t recognize — needs manual review to apply.' };
       } else {
         result = { ok: false, reason: `Auto-apply not yet implemented for source type "${source?.source_type}".` };
       }
