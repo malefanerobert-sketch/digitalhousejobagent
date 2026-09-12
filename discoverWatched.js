@@ -34,11 +34,26 @@ LINKS:
 ${JSON.stringify(links)}`;
 }
 
+// A user can list several target roles (e.g. "Data Analyst, Data Processor,
+// Data Capture"). Each keyword is an INDEPENDENT thing they'd take a job for,
+// so a posting qualifies if it matches ANY one of them well — we return the
+// best single-keyword match, not the fraction of all keywords. (The old
+// hits/total formula punished having many roles: a job matching 1 of 5 scored
+// 0.2 and got filtered out, so adding more roles found fewer jobs.)
 function scoreMatch(text, keywords) {
   if (!keywords || keywords.length === 0) return 0;
   const haystack = text.toLowerCase();
-  const hits = keywords.filter(k => haystack.includes(k.toLowerCase())).length;
-  return hits / keywords.length;
+  let best = 0;
+  for (const kw of keywords) {
+    const k = (kw || '').toLowerCase().trim();
+    if (!k) continue;
+    if (haystack.includes(k)) { best = 1; break; } // whole role phrase present — strongest possible match
+    const words = k.split(/\s+/).filter(Boolean);
+    if (!words.length) continue;
+    const wordHits = words.filter(w => haystack.includes(w)).length;
+    best = Math.max(best, wordHits / words.length); // partial: fraction of THIS role's words present
+  }
+  return best;
 }
 
 // Have we already reported *something* against this exact URL for this
