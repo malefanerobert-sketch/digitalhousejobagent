@@ -13,16 +13,23 @@ let cachedSettings = null;
 async function loadSettings(supabase) {
   const { data, error } = await supabase
     .from('dispatch_settings')
-    .select('ai_provider, ai_api_key, ai_model')
+    .select('ai_provider, ai_api_key, ai_model, agent_prompt')
     .eq('id', true)
     .maybeSingle();
   if (error) {
     console.error('[ai-match] failed to load dispatch_settings, AI matching disabled for this run:', error.message);
-    cachedSettings = { ai_provider: 'none', ai_api_key: null, ai_model: null };
+    cachedSettings = { ai_provider: 'none', ai_api_key: null, ai_model: null, agent_prompt: null };
   } else {
-    cachedSettings = data || { ai_provider: 'none', ai_api_key: null, ai_model: null };
+    cachedSettings = data || { ai_provider: 'none', ai_api_key: null, ai_model: null, agent_prompt: null };
   }
   return cachedSettings;
+}
+
+// Dispatch Admin's free-text "Agent instructions" — prepended to prompts
+// that benefit from admin-tunable guidance (currently just watched-page
+// extraction). Returns null when nothing has been set.
+function agentPrompt() {
+  return cachedSettings?.agent_prompt || null;
 }
 
 // Used only if Dispatch Admin hasn't set a specific model string — keeps
@@ -138,4 +145,4 @@ async function completeWithAI(prompt) {
   }
 }
 
-module.exports = { loadSettings, isEnabled, scoreWithAI, completeWithAI };
+module.exports = { loadSettings, isEnabled, scoreWithAI, completeWithAI, agentPrompt };

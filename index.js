@@ -1,29 +1,27 @@
 require('dotenv').config();
 const cron = require('node-cron');
-// discover.js was retired — it was an older, narrower duplicate of
-// discoverCustom.js (Greenhouse/Lever only, and its AI scoring had been
-// silently broken by a stale function signature). discoverCustom.js does
-// everything it did, correctly, plus Ashby/SmartRecruiters/Workable.
-const discoverCustom = require('./discoverCustom');
+// discoverCustom.js (the structured Greenhouse/Lever/Ashby/SmartRecruiters/
+// Workable catalog approach, driven by the job_sources table) has been
+// retired — Dispatch now runs entirely on user-added Watched pages. Railway
+// itself still hosts the process; what changed is that there's no more
+// fixed-catalog scraping, only the Agent visiting whatever pages users add.
 const discoverWatched = require('./discoverWatched');
 const apply = require('./apply');
 
-const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 * * * *';     // every hour by default
-const APPLY_CRON = process.env.APPLY_CRON || '*/20 * * * *';        // every 20 min by default
+const WATCH_CRON = process.env.WATCH_CRON || '0 */3 * * *';   // every 3 hours by default
+const APPLY_CRON = process.env.APPLY_CRON || '*/20 * * * *';  // every 20 min by default
 
 console.log('=================================================');
-console.log(' DigitalHouse Job Agent Worker — starting up');
-console.log(' discover schedule:', DISCOVER_CRON);
-console.log(' apply schedule:   ', APPLY_CRON);
+console.log(' Dispatch Agent Worker — starting up');
+console.log(' watched-pages schedule:', WATCH_CRON);
+console.log(' apply schedule:        ', APPLY_CRON);
 console.log('=================================================');
 
 // Run once immediately on startup so you see activity right away,
 // then settle into the scheduled cadence.
-discoverCustom.run().catch(err => console.error('[startup discoverCustom]', err));
 discoverWatched.run().catch(err => console.error('[startup discoverWatched]', err));
 
-cron.schedule(DISCOVER_CRON, () => {
-  discoverCustom.run().catch(err => console.error('[scheduled discoverCustom]', err));
+cron.schedule(WATCH_CRON, () => {
   discoverWatched.run().catch(err => console.error('[scheduled discoverWatched]', err));
 });
 
@@ -32,7 +30,4 @@ cron.schedule(APPLY_CRON, () => {
 });
 
 // Keep the process alive — this file itself IS the "24/7" part.
-// It needs to run on a host that keeps a Node process alive continuously
-// (see README.md for hosting options). It will NOT work on Netlify Functions
-// or Supabase Edge Functions, since those are short-lived/serverless.
 process.stdin.resume();

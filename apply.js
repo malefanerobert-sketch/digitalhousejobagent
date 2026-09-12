@@ -347,6 +347,56 @@ async function applyOnWorkable(page, seeker) {
   return { ok: true, missingFields };
 }
 
+// Fallback for watched-page postings, which don't come from a known ATS —
+// there's no fixed field layout to target, so this uses the broadest
+// reasonable selectors (similar spirit to applyOnAshby, just looser) to
+// find a name/email/phone/resume field on whatever form the page has. It
+// still only submits when it can find at minimum a name-like and email
+// field — anything less and it hands off to a manual-review report rather
+// than guess at an unrecognizable form.
+async function applyGeneric(page, seeker) {
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  const nameField = await page.$('input[name*="name" i]:not([name*="user" i]):not([type="email"]), input[id*="name" i]:not([id*="user" i]), input[placeholder*="full name" i], input[placeholder*="your name" i]');
+  const emailField = await page.$('input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]');
+  const phoneField = await page.$('input[type="tel"], input[name*="phone" i], input[id*="phone" i], input[placeholder*="phone" i]');
+  const resumeInput = await page.$('input[type="file"]');
+
+  if (!nameField || !emailField) {
+    return { ok: false, reason: 'This page\'s application form doesn\'t look like a standard job application — could not find recognizable name/email fields.' };
+  }
+
+  await nameField.fill(seeker.full_name);
+  await humanDelay();
+  await emailField.fill(seeker.dedicated_email || '');
+  await humanDelay();
+
+  if (phoneField && seeker.phone) {
+    await phoneField.fill(seeker.phone);
+    await humanDelay();
+  }
+
+  const resumeResult = await attachResume(resumeInput, seeker);
+  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  }
+
+  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Apply"), button:has-text("Submit")');
+  if (!submitBtn) {
+    return { ok: false, reason: 'Could not find a submit/apply button on this form.' };
+  }
+
+  const missingFields = await findMissingRequiredFields(page, [nameField, emailField, phoneField, resumeInput]);
+
+  await humanDelay();
+  await submitBtn.click();
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  return { ok: true, missingFields };
+}
+
 async function run() {
   console.log(`[apply] starting run at ${new Date().toISOString()}`);
 
@@ -417,15 +467,17 @@ async function run() {
       } else if (source?.source_type === 'workable') {
         result = await applyOnWorkable(page, seeker);
       } else if (match.is_custom_source) {
-        result = { ok: false, reason: 'This came from a watched company page whose form layout the agent doesn\'t recognize — needs manual review to apply.' };
+        result = await applyGeneric(page, seeker);
       } else {
         result = { ok: false, reason: `Auto-apply not yet implemented for source type "${source?.source_type}".` };
       }
 
+      const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'unknown');
+
       if (result.ok) {
         const note = missingFieldsNote(result.missingFields);
         console.log(`[apply]  ✔ submitted${note ? ' (some info still needed)' : ''}`);
-        await logResult(match, 'success', `Submitted via ${source?.source_type} form automation.${note}`);
+        await logResult(match, 'success', `Submitted via ${formLabel} form automation.${note}`);
       } else if (result.captcha) {
         console.log(`[apply]  ⚠ captcha — needs manual action`);
         await logResult(match, 'captcha_blocked', result.reason);
@@ -434,8 +486,12 @@ async function run() {
         await logResult(match, 'needs_manual_action', result.reason);
       }
     } catch (err) {
-      console.error(`[apply]  ✖ error:`, err.message);
-      await logResult(match, 'failed', err.message);
+      const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
+      const note = isNetworkIssue
+        ? `This posting's link appears broken, mistyped, or no longer exists (${err.message}).`
+        : err.message;
+      console.error(`[apply]  ✖ ${isNetworkIssue ? 'broken link' : 'error'}:`, err.message);
+      await logResult(match, isNetworkIssue ? 'needs_manual_action' : 'failed', note);
     } finally {
       await context.close();
       await humanDelay();

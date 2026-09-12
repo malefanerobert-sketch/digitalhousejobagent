@@ -1,32 +1,37 @@
 require('dotenv').config();
+const { chromium } = require('playwright');
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
 
-// Handles job_custom_sources — company career pages a user has added
-// themselves ("Watched pages" in the app). This previously had NO backend
-// implementation at all: users could add a page, and it would just sit in
-// the database untouched. This module is what actually makes it work.
+// Handles job_custom_sources — company/job-board pages a user has added
+// themselves ("Watched pages" in the app). This is now the ONLY discovery
+// mechanism in the product (the old job_sources/Greenhouse-Lever catalog
+// approach has been retired) — the Agent visits each watched page itself,
+// works out what jobs are posted there, and hands them to apply.js.
 //
-// Unlike job_sources (Greenhouse/Lever/etc., which publish a structured
-// JSON feed), a custom career page is arbitrary HTML with no fixed
-// structure — there's no reliable rule-based way to parse "what's a job
-// listing" here, so this is the one place in the system where AI does the
-// actual discovery, not just the scoring. It uses the same shared
-// DigitalHouse key as everything else.
-//
-// Matches found this way are always is_custom_source: true — apply.js
-// already deliberately excludes these from auto-apply (arbitrary company
-// pages have no consistent form to safely automate), so this is
-// discovery-only by design, same as before.
+// Unlike a structured ATS feed, a watched page can be anything — a simple
+// static company careers page or a heavy JS-rendered job board — so this
+// uses a real browser (the same Playwright engine apply.js uses to submit
+// applications) to render the page fully before reading it, rather than a
+// plain fetch() that would see nothing on a JS-only site. It then hands a
+// clean list of "link text + URL" pairs to the AI rather than raw HTML —
+// smaller, cheaper, and immune to markup bloat burying the real content.
 
-const MAX_HTML_CHARS = 12000; // keep the AI prompt a reasonable size/cost
+const MAX_LINKS = 400; // keep the AI prompt a reasonable size/cost
 
-function stripHtmlNoise(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .slice(0, MAX_HTML_CHARS);
+function buildExtractPrompt(links, pageUrl, agentPrompt) {
+  const preamble = agentPrompt
+    ? `${agentPrompt}\n\n`
+    : '';
+  return `${preamble}Below is a list of links found on a company/job-board page (${pageUrl}), as {"text","href"} pairs. Identify which ones are actual job postings (ignore navigation, login, footer, social, pagination, and "about us"-type links).
+
+Reply with ONLY a JSON array, no other text, in this exact shape:
+[{"title": "...", "url": "...", "location": "... or null"}]
+
+If none of the links look like job postings, reply with exactly: []
+
+LINKS:
+${JSON.stringify(links)}`;
 }
 
 function scoreMatch(text, keywords) {
@@ -36,15 +41,43 @@ function scoreMatch(text, keywords) {
   return hits / keywords.length;
 }
 
-const EXTRACT_PROMPT = (pageHtml, pageUrl) => `Below is raw HTML from a company's careers page (${pageUrl}). Extract every distinct job posting visible on this page.
+// Have we already reported *something* against this exact URL for this
+// seeker (a real job match, or an earlier "page unreachable" placeholder)?
+// Used to make sure a broken/typo'd watched page gets reported once, not
+// every single run.
+async function alreadyKnown(seekerId, url) {
+  const { data } = await supabase
+    .from('job_matches')
+    .select('id')
+    .eq('job_seeker_id', seekerId)
+    .eq('job_url', url)
+    .maybeSingle();
+  return !!data;
+}
 
-Reply with ONLY a JSON array, no other text, in this exact shape:
-[{"title": "...", "url": "...", "location": "... or null", "description": "short 1-2 sentence summary or null"}]
+async function reportUnreachable(seeker, source, reason) {
+  const placeholderUrl = source.career_page_url;
+  if (await alreadyKnown(seeker.id, placeholderUrl)) return; // already reported once, don't pile up
 
-If a job's URL is relative (e.g. "/jobs/123"), resolve it into a full absolute URL using ${pageUrl} as the base. If you find no job postings at all, reply with exactly: []
+  const { data: match, error: insErr } = await supabase.from('job_matches').insert({
+    job_seeker_id: seeker.id,
+    job_source_id: null,
+    job_title: '(watched page)',
+    company_name: source.company_name,
+    job_url: placeholderUrl,
+    status: 'needs_manual_action',
+    is_custom_source: true
+  }).select().single();
+  if (insErr) { console.error('[discoverWatched]  ✖ could not record unreachable-page report:', insErr.message); return; }
 
-HTML:
-${pageHtml}`;
+  await supabase.from('application_log').insert({
+    job_match_id: match.id,
+    job_seeker_id: seeker.id,
+    result: 'needs_manual_action',
+    notes: `Could not reach ${source.company_name}'s watched page (${placeholderUrl}) — ${reason}. Check the URL is correct and the page is public.`
+  });
+  console.log(`[discoverWatched]  ⚠ reported "${source.company_name}" as unreachable`);
+}
 
 async function run() {
   console.log(`[discoverWatched] starting run at ${new Date().toISOString()}`);
@@ -65,24 +98,41 @@ async function run() {
     return;
   }
 
+  const browser = await chromium.launch({ headless: true });
+
   for (const source of watched) {
     const seeker = source.job_seekers;
     if (!seeker || seeker.status !== 'active') continue;
 
     console.log(`[discoverWatched] checking "${source.company_name}" (${source.career_page_url}) for ${seeker.full_name}`);
 
-    let html;
+    const page = await browser.newPage();
+    let links;
     try {
-      const res = await fetch(source.career_page_url, { signal: AbortSignal.timeout(15000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      html = await res.text();
+      await page.goto(source.career_page_url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); // best effort — some pages never go fully idle
+      links = await page.$$eval('a[href]', els => els
+        .map(e => ({ text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href }))
+        .filter(l => l.text && l.text.length > 2 && l.text.length < 200)
+      );
     } catch (err) {
-      console.error(`[discoverWatched]  ✖ could not fetch page:`, err.message);
+      const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
+      const reason = isNetworkIssue
+        ? 'the address could not be reached (broken link, typo, or the site is down)'
+        : `an unexpected error occurred (${err.message})`;
+      console.error(`[discoverWatched]  ✖ could not load page:`, err.message);
+      await reportUnreachable(seeker, source, reason);
+      await page.close();
+      continue;
+    }
+    await page.close();
+
+    if (!links.length) {
+      console.log(`[discoverWatched]  page loaded but no readable links found on "${source.company_name}"`);
       continue;
     }
 
-    const cleanedHtml = stripHtmlNoise(html);
-    const raw = await aiMatch.completeWithAI(EXTRACT_PROMPT(cleanedHtml, source.career_page_url));
+    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()));
     if (!raw) {
       console.log(`[discoverWatched]  ⚠ AI extraction failed or returned nothing for "${source.company_name}"`);
       continue;
@@ -107,17 +157,10 @@ async function run() {
       try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
       catch { continue; } // malformed URL from the AI — skip rather than insert garbage
 
-      const keywordText = `${job.title} ${job.description || ''}`;
-      const relevance = scoreMatch(keywordText, seeker.job_title_keywords);
+      const relevance = scoreMatch(`${job.title}`, seeker.job_title_keywords);
       if (relevance < 0.3) continue; // lighter threshold than structured sources, since these are user-requested watches
 
-      const { data: existing } = await supabase
-        .from('job_matches')
-        .select('id')
-        .eq('job_seeker_id', seeker.id)
-        .eq('job_url', absoluteUrl)
-        .maybeSingle();
-      if (existing) continue;
+      if (await alreadyKnown(seeker.id, absoluteUrl)) continue; // already discovered (and possibly already applied/reported) — never re-process the same posting
 
       const { error: insErr } = await supabase.from('job_matches').insert({
         job_seeker_id: seeker.id,
@@ -127,7 +170,6 @@ async function run() {
         job_url: absoluteUrl,
         location: job.location || null,
         match_score: Number(relevance.toFixed(2)),
-        match_reason: job.description || null,
         status: 'pending',
         is_custom_source: true
       });
@@ -137,6 +179,7 @@ async function run() {
     }
   }
 
+  await browser.close();
   console.log('[discoverWatched] run complete');
 }
 
