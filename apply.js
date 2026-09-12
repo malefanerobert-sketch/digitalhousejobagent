@@ -9,6 +9,11 @@ const aiMatch = require('./aiMatch');
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
 const MAX_PER_RUN = Number(process.env.MAX_APPLICATIONS_PER_RUN || 15);
+// How many pages a single watched-page application is allowed to move
+// through — an initial "Apply" CTA page, then however many steps a
+// multi-step form has — before giving up and reporting instead of looping
+// forever on a flow it can't finish.
+const MAX_FORM_STEPS = 6;
 
 function humanDelay() {
   const ms = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
@@ -445,111 +450,152 @@ async function fillFieldsWithAI(page, fields, mapping) {
 // The AI-driven filler for watched-page postings: reads whatever form is
 // actually on the page (any layout, any field names/labels/language) and
 // asks the shared AI model to map fields to the candidate's profile, rather
-// than guessing off a fixed list of common selectors. This is what lets the
+// than guessing off a fixed list of common selectors — this is what lets the
 // Agent handle "any type of form", not just the 5 known ATS platforms above.
-// Falls back to the older loose-selector guesser (applyGeneric, below) if
-// AI isn't configured or returns nothing usable — still better than giving
-// up outright.
-async function applyAI(page, seeker) {
-  await page.waitForLoadState('networkidle').catch(() => {});
-
-  const fields = await extractFormFields(page);
-  if (!fields.length) {
-    return { ok: false, reason: 'No form fields found on this page at all — this doesn\'t look like a real application form.' };
-  }
-
-  let mapping = [];
-  if (aiMatch.isEnabled()) {
-    const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker));
-    if (raw) {
-      try {
-        const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-        const parsed = JSON.parse(cleaned);
-        if (Array.isArray(parsed)) mapping = parsed;
-      } catch (_) { /* fall through to the loose-selector fallback below */ }
-    }
-  }
-
-  if (!mapping.length) return await applyGeneric(page, seeker);
-
-  const filledEls = await fillFieldsWithAI(page, fields, mapping);
-
-  const resumeFieldMap = mapping.find(m => m && m.action === 'file');
-  if (resumeFieldMap) {
-    const resumeEl = await page.$(`[data-agent-idx="${resumeFieldMap.idx}"]`);
-    const resumeResult = await attachResume(resumeEl, seeker);
-    if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-    if (resumeEl) filledEls.push(resumeEl);
-  }
-
-  if (!filledEls.length) return await applyGeneric(page, seeker);
-
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
-
-  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Apply"), button:has-text("Submit")');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit/apply button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, filledEls);
-
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle').catch(() => {});
-
-  return { ok: true, missingFields };
+//
+// This is the FULL flow end to end, not just one form: many real career
+// pages show a job description first with just an "Apply"/"Apply now"
+// button, and the actual form only appears after clicking it (sometimes as
+// a modal, sometimes a whole new page) — findApplyEntryPoint() finds and
+// clicks through that. And a form itself is often multiple steps (fill
+// step 1 -> click Next -> more fields appear -> fill step 2 -> ... ->
+// Submit) — the loop below re-scans the page after every click and keeps
+// going as long as there's still something to fill or click, up to
+// MAX_FORM_STEPS pages, rather than stopping after a single pass.
+async function findApplyEntryPoint(page) {
+  return await page.$(
+    'a:has-text("Apply now"), a:has-text("Apply Now"), a:has-text("Apply"), ' +
+    'button:has-text("Apply now"), button:has-text("Apply Now"), button:has-text("Apply"), ' +
+    'a:has-text("Start application"), button:has-text("Start application"), ' +
+    'a:has-text("Start Application"), button:has-text("Start Application")'
+  );
 }
 
-// Fallback for watched-page postings when AI mapping isn't available or
-// comes back empty — there's no fixed field layout to target, so this uses
-// the broadest reasonable selectors (similar spirit to applyOnAshby, just
-// looser) to find a name/email/phone/resume field on whatever form the page
-// has. It still only submits when it can find at minimum a name-like and
-// email field — anything less and it hands off to a manual-review report
-// rather than guess at an unrecognizable form.
-async function applyGeneric(page, seeker) {
-  await page.waitForLoadState('networkidle').catch(() => {});
+// Decides what to click to move forward on the current step. A Next/
+// Continue button means there's more of the form still to come (loop
+// again after clicking); a Submit/Apply/Send button means this is the last
+// step (return success after clicking it).
+async function findStepButton(page) {
+  const nextBtn = await page.$('button:has-text("Next"), a:has-text("Next"), button:has-text("Continue"), a:has-text("Continue")');
+  if (nextBtn) return { el: nextBtn, isFinal: false };
+  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")');
+  if (submitBtn) return { el: submitBtn, isFinal: true };
+  return null;
+}
 
+// Loose-selector guess used within a single step of the loop below, when AI
+// mapping isn't configured or comes back empty for that particular page —
+// fills what it can find rather than aborting the whole multi-step flow
+// over one page's worth of trouble. Only fills; the loop itself decides
+// what to click next.
+async function fillGenericStep(page, seeker) {
   const nameField = await page.$('input[name*="name" i]:not([name*="user" i]):not([type="email"]), input[id*="name" i]:not([id*="user" i]), input[placeholder*="full name" i], input[placeholder*="your name" i]');
   const emailField = await page.$('input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]');
   const phoneField = await page.$('input[type="tel"], input[name*="phone" i], input[id*="phone" i], input[placeholder*="phone" i]');
   const resumeInput = await page.$('input[type="file"]');
 
-  if (!nameField || !emailField) {
-    return { ok: false, reason: 'This page\'s application form doesn\'t look like a standard job application — could not find recognizable name/email fields.' };
+  if (!nameField && !emailField && !resumeInput) {
+    return { ok: false, reason: 'could not find recognizable name/email/resume fields on this step', filledEls: [] };
   }
 
-  await nameField.fill(seeker.full_name);
-  await humanDelay();
-  await emailField.fill(seeker.dedicated_email || '');
-  await humanDelay();
+  const filledEls = [];
+  if (nameField) { await nameField.fill(seeker.full_name); await humanDelay(); filledEls.push(nameField); }
+  if (emailField) { await emailField.fill(seeker.dedicated_email || ''); await humanDelay(); filledEls.push(emailField); }
+  if (phoneField && seeker.phone) { await phoneField.fill(seeker.phone); await humanDelay(); filledEls.push(phoneField); }
 
-  if (phoneField && seeker.phone) {
-    await phoneField.fill(seeker.phone);
+  if (resumeInput) {
+    const resumeResult = await attachResume(resumeInput, seeker);
+    if (resumeResult.error) return { ok: false, reason: resumeResult.error, filledEls: [] };
+    filledEls.push(resumeInput);
+  }
+
+  return { ok: true, filledEls };
+}
+
+async function applyAI(page, seeker) {
+  let lastMissingFields = [];
+
+  for (let step = 0; step < MAX_FORM_STEPS; step++) {
+    await page.waitForLoadState('networkidle').catch(() => {});
+
+    if (await detectCaptcha(page)) {
+      return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+    }
+
+    const fields = await extractFormFields(page);
+
+    if (!fields.length) {
+      // No form visible yet on this page — look for an "Apply" CTA that
+      // reveals the real form (job-description-first career pages).
+      const entry = await findApplyEntryPoint(page);
+      if (!entry) {
+        return {
+          ok: false,
+          reason: step === 0
+            ? 'No form fields found on this page at all — this doesn\'t look like a real application form.'
+            : `Got ${step} step(s) into this application, then reached a page with no form and no "Apply" button to continue — needs a human to finish.`
+        };
+      }
+      await entry.click().catch(() => {});
+      await humanDelay();
+      continue; // re-scan whatever we land on next
+    }
+
+    let mapping = [];
+    if (aiMatch.isEnabled()) {
+      const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker));
+      if (raw) {
+        try {
+          const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed)) mapping = parsed;
+        } catch (_) { /* fall through to the loose fallback below */ }
+      }
+    }
+
+    let filledEls;
+    if (mapping.length) {
+      filledEls = await fillFieldsWithAI(page, fields, mapping);
+      const resumeFieldMap = mapping.find(m => m && m.action === 'file');
+      if (resumeFieldMap) {
+        const resumeEl = await page.$(`[data-agent-idx="${resumeFieldMap.idx}"]`);
+        const resumeResult = await attachResume(resumeEl, seeker);
+        if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+        if (resumeEl) filledEls.push(resumeEl);
+      }
+    } else {
+      const loose = await fillGenericStep(page, seeker);
+      if (!loose.ok) {
+        return {
+          ok: false,
+          reason: step === 0 ? loose.reason : `Got ${step} step(s) into this application, then ${loose.reason} — needs a human to finish.`
+        };
+      }
+      filledEls = loose.filledEls;
+    }
+
+    if (!filledEls.length && step === 0) {
+      return { ok: false, reason: 'This page\'s application form doesn\'t look like a standard job application — could not find recognizable fields to fill.' };
+    }
+
+    lastMissingFields = await findMissingRequiredFields(page, filledEls);
+
+    const stepBtn = await findStepButton(page);
+    if (!stepBtn) {
+      return { ok: false, reason: `Got ${step + 1} step(s) into this application but couldn't find a Next or Submit button to continue — needs a human to finish.` };
+    }
+
     await humanDelay();
+    await stepBtn.el.click().catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+
+    if (stepBtn.isFinal) {
+      return { ok: true, missingFields: lastMissingFields };
+    }
+    // else: a Next/Continue step — loop back around and handle whatever it reveals
   }
 
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
-
-  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Apply"), button:has-text("Submit")');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit/apply button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [nameField, emailField, phoneField, resumeInput]);
-
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle').catch(() => {});
-
-  return { ok: true, missingFields };
+  return { ok: false, reason: `This application needed more than ${MAX_FORM_STEPS} steps to complete — handed off for manual review rather than risk submitting something wrong halfway through.` };
 }
 
 async function run() {
