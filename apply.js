@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { chromium } = require('playwright');
 const supabase = require('./supabaseClient');
+const aiMatch = require('./aiMatch');
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -347,13 +348,167 @@ async function applyOnWorkable(page, seeker) {
   return { ok: true, missingFields };
 }
 
-// Fallback for watched-page postings, which don't come from a known ATS —
-// there's no fixed field layout to target, so this uses the broadest
-// reasonable selectors (similar spirit to applyOnAshby, just looser) to
-// find a name/email/phone/resume field on whatever form the page has. It
-// still only submits when it can find at minimum a name-like and email
-// field — anything less and it hands off to a manual-review report rather
-// than guess at an unrecognizable form.
+// Reads EVERY input/select/textarea actually present on the page — not a
+// guess off a fixed list of common names — so an AI model can work out what
+// each one is for, however it's labelled. Tags each element with a
+// data-agent-idx attribute so the mapping AI returns can be matched back to
+// a real element afterwards.
+async function extractFormFields(page) {
+  return await page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll('input, select, textarea'));
+    return els.map((el, i) => {
+      el.setAttribute('data-agent-idx', String(i));
+      let label = '';
+      if (el.id) {
+        const l = document.querySelector(`label[for="${el.id}"]`);
+        if (l) label = l.textContent.trim();
+      }
+      if (!label) {
+        const parentLabel = el.closest('label');
+        if (parentLabel) label = parentLabel.textContent.trim();
+      }
+      const options = el.tagName === 'SELECT'
+        ? Array.from(el.options).slice(0, 40).map(o => o.textContent.trim() || o.value)
+        : undefined;
+      return {
+        idx: i,
+        tag: el.tagName.toLowerCase(),
+        type: el.type || null,
+        name: el.name || null,
+        id: el.id || null,
+        placeholder: el.placeholder || null,
+        ariaLabel: el.getAttribute('aria-label') || null,
+        label: label || null,
+        required: !!(el.required || el.getAttribute('aria-required') === 'true'),
+        options
+      };
+    }).filter(f => !['hidden', 'submit', 'button', 'image', 'password'].includes(f.type));
+  });
+}
+
+function buildFieldMappingPrompt(fields, seeker) {
+  const profile = {
+    full_name: seeker.full_name,
+    email: seeker.dedicated_email,
+    phone: seeker.phone || null,
+    job_titles: seeker.job_title_keywords || [],
+    preferred_locations: seeker.preferred_locations || [],
+    salary_min: seeker.salary_min || null,
+    salary_max: seeker.salary_max || null,
+    has_resume_file: !!seeker.resume_url
+  };
+  return `You are helping fill out a job application form automatically for a candidate, on an unfamiliar page whose layout you've never seen before. Below is the candidate's profile and every input/select/textarea field found on the page (each tagged with an "idx" — reference that, not name/id).
+
+CANDIDATE PROFILE:
+${JSON.stringify(profile)}
+
+FORM FIELDS:
+${JSON.stringify(fields)}
+
+Decide what to do with each field that's clearly answerable from the profile, and reply with a JSON array of entries, using ONLY these shapes:
+- Text/email/tel/textarea field: {"idx": <n>, "action": "fill", "value": "<text>"}
+- A <select> dropdown: {"idx": <n>, "action": "select", "value": "<the closest matching option text>"}
+- A checkbox that should be ticked (e.g. a consent/terms/"I agree" checkbox that's required to submit): {"idx": <n>, "action": "check", "value": true}
+- A radio button that should be selected: {"idx": <n>, "action": "check", "value": true}
+- A file-upload field meant for a resume/CV: {"idx": <n>, "action": "file"}
+
+Rules: never invent facts not present in the profile (no fabricated LinkedIn URL, years of experience, cover letter text, work authorization status, etc) — leave those fields out entirely rather than guess. Never touch a password field. If a field genuinely isn't answerable from the profile, omit it — that's fine, it's better to leave something blank than to make something up.
+
+Reply with ONLY a JSON array, no other text. If nothing on this page is fillable from this profile, reply with exactly: []`;
+}
+
+async function fillFieldsWithAI(page, fields, mapping) {
+  const filledEls = [];
+  for (const m of mapping) {
+    if (!m || typeof m.idx !== 'number') continue;
+    const field = fields.find(f => f.idx === m.idx);
+    if (!field) continue;
+    const el = await page.$(`[data-agent-idx="${m.idx}"]`);
+    if (!el) continue;
+    try {
+      if (m.action === 'select') {
+        await el.selectOption({ label: String(m.value) }).catch(() => el.selectOption(String(m.value)).catch(() => {}));
+      } else if (m.action === 'check') {
+        if (m.value) await el.check().catch(() => {});
+      } else if (m.action === 'fill' && field.tag !== 'select') {
+        await el.fill(String(m.value ?? '')).catch(() => {});
+      } else {
+        continue;
+      }
+      filledEls.push(el);
+      await humanDelay();
+    } catch (_) { /* best effort — one bad field shouldn't sink the whole application */ }
+  }
+  return filledEls;
+}
+
+// The AI-driven filler for watched-page postings: reads whatever form is
+// actually on the page (any layout, any field names/labels/language) and
+// asks the shared AI model to map fields to the candidate's profile, rather
+// than guessing off a fixed list of common selectors. This is what lets the
+// Agent handle "any type of form", not just the 5 known ATS platforms above.
+// Falls back to the older loose-selector guesser (applyGeneric, below) if
+// AI isn't configured or returns nothing usable — still better than giving
+// up outright.
+async function applyAI(page, seeker) {
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  const fields = await extractFormFields(page);
+  if (!fields.length) {
+    return { ok: false, reason: 'No form fields found on this page at all — this doesn\'t look like a real application form.' };
+  }
+
+  let mapping = [];
+  if (aiMatch.isEnabled()) {
+    const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker));
+    if (raw) {
+      try {
+        const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+        const parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed)) mapping = parsed;
+      } catch (_) { /* fall through to the loose-selector fallback below */ }
+    }
+  }
+
+  if (!mapping.length) return await applyGeneric(page, seeker);
+
+  const filledEls = await fillFieldsWithAI(page, fields, mapping);
+
+  const resumeFieldMap = mapping.find(m => m && m.action === 'file');
+  if (resumeFieldMap) {
+    const resumeEl = await page.$(`[data-agent-idx="${resumeFieldMap.idx}"]`);
+    const resumeResult = await attachResume(resumeEl, seeker);
+    if (resumeResult.error) return { ok: false, reason: resumeResult.error };
+    if (resumeEl) filledEls.push(resumeEl);
+  }
+
+  if (!filledEls.length) return await applyGeneric(page, seeker);
+
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  }
+
+  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Apply"), button:has-text("Submit")');
+  if (!submitBtn) {
+    return { ok: false, reason: 'Could not find a submit/apply button on this form.' };
+  }
+
+  const missingFields = await findMissingRequiredFields(page, filledEls);
+
+  await humanDelay();
+  await submitBtn.click();
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  return { ok: true, missingFields };
+}
+
+// Fallback for watched-page postings when AI mapping isn't available or
+// comes back empty — there's no fixed field layout to target, so this uses
+// the broadest reasonable selectors (similar spirit to applyOnAshby, just
+// looser) to find a name/email/phone/resume field on whatever form the page
+// has. It still only submits when it can find at minimum a name-like and
+// email field — anything less and it hands off to a manual-review report
+// rather than guess at an unrecognizable form.
 async function applyGeneric(page, seeker) {
   await page.waitForLoadState('networkidle').catch(() => {});
 
@@ -399,6 +554,8 @@ async function applyGeneric(page, seeker) {
 
 async function run() {
   console.log(`[apply] starting run at ${new Date().toISOString()}`);
+
+  await aiMatch.loadSettings(supabase);
 
   const { data: pending, error } = await supabase
     .from('job_matches')
@@ -467,7 +624,7 @@ async function run() {
       } else if (source?.source_type === 'workable') {
         result = await applyOnWorkable(page, seeker);
       } else if (match.is_custom_source) {
-        result = await applyGeneric(page, seeker);
+        result = await applyAI(page, seeker);
       } else {
         result = { ok: false, reason: `Auto-apply not yet implemented for source type "${source?.source_type}".` };
       }
