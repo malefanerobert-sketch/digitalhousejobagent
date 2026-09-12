@@ -299,9 +299,12 @@ async function run() {
   if (error) { console.error('[apply] failed to load job_matches:', error.message); return; }
   if (!pending || pending.length === 0) { console.log('[apply] nothing to process'); return; }
 
-  const toProcess = pending.filter(m =>
-    m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic')
-  ).slice(0, MAX_PER_RUN);
+const toProcess = pending.filter(m => {
+      const blockedCompanies = m.job_seekers?.blocked_companies || [];
+      const isBlockedCompany = blockedCompanies.some(b => b.toLowerCase() === (m.company_name || '').toLowerCase());
+      if (isBlockedCompany) return false;
+      return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
+}).slice(0, MAX_PER_RUN);
 
   if (toProcess.length === 0) { console.log('[apply] no approved/automatic matches ready'); return; }
 
