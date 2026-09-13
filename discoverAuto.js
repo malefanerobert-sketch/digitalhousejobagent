@@ -232,8 +232,11 @@ async function saveMatches(userId, matches) {
 async function discoverForAllUsers() {
   console.log('\n🚀 Starting autonomous discovery...');
 
-  // Check time window
-  if (!isWithinTimeWindow()) {
+  // Check time window (bypass with SKIP_TIME_CHECK=true for manual testing)
+  const skipTimeCheck = process.env.SKIP_TIME_CHECK === 'true';
+  if (skipTimeCheck) {
+    console.log('⚠ SKIP_TIME_CHECK=true — bypassing 8am-4pm SA window check.');
+  } else if (!isWithinTimeWindow()) {
     console.log('⏰ Outside 8am-4pm SA window. Exiting.');
     process.exit(0);
   }
