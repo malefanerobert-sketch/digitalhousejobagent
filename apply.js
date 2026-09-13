@@ -2,9 +2,14 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium } = require('playwright');
+const chromium = require('playwright-extra').chromium;
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
+const captchaSolver = require('./captchaSolver');
+
+// Apply stealth plugin to chromium
+chromium.use(new StealthPlugin());
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -49,8 +54,18 @@ async function logResult(match, result, notes) {
     .eq('id', match.id);
 }
 
-async function detectCaptcha(page) {
-  return await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
+async function handleCaptchaIfPresent(page) {
+  // Try to detect and solve CAPTCHA automatically
+  const solved = await captchaSolver.solveCaptchaOnPage(page);
+  if (solved) {
+    console.log('[apply] CAPTCHA solved automatically');
+    await humanDelay();
+    return true; // CAPTCHA was solved
+  }
+
+  // If solving failed or no CAPTCHA was detected, check if one is visible
+  const captchaElement = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
+  return !captchaElement; // Return true if no CAPTCHA visible, false if one is still there
 }
 
 // Figures out a human-readable label for a form field, so a missing-field
@@ -149,8 +164,10 @@ async function applyOnGreenhouse(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  // Try to solve CAPTCHA automatically if present
+  const captchaOk = await handleCaptchaIfPresent(page);
+  if (!captchaOk) {
+    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
@@ -194,8 +211,10 @@ async function applyOnLever(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  // Try to solve CAPTCHA automatically if present
+  const captchaOk = await handleCaptchaIfPresent(page);
+  if (!captchaOk) {
+    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -245,8 +264,10 @@ async function applyOnSmartRecruiters(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  // Try to solve CAPTCHA automatically if present
+  const captchaOk = await handleCaptchaIfPresent(page);
+  if (!captchaOk) {
+    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -284,8 +305,10 @@ async function applyOnAshby(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  // Try to solve CAPTCHA automatically if present
+  const captchaOk = await handleCaptchaIfPresent(page);
+  if (!captchaOk) {
+    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -335,8 +358,10 @@ async function applyOnWorkable(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  // Try to solve CAPTCHA automatically if present
+  const captchaOk = await handleCaptchaIfPresent(page);
+  if (!captchaOk) {
+    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -518,8 +543,10 @@ async function applyAI(page, seeker) {
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
     await page.waitForLoadState('networkidle').catch(() => {});
 
-    if (await detectCaptcha(page)) {
-      return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+    // Try to solve CAPTCHA automatically if present
+    const captchaOk = await handleCaptchaIfPresent(page);
+    if (!captchaOk) {
+      return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
     }
 
     const fields = await extractFormFields(page);
@@ -603,6 +630,11 @@ async function run() {
 
   await aiMatch.loadSettings(supabase);
 
+  if (!aiMatch.isAgentEnabled()) {
+    console.log('[apply] agent is disabled in Dispatch Admin — skipping application run (no tokens will be spent)');
+    return;
+  }
+
   const { data: pending, error } = await supabase
     .from('job_matches')
     .select('*, job_seekers(*), job_sources(*)')
@@ -635,6 +667,10 @@ async function run() {
   );
 
   const toProcess = pending.filter(m => {
+    // Respect paused/frozen accounts — admin can pause an account and the
+    // worker must stop processing pending matches for it, otherwise it keeps
+    // burning tokens on someone whose account has been switched off.
+    if (!m.job_seekers || m.job_seekers.status !== 'active') return false;
     const blockedCompanies = m.job_seekers?.blocked_companies || [];
     const isBlockedCompany = blockedCompanies.some(b => b.toLowerCase() === (m.company_name || '').toLowerCase());
     if (isBlockedCompany) return false;
