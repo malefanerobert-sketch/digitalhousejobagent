@@ -2,14 +2,14 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const chromium = require('playwright-extra').chromium;
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth');
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
 const captchaSolver = require('./captchaSolver');
 
 // Apply stealth plugin to chromium
-chromium.use(new StealthPlugin());
+chromium.use(stealth());
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
