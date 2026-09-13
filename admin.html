@@ -218,7 +218,11 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 <script>
 const SUPABASE_URL = 'https://celylskveytdwvuvsuvx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_QBseann9rrODgfZP9V0oXg_u9brFEVh';
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let sb;
+(async () => {
+  while (!window.supabase) await new Promise(r => setTimeout(r, 10));
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+})();
 
 let accounts=[], jobSources=[], userJobSources=[];
 function $(s){return document.querySelector(s)}
@@ -433,7 +437,7 @@ function renderAccounts(){
         '<div class="row2">'+
           '<div class="field">'+
             '<label>API Provider</label>'+
-            '<select data-api-provider="'+a.id+'"><option value="company">Company API (JobAgent Adzuna)</option><option value="user">User's Own API Key</option></select>'+
+            '<select data-api-provider="'+a.id+'"><option value="company">Company API (JobAgent Adzuna)</option><option value="user">User\'s Own API Key</option></select>'+
           '</div>'+
           '<div class="field">'+
             '<label>Discovery Mode</label>'+
@@ -593,7 +597,7 @@ function renderAccounts(){
     btn.addEventListener('click', async ()=>{
       const id=btn.dataset.deleteAcct;
       const acct=accounts.find(a=>a.id===id);
-      const ok = confirm('Delete '+(acct.full_name||'this account')+'? This permanently removes their profile, resume, matches, applications, documents, and watched pages. Their login itself is not removed (that needs the same self-service delete flow they\'d use themselves). This can\'t be undone.');
+      const ok = confirm("Delete "+(acct.full_name||"this account")+"? This permanently removes their profile, resume, matches, applications, documents, and watched pages. Their login itself is not removed (that needs the same self-service delete flow they'd use themselves). This can't be undone.");
       if(!ok) return;
       btn.disabled=true;
       const {error} = await sb.from('job_seekers').delete().eq('id', id);
@@ -626,7 +630,10 @@ function renderSources(){
     return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <b>${esc(src.name)}</b>
-        <span class="pill ${src.active?'green':'gray'}">${src.active?'Active':'Inactive'}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="pill ${src.active?'green':'gray'}">${src.active?'Active':'Inactive'}</span>
+          <button class="btn btn-danger btn-sm" data-delete-source="${src.id}">🗑 Remove</button>
+        </div>
       </div>
       <div style="color:var(--muted);font-size:12px;margin-bottom:8px">
         ${esc(src.description||src.source_type)}<br>
@@ -635,6 +642,23 @@ function renderSources(){
       </div>
     </div>`;
   }).join('');
+
+  // Add delete handlers for sources
+  el.querySelectorAll('[data-delete-source]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const sourceId=btn.dataset.deleteSource;
+      const src=jobSources.find(s=>s.id===sourceId);
+      const ok=confirm('Remove '+src.name+' from the app? All users will lose access to this source. This cannot be undone.');
+      if(!ok) return;
+      btn.disabled=true;
+      const {error}=await sb.from('job_sources').delete().eq('id',sourceId);
+      btn.disabled=false;
+      if(error){ toast('⚠ '+error.message,'err'); return; }
+      jobSources=jobSources.filter(s=>s.id!==sourceId);
+      toast(src.name+' removed from app','ok');
+      loadSources();
+    });
+  });
 
   // Render summary
   const summary=$('#sourceSummary');
