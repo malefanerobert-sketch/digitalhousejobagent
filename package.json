@@ -1,22 +1,20 @@
 {
-  "name": "digitalhouse-jobagent-worker",
+  "name": "jobagent-discover-auto",
   "version": "1.0.0",
-  "description": "Background worker that discovers job postings from Greenhouse/Lever boards, matches them to user profiles, and (in automatic mode) submits applications.",
-  "main": "index.js",
-  "type": "commonjs",
+  "description": "Autonomous job discovery worker for JobAgent",
+  "main": "discoverAuto.js",
   "scripts": {
-    "start": "node index.js",
-    "discover": "node discover.js",
-    "apply": "node apply.js"
+    "start": "node discoverAuto.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": ["job", "discovery", "automation"],
+  "author": "DigitalHouse",
+  "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.27.0",
-    "@supabase/supabase-js": "^2.45.0",
-    "dotenv": "^16.4.5",
-    "node-cron": "^3.0.3",
-    "playwright": "^1.47.0",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "2captcha": "^3.0.7"
+    "@anthropic-ai/sdk": "^0.24.3",
+    "@supabase/supabase-js": "^2.38.4"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
