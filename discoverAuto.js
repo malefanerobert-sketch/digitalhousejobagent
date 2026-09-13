@@ -53,7 +53,7 @@ async function fetchAdzunaJobs(userApiKey, query = 'software') {
 
   try {
     const url = new URL('https://api.adzuna.com/v1/api/jobs/za/search');
-    url.searchParams.append('app_id', 'jobagent');
+    url.searchParams.append('app_id', '118cbf9d');
     url.searchParams.append('app_key', apiKey);
     url.searchParams.append('results_per_page', '50');
     url.searchParams.append('what', query);
