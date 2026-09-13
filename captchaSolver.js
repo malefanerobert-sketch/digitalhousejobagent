@@ -3,7 +3,7 @@
  * Handles reCAPTCHA v2, v3, hCaptcha, and image-based CAPTCHAs
  */
 
-const Solver = require('2captcha-nodejs');
+const { Solver } = require('2captcha');
 
 const API_KEY = process.env.CAPTCHA_API_KEY;
 const ENABLED = Boolean(API_KEY);
@@ -86,27 +86,28 @@ async function solveRecaptcha(captchaInfo) {
   try {
     console.log(`[captcha] attempting to solve ${captchaInfo.type}...`);
 
-    let token;
+    let result;
     if (captchaInfo.type === 'recaptcha_v2') {
-      token = await solver.recaptchaV2Proxyless({
+      result = await solver.recaptcha({
         googlekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl
       });
     } else if (captchaInfo.type === 'recaptcha_v3') {
-      token = await solver.recaptchaV3Proxyless({
+      result = await solver.recaptcha({
         googlekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl,
         version: 'v3',
         action: 'submit',
-        min_score: 0.4
+        score: 0.4
       });
     } else if (captchaInfo.type === 'hcaptcha') {
-      token = await solver.hcaptchaProxyless({
+      result = await solver.hcaptcha({
         sitekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl
       });
     }
 
+    const token = result && result.data ? result.data : null;
     if (token) {
       console.log('[captcha] ✔ solved successfully');
       return token;

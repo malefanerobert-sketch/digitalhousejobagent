@@ -15,8 +15,8 @@
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
     "playwright": "^1.47.0",
-    "playwright-extra": "^3.3.6",
+    "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "2captcha-nodejs": "^1.2.5"
+    "2captcha": "^3.0.7"
   }
 }
