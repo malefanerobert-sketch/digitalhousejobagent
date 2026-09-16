@@ -145,4 +145,4 @@ async function completeWithAI(prompt) {
   }
 }
 
-module.exports = { loadSettings, isEnabled, scoreWithAI, completeWithAI, agentPrompt };
+module.exports = { loadSettings, isEnabled, isAgentEnabled: isEnabled, scoreWithAI, completeWithAI, agentPrompt };
