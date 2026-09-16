@@ -4,6 +4,6 @@
     "builder": "nixpacks"
   },
   "deploy": {
-    "startCommand": "node discoverAuto.js"
+    "startCommand": "node index.js"
   }
 }
