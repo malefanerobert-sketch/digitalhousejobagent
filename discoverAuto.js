@@ -4,26 +4,23 @@
  * Queries ALL enabled job sources for each user
  * Time window configurable by admin via dispatch_settings
  * Scores matches with Claude API, saves to job_matches
+ *
+ * Runs as part of the shared worker process (index.js schedules it on
+ * DISCOVER_CRON, alongside discoverWatched on WATCH_CRON and apply on
+ * APPLY_CRON) — so nothing in here may call process.exit(), since that
+ * would kill the whole worker and its other cron jobs with it. Every
+ * early-return uses `return` instead. `node discoverAuto.js` directly
+ * still works standalone for manual testing (see bottom of file).
  */
 
-const { createClient } = require('@supabase/supabase-js');
 const Anthropic = require('@anthropic-ai/sdk');
+const sb = require('./supabaseClient');
 
-// Environment variables (env takes precedence; DB values fill in gaps)
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 // Adzuna's app_id is a public identifier (not a secret); default to the one
 // registered for this project so Railway only has to hold the secret app_key.
 // Override with ADZUNA_APP_ID if you register a different Adzuna app later.
 const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID || '118cbf9d';
 const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('❌ SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
-  process.exit(1);
-}
-
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // Anthropic client is initialized after loadAdminSettings() runs, so it can
 // pick up the API key stored in dispatch_settings when no env var is set.
@@ -31,14 +28,14 @@ let claude = null;
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
-const COUNTRY_FILTER = 'ZA';
 const BATCH_SIZE = 5; // Jobs per batch for Claude scoring
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
 
 let adminSettings = null; // Will be loaded from DB
 
 /**
- * Load admin settings (time window, timezone, etc)
+ * Load admin settings (time window, timezone, etc).
+ * Returns true if the run should proceed, false if the master switch is off.
  */
 async function loadAdminSettings() {
   const { data, error } = await sb
@@ -70,13 +67,13 @@ async function loadAdminSettings() {
     };
     console.log(`⏰ Admin time window: ${adminSettings.start_hour}:00 - ${adminSettings.end_hour}:00 ${adminSettings.timezone}`);
     console.log(`🎛  Agent master switch: ${adminSettings.enabled ? 'ON' : 'OFF'}`);
-    console.log(`🤖 AI model: ${adminSettings.ai_model} (key ${adminSettings.ai_api_key ? 'present' : 'MISSING'})`);
+    console.log(`Agent AI model: ${adminSettings.ai_model} (key ${adminSettings.ai_api_key ? 'present' : 'MISSING'})`);
   }
 
   // Master switch check
   if (!adminSettings.enabled && process.env.SKIP_ENABLED_CHECK !== 'true') {
-    console.log('🛑 Agent master switch is OFF (dispatch_settings.agent_enabled=false). Exiting.');
-    process.exit(0);
+    console.log('🛑 [discoverAuto] Agent master switch is OFF (dispatch_settings.agent_enabled=false). Skipping this run.');
+    return false;
   }
 
   // Initialize Anthropic client with the resolved key
@@ -85,6 +82,8 @@ async function loadAdminSettings() {
   } else {
     console.warn('⚠ No Claude API key available — scoring will be skipped, jobs will save with score=0');
   }
+
+  return true;
 }
 
 /**
@@ -445,16 +444,17 @@ async function saveMatches(userId, matches) {
 /**
  * Main discovery loop
  */
-async function discoverForAllUsers() {
-  console.log('\n🚀 Starting autonomous discovery...');
+async function run() {
+  console.log(`\n🚀 [discoverAuto] starting run at ${new Date().toISOString()}`);
 
-  // Load admin settings
-  await loadAdminSettings();
+  // Load admin settings / master switch
+  const proceed = await loadAdminSettings();
+  if (!proceed) return;
 
   // Check time window
   if (!isWithinTimeWindow()) {
-    console.log(`⏰ Outside configured time window (${adminSettings.start_hour}:00-${adminSettings.end_hour}:00 ${adminSettings.timezone}). Exiting.`);
-    process.exit(0);
+    console.log(`⏰ [discoverAuto] Outside configured time window (${adminSettings.start_hour}:00-${adminSettings.end_hour}:00 ${adminSettings.timezone}). Skipping this run.`);
+    return;
   }
 
   // Get all active users with auto-search enabled
@@ -466,8 +466,8 @@ async function discoverForAllUsers() {
     .eq('discovery_mode', 'auto');
 
   if (usersErr) {
-    console.error('❌ Failed to load users:', usersErr.message);
-    process.exit(1);
+    console.error('❌ [discoverAuto] Failed to load users:', usersErr.message);
+    return;
   }
 
   console.log(`📋 Found ${users?.length || 0} users to process`);
@@ -479,8 +479,8 @@ async function discoverForAllUsers() {
     .eq('active', true);
 
   if (sourcesErr || !allSources?.length) {
-    console.error('❌ Failed to load job sources');
-    process.exit(1);
+    console.error('❌ [discoverAuto] Failed to load job sources');
+    return;
   }
 
   console.log(`📚 Available sources: ${allSources.map(s => s.name).join(', ')}`);
@@ -546,7 +546,7 @@ async function discoverForAllUsers() {
     }
 
     // Score with Claude
-    console.log(`  🤖 Scoring with Claude...`);
+    console.log(`  Scoring with the Agent...`);
     const scored = await scoreJobsWithClaude(allJobs, user);
 
     // Save matches
@@ -554,12 +554,12 @@ async function discoverForAllUsers() {
     totalMatches += saved;
   }
 
-  console.log(`\n✅ Discovery complete. Total matches: ${totalMatches}`);
-  process.exit(0);
+  console.log(`\n✅ [discoverAuto] run complete. Total matches: ${totalMatches}`);
 }
 
-// Run
-discoverForAllUsers().catch(err => {
-  console.error('💥 Fatal error:', err);
-  process.exit(1);
-});
+module.exports = { run };
+
+// Still runnable standalone for manual testing: `node discoverAuto.js`
+if (require.main === module) {
+  run().then(() => process.exit(0)).catch(err => { console.error('💥 Fatal error:', err); process.exit(1); });
+}
