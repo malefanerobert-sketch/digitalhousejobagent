@@ -2,14 +2,9 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium } = require('playwright-extra');
-const stealth = require('puppeteer-extra-plugin-stealth');
+const { chromium } = require('playwright');
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
-const captchaSolver = require('./captchaSolver');
-
-// Apply stealth plugin to chromium
-chromium.use(stealth());
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -54,18 +49,8 @@ async function logResult(match, result, notes) {
     .eq('id', match.id);
 }
 
-async function handleCaptchaIfPresent(page) {
-  // Try to detect and solve CAPTCHA automatically
-  const solved = await captchaSolver.solveCaptchaOnPage(page);
-  if (solved) {
-    console.log('[apply] CAPTCHA solved automatically');
-    await humanDelay();
-    return true; // CAPTCHA was solved
-  }
-
-  // If solving failed or no CAPTCHA was detected, check if one is visible
-  const captchaElement = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
-  return !captchaElement; // Return true if no CAPTCHA visible, false if one is still there
+async function detectCaptcha(page) {
+  return await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
 }
 
 // Figures out a human-readable label for a form field, so a missing-field
@@ -164,10 +149,8 @@ async function applyOnGreenhouse(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Try to solve CAPTCHA automatically if present
-  const captchaOk = await handleCaptchaIfPresent(page);
-  if (!captchaOk) {
-    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
@@ -211,10 +194,8 @@ async function applyOnLever(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Try to solve CAPTCHA automatically if present
-  const captchaOk = await handleCaptchaIfPresent(page);
-  if (!captchaOk) {
-    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -264,10 +245,8 @@ async function applyOnSmartRecruiters(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Try to solve CAPTCHA automatically if present
-  const captchaOk = await handleCaptchaIfPresent(page);
-  if (!captchaOk) {
-    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -305,10 +284,8 @@ async function applyOnAshby(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Try to solve CAPTCHA automatically if present
-  const captchaOk = await handleCaptchaIfPresent(page);
-  if (!captchaOk) {
-    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -358,10 +335,8 @@ async function applyOnWorkable(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  // Try to solve CAPTCHA automatically if present
-  const captchaOk = await handleCaptchaIfPresent(page);
-  if (!captchaOk) {
-    return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+  if (await detectCaptcha(page)) {
+    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
   }
 
   const submitBtn = await page.$('button[type="submit"]');
@@ -417,16 +392,54 @@ async function extractFormFields(page) {
 }
 
 function buildFieldMappingPrompt(fields, seeker) {
+  // Full profile — soft fields included so the agent can compose short answers
+  // to open-ended application questions when the user has enabled autofill.
   const profile = {
+    // hard identity — never inventable
     full_name: seeker.full_name,
     email: seeker.dedicated_email,
     phone: seeker.phone || null,
+    phone_alt: seeker.phone_alt || null,
+    date_of_birth: seeker.date_of_birth || null,
+    gender: seeker.gender || null,
+    race: seeker.race || null,
+    id_type: seeker.id_type || null,
+    id_number: seeker.id_number || null,
+    nationality: seeker.nationality || null,
+    physical_address: seeker.physical_address || null,
+    city: seeker.city || null,
+    province: seeker.province || null,
+    postal_code: seeker.postal_code || null,
+
+    // work + preferences — hard
     job_titles: seeker.job_title_keywords || [],
     preferred_locations: seeker.preferred_locations || [],
     salary_min: seeker.salary_min || null,
     salary_max: seeker.salary_max || null,
-    has_resume_file: !!seeker.resume_url
+    current_employer: seeker.current_employer || null,
+    current_position: seeker.current_position || null,
+    years_experience: seeker.years_experience || null,
+    highest_qualification: seeker.highest_qualification || null,
+    field_of_study: seeker.field_of_study || null,
+    skills: seeker.skills || [],
+    languages: seeker.languages || [],
+    drivers_license: seeker.drivers_license || [],
+    own_transport: seeker.own_transport,
+    willing_to_relocate: seeker.willing_to_relocate,
+    notice_period_days: seeker.notice_period_days || null,
+    available_from: seeker.available_from || null,
+
+    // soft — the agent may compose from these + the rest of the profile
+    bio: seeker.bio || null,
+    hobbies: seeker.hobbies || null,
+    pressure_ok: seeker.pressure_ok,
+    team_player: seeker.team_player,
+
+    has_resume_file: !!seeker.resume_url,
   };
+  // Default TRUE — the user has to explicitly opt out in profile settings.
+  const canAutofillSoft = seeker.agent_can_autofill_soft !== false;
+
   return `You are helping fill out a job application form automatically for a candidate, on an unfamiliar page whose layout you've never seen before. Below is the candidate's profile and every input/select/textarea field found on the page (each tagged with an "idx" — reference that, not name/id).
 
 CANDIDATE PROFILE:
@@ -442,7 +455,30 @@ Decide what to do with each field that's clearly answerable from the profile, an
 - A radio button that should be selected: {"idx": <n>, "action": "check", "value": true}
 - A file-upload field meant for a resume/CV: {"idx": <n>, "action": "file"}
 
-Rules: never invent facts not present in the profile (no fabricated LinkedIn URL, years of experience, cover letter text, work authorization status, etc) — leave those fields out entirely rather than guess. Never touch a password field. If a field genuinely isn't answerable from the profile, omit it — that's fine, it's better to leave something blank than to make something up.
+Rules for HARD FACTS — never invent these, leave the field out if the profile doesn't have it:
+- Names, contact details, email, phone
+- Employment history, employer names, positions, dates, years of experience beyond what the profile states
+- Education, qualifications, institutions
+- ID / passport numbers, addresses, DOB, nationality
+- LinkedIn / GitHub / portfolio URLs
+- Salary expectations beyond the min/max range on the profile
+- Work-authorization / visa status
+- Anything the profile doesn't directly state
+${canAutofillSoft ? `
+Rules for SOFT / SUBJECTIVE questions — you MAY compose short, authentic-sounding answers from the profile when the field asks for one and the direct answer isn't on the profile:
+- "Tell us about yourself" / short bio → use the "bio" field verbatim if present; otherwise write 2-3 sentences synthesised from job_titles, current_position, years_experience, skills, highest_qualification. First person, warm but professional.
+- "Why this role?" / motivation / cover-letter-style prompt → 3-5 sentences tying the candidate's job_titles / skills / current_position to what the role obviously needs. Do not name the company unless it's referenced elsewhere in the form fields. Never claim specific past achievements the profile doesn't list.
+- "Can you work under pressure?" / "Do you handle stress well?" → use pressure_ok if set (true → "Yes"); if not set, answer "Yes" with a brief one-line reason drawn from current_position / years_experience.
+- "Are you a team player?" / "Do you work well in a team?" → use team_player if set (true → "Yes"); otherwise "Yes" with a one-line reason.
+- Hobbies / interests → use "hobbies" verbatim if present; otherwise omit rather than invent.
+- "When can you start?" → use available_from if set, otherwise notice_period_days ("Available in <N> days"); otherwise "Immediately" only if notice_period_days is 0 or null.
+- "Willing to relocate?" / "Own transport?" / "Driver's licence?" → answer from the corresponding profile fields.
+
+For a soft answer you compose: keep it concise (a short paragraph max for open textareas, one sentence for short-answer inputs), first person, plain language, no clichés like "team player" or "hard worker", no fabricated numbers, no fabricated employer / project / school names.
+` : `
+The candidate has opted OUT of soft-field autofill. Treat soft/subjective questions the same as hard facts — omit the field rather than compose an answer.
+`}
+Never touch a password field. If a field is a hard fact not on the profile — and it's not a soft field you're allowed to compose — omit it. Leaving something blank is better than making it up.
 
 Reply with ONLY a JSON array, no other text. If nothing on this page is fillable from this profile, reply with exactly: []`;
 }
@@ -543,10 +579,8 @@ async function applyAI(page, seeker) {
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
     await page.waitForLoadState('networkidle').catch(() => {});
 
-    // Try to solve CAPTCHA automatically if present
-    const captchaOk = await handleCaptchaIfPresent(page);
-    if (!captchaOk) {
-      return { ok: false, reason: 'CAPTCHA detected — could not solve. Needs manual action.', captcha: true };
+    if (await detectCaptcha(page)) {
+      return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
     }
 
     const fields = await extractFormFields(page);

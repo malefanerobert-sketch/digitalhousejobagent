@@ -3,12 +3,22 @@
  * Handles reCAPTCHA v2, v3, hCaptcha, and image-based CAPTCHAs
  */
 
-const { Solver } = require('2captcha');
+// 2Captcha solver is loaded lazily so a missing / uninstalled solver package
+// never crashes the whole worker at boot — CAPTCHA support is optional, and
+// the rest of the pipeline (discovery, applying to non-CAPTCHA'd forms) must
+// keep running even when no solver library is available.
+let Solver = null;
+try { Solver = require('2captcha-nodejs'); } catch (_) {
+  try { Solver = require('2captcha'); } catch (_) { Solver = null; }
+}
 
 const API_KEY = process.env.CAPTCHA_API_KEY;
-const ENABLED = Boolean(API_KEY);
+const ENABLED = Boolean(API_KEY && Solver);
 
 const solver = ENABLED ? new Solver(API_KEY) : null;
+if (API_KEY && !Solver) {
+  console.warn('[captcha] CAPTCHA_API_KEY is set but no 2Captcha library is installed — CAPTCHAs will report as blocked.');
+}
 
 /**
  * Detect reCAPTCHA v2/v3 or hCaptcha on the page
@@ -86,28 +96,27 @@ async function solveRecaptcha(captchaInfo) {
   try {
     console.log(`[captcha] attempting to solve ${captchaInfo.type}...`);
 
-    let result;
+    let token;
     if (captchaInfo.type === 'recaptcha_v2') {
-      result = await solver.recaptcha({
+      token = await solver.recaptchaV2Proxyless({
         googlekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl
       });
     } else if (captchaInfo.type === 'recaptcha_v3') {
-      result = await solver.recaptcha({
+      token = await solver.recaptchaV3Proxyless({
         googlekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl,
         version: 'v3',
         action: 'submit',
-        score: 0.4
+        min_score: 0.4
       });
     } else if (captchaInfo.type === 'hcaptcha') {
-      result = await solver.hcaptcha({
+      token = await solver.hcaptchaProxyless({
         sitekey: captchaInfo.sitekey,
         pageurl: captchaInfo.pageUrl
       });
     }
 
-    const token = result && result.data ? result.data : null;
     if (token) {
       console.log('[captcha] ✔ solved successfully');
       return token;
