@@ -149,26 +149,41 @@ async function run() {
 
     console.log(`[discoverWatched] checking "${source.company_name}" (${source.career_page_url}) for ${seeker.full_name}${override ? ' (using their own API key)' : ''}`);
 
-    const page = await browser.newPage();
-    let links;
-    try {
-      await page.goto(source.career_page_url, { waitUntil: 'domcontentloaded', timeout: 25000 });
-      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); // best effort — some pages never go fully idle
-      links = await page.$$eval('a[href]', els => els
-        .map(e => ({ text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href }))
-        .filter(l => l.text && l.text.length > 2 && l.text.length < 200)
-      );
-    } catch (err) {
+    // A crashed renderer ("Target crashed" / "Page crashed") is a transient
+    // resource hiccup in this container, not a real problem with the page
+    // itself — retry once on a brand-new page before reporting the watched
+    // page as unreachable (see apply.js for the same pattern and rationale).
+    let links = null;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2 && links === null; attempt++) {
+      const page = await browser.newPage();
+      try {
+        await page.goto(source.career_page_url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); // best effort — some pages never go fully idle
+        links = await page.$$eval('a[href]', els => els
+          .map(e => ({ text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href }))
+          .filter(l => l.text && l.text.length > 2 && l.text.length < 200)
+        );
+      } catch (err) {
+        lastErr = err;
+        const isCrash = /crashed/i.test(err.message || '');
+        if (isCrash && attempt === 1) {
+          console.warn(`[discoverWatched]  ⚠ browser tab crashed loading "${source.company_name}" — retrying once with a fresh page`);
+        }
+      } finally {
+        await page.close().catch(() => {}); // a crashed target can make close() itself throw
+      }
+    }
+    if (links === null) {
+      const err = lastErr;
       const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
       const reason = isNetworkIssue
         ? 'the address could not be reached (broken link, typo, or the site is down)'
         : `an unexpected error occurred (${err.message})`;
       console.error(`[discoverWatched]  ✖ could not load page:`, err.message);
       await reportUnreachable(seeker, source, reason);
-      await page.close();
       continue;
     }
-    await page.close();
 
     if (!links.length) {
       console.log(`[discoverWatched]  page loaded but no readable links found on "${source.company_name}"`);
