@@ -333,11 +333,13 @@ async function fetchCareerJunctionJobs(source, query = 'software') {
 /**
  * Score jobs using Claude API
  */
-async function scoreJobsWithClaude(jobs, userProfile) {
+async function scoreJobsWithClaude(jobs, userProfile, clientOverride) {
   if (jobs.length === 0) return [];
 
+  const activeClient = clientOverride || claude;
+
   // If no Claude client, save every job with a placeholder score (unscored)
-  if (!claude) {
+  if (!activeClient) {
     console.log(`  ⚠ No Claude key — saving ${jobs.length} jobs unscored (score=0)`);
     return jobs.map(j => ({ ...j, match_score: 0 }));
   }
@@ -368,7 +370,7 @@ ${idx + 1}. ${j.title}
 Respond ONLY with JSON array of scores, e.g.: [85, 72, 91, ...]
 No explanation, no markdown, just the array.`;
 
-      const response = await claude.messages.create({
+      const response = await activeClient.messages.create({
         model: adminSettings.ai_model || DEFAULT_CLAUDE_MODEL,
         max_tokens: 200,
         messages: [{ role: 'user', content: prompt }]
@@ -545,9 +547,23 @@ async function run() {
       console.log(`  🌐 Filtered to remote only: ${allJobs.length} jobs`);
     }
 
+    // Bring-your-own-key: a seeker who opted into their own key gets scored
+    // with it instead of the shared one. Only Anthropic is supported here
+    // today (this file talks to Claude directly, unlike aiMatch.js which
+    // supports both providers) — an OpenAI personal key falls back to the
+    // shared client with a warning rather than silently mishandling it.
+    let userClaudeClient = null;
+    if (user.api_provider === 'user' && user.ai_provider && user.ai_provider !== 'none' && user.ai_api_key) {
+      if (user.ai_provider === 'anthropic') {
+        userClaudeClient = new Anthropic({ apiKey: user.ai_api_key });
+      } else {
+        console.warn(`  ⚠ ${user.full_name} set their own ${user.ai_provider} key, but autonomous board-search scoring only supports Anthropic today — using the shared key for this run instead.`);
+      }
+    }
+
     // Score with Claude
-    console.log(`  Scoring with the Agent...`);
-    const scored = await scoreJobsWithClaude(allJobs, user);
+    console.log(`  Scoring with the Agent${userClaudeClient ? ' (using their own API key)' : ''}...`);
+    const scored = await scoreJobsWithClaude(allJobs, user, userClaudeClient);
 
     // Save matches
     const saved = await saveMatches(user.id, scored);

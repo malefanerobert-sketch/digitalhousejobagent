@@ -98,8 +98,9 @@ async function run() {
   console.log(`[discoverWatched] starting run at ${new Date().toISOString()}`);
 
   await aiMatch.loadSettings(supabase);
-  if (!aiMatch.isEnabled()) {
-    console.log('[discoverWatched] no shared AI key set in Dispatch Admin > AI settings — this feature requires AI to interpret arbitrary pages, skipping run entirely.');
+
+  if (!aiMatch.isAgentEnabled()) {
+    console.log('[discoverWatched] Agent master switch is OFF (dispatch_settings.agent_enabled=false). Skipping this run.');
     return;
   }
 
@@ -119,7 +120,16 @@ async function run() {
     const seeker = source.job_seekers;
     if (!seeker || seeker.status !== 'active') continue;
 
-    console.log(`[discoverWatched] checking "${source.company_name}" (${source.career_page_url}) for ${seeker.full_name}`);
+    // AI is required to interpret an arbitrary page — use the seeker's own
+    // key if they've set one, otherwise the shared key. Only skip THIS
+    // seeker (not the whole run) when neither is available.
+    const override = aiMatch.resolveSeekerOverride(seeker);
+    if (!aiMatch.isEnabled() && !override) {
+      console.log(`[discoverWatched]  ⚠ skipping "${source.company_name}" for ${seeker.full_name} — no AI key available (no shared key set, and this seeker has no personal key)`);
+      continue;
+    }
+
+    console.log(`[discoverWatched] checking "${source.company_name}" (${source.career_page_url}) for ${seeker.full_name}${override ? ' (using their own API key)' : ''}`);
 
     const page = await browser.newPage();
     let links;
@@ -147,7 +157,7 @@ async function run() {
       continue;
     }
 
-    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()));
+    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()), override);
     if (!raw) {
       console.log(`[discoverWatched]  ⚠ AI extraction failed or returned nothing for "${source.company_name}"`);
       continue;

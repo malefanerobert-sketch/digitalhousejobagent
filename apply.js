@@ -603,8 +603,9 @@ async function applyAI(page, seeker) {
     }
 
     let mapping = [];
-    if (aiMatch.isEnabled()) {
-      const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker));
+    const aiOverride = aiMatch.resolveSeekerOverride(seeker);
+    if (aiMatch.isEnabled() || aiOverride) {
+      const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker), aiOverride);
       if (raw) {
         try {
           const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
@@ -665,7 +666,7 @@ async function run() {
   await aiMatch.loadSettings(supabase);
 
   if (!aiMatch.isAgentEnabled()) {
-    console.log('[apply] agent is disabled in Dispatch Admin — skipping application run (no tokens will be spent)');
+    console.log('[apply] Agent master switch is OFF (dispatch_settings.agent_enabled=false) — skipping this run, nothing will be applied to.');
     return;
   }
 
@@ -708,6 +709,9 @@ async function run() {
     const blockedCompanies = m.job_seekers?.blocked_companies || [];
     const isBlockedCompany = blockedCompanies.some(b => b.toLowerCase() === (m.company_name || '').toLowerCase());
     if (isBlockedCompany) return false;
+    const blockedLocations = m.job_seekers?.blocked_locations || [];
+    const isBlockedLocation = blockedLocations.some(loc => (m.location || '').toLowerCase().includes(loc.toLowerCase()));
+    if (isBlockedLocation) return false;
     if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
   }).slice(0, MAX_PER_RUN);
