@@ -620,9 +620,29 @@ async function findApplyEntryPoint(page) {
 // again after clicking); a Submit/Apply/Send button means this is the last
 // step (return success after clicking it).
 async function findStepButton(page) {
-  const nextBtn = await page.$('button:has-text("Next"), a:has-text("Next"), button:has-text("Continue"), a:has-text("Continue")');
+  const nextBtn = await page.$(
+    'button:has-text("Next"), a:has-text("Next"), button:has-text("Continue"), a:has-text("Continue"), ' +
+    'button:has-text("Proceed"), a:has-text("Proceed"), button:has-text("Continue application"), ' +
+    '[role="button"]:has-text("Next"), [role="button"]:has-text("Continue")'
+  );
   if (nextBtn) return { el: nextBtn, isFinal: false };
-  const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")');
+  const submitBtn = await page.$(
+    'button[type="submit"], input[type="submit"], ' +
+    // A <button> inside a <form> with NO type attribute is an IMPLICIT
+    // submit button per the HTML spec — the selector above only matched an
+    // explicit type="submit", so plenty of real forms (anything hand-rolled
+    // or built without setting type= on its button) were silently invisible
+    // to this function, surfacing as "couldn't find a Next or Submit
+    // button" even though a perfectly normal submit button was right there.
+    // Back/Previous/Cancel buttons are excluded so a multi-step form's
+    // "back" control (also often untyped) doesn't get misidentified as the
+    // final submit action.
+    'form button:not([type="button"]):not([type="reset"]):not(:has-text("Back")):not(:has-text("Previous")):not(:has-text("Cancel")), ' +
+    'button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send"), ' +
+    'button:has-text("Finish"), button:has-text("Complete"), button:has-text("Confirm"), ' +
+    'button:has-text("Save and continue"), button:has-text("Review application"), ' +
+    '[role="button"]:has-text("Submit")'
+  );
   if (submitBtn) return { el: submitBtn, isFinal: true };
   return null;
 }
@@ -817,60 +837,79 @@ async function run() {
     const source = match.job_sources;
     console.log(`[apply] processing "${match.job_title}" @ ${match.company_name} for ${seeker.full_name}`);
 
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    // A crashed Chromium renderer ("Target crashed" / "Page crashed") is a
+    // transient resource hiccup in this container, not a real problem with
+    // the posting — the same URL usually works fine on a fresh page. Retry
+    // once with a brand-new context/page before giving up, instead of
+    // immediately logging a permanent 'failed' result for something that
+    // had nothing to do with the actual application.
+    let lastErr = null;
+    let attempted = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      try {
+        await page.goto(match.job_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await humanDelay();
 
-    try {
-      await page.goto(match.job_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await humanDelay();
+        let result;
+        if (source?.source_type === 'greenhouse') {
+          result = await applyOnGreenhouse(page, seeker);
+        } else if (source?.source_type === 'lever') {
+          result = await applyOnLever(page, seeker);
+        } else if (source?.source_type === 'smartrecruiters') {
+          result = await applyOnSmartRecruiters(page, seeker);
+        } else if (source?.source_type === 'ashby') {
+          result = await applyOnAshby(page, seeker);
+        } else if (source?.source_type === 'workable') {
+          result = await applyOnWorkable(page, seeker);
+        } else {
+          // Everything else — watched pages AND autonomous-search postings
+          // (Adzuna/RemoteOK/Jobmail, which have no job_sources row and
+          // aren't is_custom_source) — goes through the same AI-driven form
+          // filler. It was previously gated to is_custom_source only, which
+          // meant every autonomously-discovered job structurally could never
+          // be applied to and always landed in needs_manual_action. applyAI()
+          // was built to handle "any layout it's never seen before", which is
+          // exactly what an arbitrary job-board posting is.
+          result = await applyAI(page, seeker);
+        }
 
-      let result;
-      if (source?.source_type === 'greenhouse') {
-        result = await applyOnGreenhouse(page, seeker);
-      } else if (source?.source_type === 'lever') {
-        result = await applyOnLever(page, seeker);
-      } else if (source?.source_type === 'smartrecruiters') {
-        result = await applyOnSmartRecruiters(page, seeker);
-      } else if (source?.source_type === 'ashby') {
-        result = await applyOnAshby(page, seeker);
-      } else if (source?.source_type === 'workable') {
-        result = await applyOnWorkable(page, seeker);
-      } else {
-        // Everything else — watched pages AND autonomous-search postings
-        // (Adzuna/RemoteOK/Jobmail, which have no job_sources row and
-        // aren't is_custom_source) — goes through the same AI-driven form
-        // filler. It was previously gated to is_custom_source only, which
-        // meant every autonomously-discovered job structurally could never
-        // be applied to and always landed in needs_manual_action. applyAI()
-        // was built to handle "any layout it's never seen before", which is
-        // exactly what an arbitrary job-board posting is.
-        result = await applyAI(page, seeker);
+        const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'job-board');
+
+        if (result.ok) {
+          const note = missingFieldsNote(result.missingFields);
+          console.log(`[apply]  ✔ submitted${note ? ' (some info still needed)' : ''}`);
+          await logResult(match, 'success', `Submitted via ${formLabel} form automation.${note}`);
+        } else if (result.captcha) {
+          console.log(`[apply]  ⚠ captcha — needs manual action`);
+          await logResult(match, 'captcha_blocked', result.reason);
+        } else {
+          console.log(`[apply]  ✖ ${result.reason}`);
+          await logResult(match, 'needs_manual_action', result.reason);
+        }
+        attempted = true;
+      } catch (err) {
+        lastErr = err;
+        const isCrash = /crashed/i.test(err.message || '');
+        if (isCrash && attempt === 1) {
+          console.warn(`[apply]  ⚠ browser tab crashed on attempt 1 (${err.message}) — retrying once with a fresh page`);
+        } else {
+          const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
+          const note = isNetworkIssue
+            ? `This posting's link appears broken, mistyped, or no longer exists (${err.message}).`
+            : (isCrash ? `The browser crashed twice trying to load/process this posting (${err.message}).` : err.message);
+          console.error(`[apply]  ✖ ${isNetworkIssue ? 'broken link' : (isCrash ? 'repeated crash' : 'error')}:`, err.message);
+          await logResult(match, isNetworkIssue ? 'needs_manual_action' : 'failed', note);
+          attempted = true;
+        }
+      } finally {
+        await context.close().catch(() => {}); // a crashed target can make close() itself throw — never let cleanup sink the run
       }
-
-      const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'job-board');
-
-      if (result.ok) {
-        const note = missingFieldsNote(result.missingFields);
-        console.log(`[apply]  ✔ submitted${note ? ' (some info still needed)' : ''}`);
-        await logResult(match, 'success', `Submitted via ${formLabel} form automation.${note}`);
-      } else if (result.captcha) {
-        console.log(`[apply]  ⚠ captcha — needs manual action`);
-        await logResult(match, 'captcha_blocked', result.reason);
-      } else {
-        console.log(`[apply]  ✖ ${result.reason}`);
-        await logResult(match, 'needs_manual_action', result.reason);
-      }
-    } catch (err) {
-      const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
-      const note = isNetworkIssue
-        ? `This posting's link appears broken, mistyped, or no longer exists (${err.message}).`
-        : err.message;
-      console.error(`[apply]  ✖ ${isNetworkIssue ? 'broken link' : 'error'}:`, err.message);
-      await logResult(match, isNetworkIssue ? 'needs_manual_action' : 'failed', note);
-    } finally {
-      await context.close();
-      await humanDelay();
+      if (attempted) break;
     }
+
+    await humanDelay();
   }
 
   await browser.close();
