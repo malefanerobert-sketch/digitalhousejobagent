@@ -20,15 +20,20 @@ function humanDelay() {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function downloadResumeToTemp(resumeUrl, seekerId) {
-  if (!resumeUrl) return null;
-  const res = await fetch(resumeUrl);
-  if (!res.ok) throw new Error(`Failed to download resume (${res.status})`);
-  const ext = path.extname(new URL(resumeUrl).pathname) || '.pdf';
-  const tempPath = path.join(os.tmpdir(), `resume-${seekerId}${ext}`);
+async function downloadFileToTemp(fileUrl, seekerId, tag) {
+  if (!fileUrl) return null;
+  const res = await fetch(fileUrl);
+  if (!res.ok) throw new Error(`Failed to download ${tag} (${res.status})`);
+  const ext = path.extname(new URL(fileUrl).pathname) || '.pdf';
+  const tempPath = path.join(os.tmpdir(), `${tag}-${seekerId}${ext}`);
   const buffer = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(tempPath, buffer);
   return tempPath;
+}
+// Kept as a thin wrapper — the 5 named-ATS functions below only ever deal
+// with a single resume file input, so their call sites are unchanged.
+function downloadResumeToTemp(resumeUrl, seekerId) {
+  return downloadFileToTemp(resumeUrl, seekerId, 'resume');
 }
 
 function cleanupTemp(tempPath) {
@@ -120,6 +125,54 @@ async function attachResume(resumeInput, seeker) {
     return { attached: false, error: `Resume attach failed: ${err.message}` };
   } finally {
     cleanupTemp(tempResumePath);
+  }
+}
+
+// Loads the seeker's "Other documents" (ID/certificate/qualification/other —
+// job_seeker_documents, uploaded from the seeker's own Documents tab) once
+// per application, keyed by doc_type, most-recent-first so a re-upload wins.
+async function loadSeekerDocuments(seeker) {
+  const byType = {};
+  const { data, error } = await supabase
+    .from('job_seeker_documents')
+    .select('doc_type, file_url, file_name')
+    .eq('job_seeker_id', seeker.id)
+    .order('created_at', { ascending: false });
+  if (error || !data) return byType;
+  for (const d of data) {
+    if (d.doc_type && !byType[d.doc_type]) byType[d.doc_type] = d;
+  }
+  return byType;
+}
+
+// Attaches whichever document a file-upload field actually asked for. This
+// is what makes the seeker's "Other documents" uploads (ID/certificate/
+// qualification) actually reach an application, instead of only ever being
+// stored and shown back to the seeker — matching what the Documents tab
+// tells them ("having these on hand speeds up applications that ask for
+// them"). docType 'resume' behaves exactly like attachResume(); any other
+// docType looks up that seeker's most recent upload of that type. Missing a
+// non-resume document is not an error — these are optional, so the field is
+// just left unfilled and shows up honestly in findMissingRequiredFields.
+async function attachDocument(fileInput, seeker, docType, documentsByType) {
+  if (!fileInput) return { attached: false };
+  if (!docType || docType === 'resume') return attachResume(fileInput, seeker);
+
+  const doc = documentsByType?.[docType];
+  if (!doc) return { attached: false }; // optional — not on file, leave the field blank
+
+  let tempPath = null;
+  try {
+    tempPath = await downloadFileToTemp(doc.file_url, seeker.id, docType);
+    await fileInput.setInputFiles(tempPath);
+    await humanDelay();
+    return { attached: true };
+  } catch (err) {
+    // A failed optional-document attach shouldn't sink the whole
+    // application the way a missing resume does — log it as unattached.
+    return { attached: false, error: null, warning: `Could not attach ${docType}: ${err.message}` };
+  } finally {
+    cleanupTemp(tempPath);
   }
 }
 
@@ -391,7 +444,7 @@ async function extractFormFields(page) {
   });
 }
 
-function buildFieldMappingPrompt(fields, seeker) {
+function buildFieldMappingPrompt(fields, seeker, documentsByType) {
   // Full profile — soft fields included so the agent can compose short answers
   // to open-ended application questions when the user has enabled autofill.
   const profile = {
@@ -436,6 +489,10 @@ function buildFieldMappingPrompt(fields, seeker) {
     team_player: seeker.team_player,
 
     has_resume_file: !!seeker.resume_url,
+    // Other documents the seeker has actually uploaded on their Documents
+    // tab (optional, so this list may be empty or partial) — only these
+    // exact types can be attached; never claim one that isn't listed here.
+    available_documents: Object.keys(documentsByType || {}),
   };
   // Default TRUE — the user has to explicitly opt out in profile settings.
   const canAutofillSoft = seeker.agent_can_autofill_soft !== false;
@@ -453,7 +510,8 @@ Decide what to do with each field that's clearly answerable from the profile, an
 - A <select> dropdown: {"idx": <n>, "action": "select", "value": "<the closest matching option text>"}
 - A checkbox that should be ticked (e.g. a consent/terms/"I agree" checkbox that's required to submit): {"idx": <n>, "action": "check", "value": true}
 - A radio button that should be selected: {"idx": <n>, "action": "check", "value": true}
-- A file-upload field meant for a resume/CV: {"idx": <n>, "action": "file"}
+- A file-upload field meant for a resume/CV: {"idx": <n>, "action": "file", "docType": "resume"}
+- A file-upload field asking for an ID document, certificate, qualification, or other supporting document: {"idx": <n>, "action": "file", "docType": "id"|"certificate"|"qualification"|"other"} — ONLY when that exact type appears in available_documents; if the field asks for a document type not in available_documents, omit the field entirely rather than guessing another type
 
 Rules for HARD FACTS — never invent these, leave the field out if the profile doesn't have it:
 - Names, contact details, email, phone
@@ -575,6 +633,7 @@ async function fillGenericStep(page, seeker) {
 
 async function applyAI(page, seeker) {
   let lastMissingFields = [];
+  const documentsByType = await loadSeekerDocuments(seeker);
 
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
     await page.waitForLoadState('networkidle').catch(() => {});
@@ -605,7 +664,7 @@ async function applyAI(page, seeker) {
     let mapping = [];
     const aiOverride = aiMatch.resolveSeekerOverride(seeker);
     if (aiMatch.isEnabled() || aiOverride) {
-      const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker), aiOverride);
+      const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker, documentsByType), aiOverride);
       if (raw) {
         try {
           const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
@@ -618,12 +677,19 @@ async function applyAI(page, seeker) {
     let filledEls;
     if (mapping.length) {
       filledEls = await fillFieldsWithAI(page, fields, mapping);
-      const resumeFieldMap = mapping.find(m => m && m.action === 'file');
-      if (resumeFieldMap) {
-        const resumeEl = await page.$(`[data-agent-idx="${resumeFieldMap.idx}"]`);
-        const resumeResult = await attachResume(resumeEl, seeker);
-        if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-        if (resumeEl) filledEls.push(resumeEl);
+      // A form can ask for more than one file (resume + ID + certificate,
+      // say) — attach every file-type field the mapping identified, not
+      // just the first, so uploaded documents actually reach forms that
+      // ask for them.
+      const fileFieldMaps = mapping.filter(m => m && m.action === 'file');
+      for (const fileMap of fileFieldMaps) {
+        const fileEl = await page.$(`[data-agent-idx="${fileMap.idx}"]`);
+        const attachResult = await attachDocument(fileEl, seeker, fileMap.docType, documentsByType);
+        // Only a missing/failed RESUME sinks the application — a missing or
+        // failed optional document (ID/certificate/qualification) doesn't,
+        // since the seeker never had to upload those in the first place.
+        if (attachResult.error) return { ok: false, reason: attachResult.error };
+        if (fileEl && attachResult.attached) filledEls.push(fileEl);
       }
     } else {
       const loose = await fillGenericStep(page, seeker);
