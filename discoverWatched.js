@@ -1,5 +1,17 @@
 require('dotenv').config();
-const { chromium } = require('playwright');
+// Stealth-wrapped chromium (see apply.js for the full rationale) — this file
+// also drives a real browser against arbitrary third-party pages, so it
+// should get the same anti-detection benefit, with the same safe fallback.
+let chromium;
+try {
+  const extra = require('playwright-extra');
+  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  extra.chromium.use(StealthPlugin());
+  chromium = extra.chromium;
+} catch (err) {
+  console.warn('[discoverWatched] stealth browser unavailable, falling back to plain Playwright:', err.message);
+  chromium = require('playwright').chromium;
+}
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
 

@@ -7,10 +7,15 @@
 // never crashes the whole worker at boot — CAPTCHA support is optional, and
 // the rest of the pipeline (discovery, applying to non-CAPTCHA'd forms) must
 // keep running even when no solver library is available.
+//
+// NOTE: this used to try requiring "2captcha-nodejs" first — that package is
+// literally just an empty Apify-actor boilerplate on npm (no captcha-solving
+// code in it at all), not a real 2Captcha client, so it could never have
+// worked. The real client is the "2captcha" package; its Solver class uses
+// solver.recaptcha(...)/solver.hcaptcha(...), not the *Proxyless(...) method
+// names this file used to call — those have been corrected below to match.
 let Solver = null;
-try { Solver = require('2captcha-nodejs'); } catch (_) {
-  try { Solver = require('2captcha'); } catch (_) { Solver = null; }
-}
+try { Solver = require('2captcha').Solver; } catch (_) { Solver = null; }
 
 const API_KEY = process.env.CAPTCHA_API_KEY;
 const ENABLED = Boolean(API_KEY && Solver);
@@ -96,27 +101,21 @@ async function solveRecaptcha(captchaInfo) {
   try {
     console.log(`[captcha] attempting to solve ${captchaInfo.type}...`);
 
-    let token;
+    let result;
     if (captchaInfo.type === 'recaptcha_v2') {
-      token = await solver.recaptchaV2Proxyless({
-        googlekey: captchaInfo.sitekey,
-        pageurl: captchaInfo.pageUrl
-      });
+      result = await solver.recaptcha(captchaInfo.sitekey, captchaInfo.pageUrl);
     } else if (captchaInfo.type === 'recaptcha_v3') {
-      token = await solver.recaptchaV3Proxyless({
-        googlekey: captchaInfo.sitekey,
-        pageurl: captchaInfo.pageUrl,
+      result = await solver.recaptcha(captchaInfo.sitekey, captchaInfo.pageUrl, {
         version: 'v3',
         action: 'submit',
         min_score: 0.4
       });
     } else if (captchaInfo.type === 'hcaptcha') {
-      token = await solver.hcaptchaProxyless({
-        sitekey: captchaInfo.sitekey,
-        pageurl: captchaInfo.pageUrl
-      });
+      result = await solver.hcaptcha(captchaInfo.sitekey, captchaInfo.pageUrl);
     }
 
+    // The real 2captcha client resolves { data, id } — .data is the token.
+    const token = result?.data || null;
     if (token) {
       console.log('[captcha] ✔ solved successfully');
       return token;

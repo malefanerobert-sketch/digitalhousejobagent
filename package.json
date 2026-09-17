@@ -6,12 +6,14 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "discover": "node discover.js",
+    "discover-auto": "node discoverAuto.js",
+    "discover-watched": "node discoverWatched.js",
     "apply": "node apply.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
     "@supabase/supabase-js": "^2.45.0",
+    "2captcha": "^3.0.7",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
     "playwright": "^1.47.0",

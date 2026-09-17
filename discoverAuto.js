@@ -459,13 +459,16 @@ async function run() {
     return;
   }
 
-  // Get all active users with auto-search enabled
+  // Get all active users with auto-search enabled. discovery_mode 'both'
+  // means "watched pages AND autonomous search" — it must be included here,
+  // not just 'auto', or a seeker who picked "Both" in the admin panel
+  // silently never gets autonomous board search at all.
   const { data: users, error: usersErr } = await sb
     .from('job_seekers')
     .select('*')
     .eq('status', 'active')
     .eq('auto_search_enabled', true)
-    .eq('discovery_mode', 'auto');
+    .in('discovery_mode', ['auto', 'both']);
 
   if (usersErr) {
     console.error('❌ [discoverAuto] Failed to load users:', usersErr.message);
@@ -518,21 +521,13 @@ async function run() {
       allJobs = allJobs.concat(jobs);
     }
 
-    // Also fetch from custom user-added sources if they have any
-    const { data: customSources, error: customErr } = await sb
-      .from('job_custom_sources')
-      .select('*')
-      .eq('job_seeker_id', user.id)
-      .eq('active', true);
-
-    if (!customErr && customSources?.length) {
-      console.log(`  Custom sources: ${customSources.map(s => s.company_name).join(', ')}`);
-      for (const customSource of customSources) {
-        // Custom sources are just URLs - user has manually added them
-        // Store them as a note that custom sources were considered
-        console.log(`    ℹ Custom source: ${customSource.company_name} (${customSource.career_page_url})`);
-      }
-    }
+    // NOTE: watched pages (job_custom_sources) are intentionally NOT
+    // re-fetched here — discoverWatched.js already handles those on its own
+    // schedule for every active seeker regardless of discovery_mode. A
+    // previous version of this file queried them here and logged their
+    // names without doing anything else with them; that dead code has been
+    // removed so this file doesn't look like it's processing watched pages
+    // when it never was.
 
     if (allJobs.length === 0) {
       console.log(`  ℹ No jobs found from enabled sources`);

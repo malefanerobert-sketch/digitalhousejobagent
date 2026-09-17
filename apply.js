@@ -2,9 +2,26 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium } = require('playwright');
+// playwright-extra + the stealth plugin were installed as dependencies but
+// never actually used anywhere — every application was being submitted
+// through a plain, easily-fingerprinted browser. Switching to the
+// stealth-wrapped chromium here so the evasion techniques the dependency
+// was added for actually run. Falls back to plain playwright if the extra
+// packages are ever missing, so a bad install can't take the whole worker
+// down.
+let chromium;
+try {
+  const extra = require('playwright-extra');
+  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  extra.chromium.use(StealthPlugin());
+  chromium = extra.chromium;
+} catch (err) {
+  console.warn('[apply] stealth browser unavailable, falling back to plain Playwright:', err.message);
+  chromium = require('playwright').chromium;
+}
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
+const captchaSolver = require('./captchaSolver');
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -56,6 +73,19 @@ async function logResult(match, result, notes) {
 
 async function detectCaptcha(page) {
   return await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
+}
+
+// If a CAPTCHA is present, try to actually solve it via captchaSolver.js.
+// That module only attempts a real solve when CAPTCHA_API_KEY is set (see
+// its own ENABLED flag) — with no key configured this behaves exactly as
+// before: detect, then hand off as "needs manual action". Returns null to
+// mean "keep going" (no CAPTCHA found, or it was solved and injected), or
+// the failure result object to return immediately when it still blocks.
+async function handleCaptcha(page) {
+  if (!(await detectCaptcha(page))) return null;
+  const solved = await captchaSolver.solveCaptchaOnPage(page).catch(() => false);
+  if (solved) return null;
+  return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
 }
 
 // Figures out a human-readable label for a form field, so a missing-field
@@ -202,9 +232,8 @@ async function applyOnGreenhouse(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return captchaBlock;
 
   const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
   if (!submitBtn) {
@@ -247,9 +276,8 @@ async function applyOnLever(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return captchaBlock;
 
   const submitBtn = await page.$('button[type="submit"]');
   if (!submitBtn) {
@@ -298,9 +326,8 @@ async function applyOnSmartRecruiters(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return captchaBlock;
 
   const submitBtn = await page.$('button[type="submit"]');
   if (!submitBtn) {
@@ -337,9 +364,8 @@ async function applyOnAshby(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return captchaBlock;
 
   const submitBtn = await page.$('button[type="submit"]');
   if (!submitBtn) {
@@ -388,9 +414,8 @@ async function applyOnWorkable(page, seeker) {
   const resumeResult = await attachResume(resumeInput, seeker);
   if (resumeResult.error) return { ok: false, reason: resumeResult.error };
 
-  if (await detectCaptcha(page)) {
-    return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-  }
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return captchaBlock;
 
   const submitBtn = await page.$('button[type="submit"]');
   if (!submitBtn) {
@@ -638,9 +663,8 @@ async function applyAI(page, seeker) {
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
     await page.waitForLoadState('networkidle').catch(() => {});
 
-    if (await detectCaptcha(page)) {
-      return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
-    }
+    const captchaBlock = await handleCaptcha(page);
+    if (captchaBlock) return captchaBlock;
 
     const fields = await extractFormFields(page);
 
@@ -811,13 +835,19 @@ async function run() {
         result = await applyOnAshby(page, seeker);
       } else if (source?.source_type === 'workable') {
         result = await applyOnWorkable(page, seeker);
-      } else if (match.is_custom_source) {
-        result = await applyAI(page, seeker);
       } else {
-        result = { ok: false, reason: `Auto-apply not yet implemented for source type "${source?.source_type}".` };
+        // Everything else — watched pages AND autonomous-search postings
+        // (Adzuna/RemoteOK/Jobmail, which have no job_sources row and
+        // aren't is_custom_source) — goes through the same AI-driven form
+        // filler. It was previously gated to is_custom_source only, which
+        // meant every autonomously-discovered job structurally could never
+        // be applied to and always landed in needs_manual_action. applyAI()
+        // was built to handle "any layout it's never seen before", which is
+        // exactly what an arbitrary job-board posting is.
+        result = await applyAI(page, seeker);
       }
 
-      const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'unknown');
+      const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'job-board');
 
       if (result.ok) {
         const note = missingFieldsNote(result.missingFields);
