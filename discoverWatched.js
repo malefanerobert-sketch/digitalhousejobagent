@@ -123,6 +123,12 @@ async function run() {
     // AI is required to interpret an arbitrary page — use the seeker's own
     // key if they've set one, otherwise the shared key. Only skip THIS
     // seeker (not the whole run) when neither is available.
+    // A seeker set to 'none' has deliberately opted out of AI entirely —
+    // that must never silently fall back to the shared company key.
+    if (seeker.api_provider === 'none') {
+      console.log(`[discoverWatched]  ⚠ skipping "${source.company_name}" for ${seeker.full_name} — AI access is turned off for this seeker`);
+      continue;
+    }
     const override = aiMatch.resolveSeekerOverride(seeker);
     if (!aiMatch.isEnabled() && !override) {
       console.log(`[discoverWatched]  ⚠ skipping "${source.company_name}" for ${seeker.full_name} — no AI key available (no shared key set, and this seeker has no personal key)`);

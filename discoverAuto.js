@@ -547,23 +547,33 @@ async function run() {
       console.log(`  🌐 Filtered to remote only: ${allJobs.length} jobs`);
     }
 
-    // Bring-your-own-key: a seeker who opted into their own key gets scored
-    // with it instead of the shared one. Only Anthropic is supported here
-    // today (this file talks to Claude directly, unlike aiMatch.js which
-    // supports both providers) — an OpenAI personal key falls back to the
-    // shared client with a warning rather than silently mishandling it.
-    let userClaudeClient = null;
-    if (user.api_provider === 'user' && user.ai_provider && user.ai_provider !== 'none' && user.ai_api_key) {
-      if (user.ai_provider === 'anthropic') {
-        userClaudeClient = new Anthropic({ apiKey: user.ai_api_key });
-      } else {
-        console.warn(`  ⚠ ${user.full_name} set their own ${user.ai_provider} key, but autonomous board-search scoring only supports Anthropic today — using the shared key for this run instead.`);
+    // A seeker set to 'none' has deliberately opted out of AI entirely —
+    // that must never silently fall back to the shared company key, so this
+    // skips scoreJobsWithClaude altogether rather than passing it a null
+    // override (which would fall through to the shared client internally).
+    let scored;
+    if (user.api_provider === 'none') {
+      console.log(`  🚫 ${user.full_name} has AI access turned off — saving ${allJobs.length} job(s) unscored (score=0)`);
+      scored = allJobs.map(j => ({ ...j, match_score: 0 }));
+    } else {
+      // Bring-your-own-key: a seeker who opted into their own key gets scored
+      // with it instead of the shared one. Only Anthropic is supported here
+      // today (this file talks to Claude directly, unlike aiMatch.js which
+      // supports both providers) — an OpenAI personal key falls back to the
+      // shared client with a warning rather than silently mishandling it.
+      let userClaudeClient = null;
+      if (user.api_provider === 'user' && user.ai_provider && user.ai_provider !== 'none' && user.ai_api_key) {
+        if (user.ai_provider === 'anthropic') {
+          userClaudeClient = new Anthropic({ apiKey: user.ai_api_key });
+        } else {
+          console.warn(`  ⚠ ${user.full_name} set their own ${user.ai_provider} key, but autonomous board-search scoring only supports Anthropic today — using the shared key for this run instead.`);
+        }
       }
-    }
 
-    // Score with Claude
-    console.log(`  Scoring with the Agent${userClaudeClient ? ' (using their own API key)' : ''}...`);
-    const scored = await scoreJobsWithClaude(allJobs, user, userClaudeClient);
+      // Score with Claude
+      console.log(`  Scoring with the Agent${userClaudeClient ? ' (using their own API key)' : ''}...`);
+      scored = await scoreJobsWithClaude(allJobs, user, userClaudeClient);
+    }
 
     // Save matches
     const saved = await saveMatches(user.id, scored);

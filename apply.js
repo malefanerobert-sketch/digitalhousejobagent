@@ -663,7 +663,9 @@ async function applyAI(page, seeker) {
 
     let mapping = [];
     const aiOverride = aiMatch.resolveSeekerOverride(seeker);
-    if (aiMatch.isEnabled() || aiOverride) {
+    // A seeker set to 'none' opted out of AI entirely — never fall back to
+    // the shared company key for them, even though one may be configured.
+    if (seeker.api_provider !== 'none' && (aiMatch.isEnabled() || aiOverride)) {
       const raw = await aiMatch.completeWithAI(buildFieldMappingPrompt(fields, seeker, documentsByType), aiOverride);
       if (raw) {
         try {
