@@ -22,9 +22,11 @@ const sb = require('./supabaseClient');
 const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID || '118cbf9d';
 const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 
-// Anthropic client is initialized after loadAdminSettings() runs, so it can
-// pick up the API key stored in dispatch_settings when no env var is set.
-let claude = null;
+// The shared Agent key can be either an Anthropic or an OpenAI key — which
+// provider it belongs to is decided by dispatch_settings.ai_provider (set
+// in the admin panel). callScoringAI() below picks the right API for
+// whichever provider is actually configured, instead of assuming Anthropic.
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
@@ -76,11 +78,8 @@ async function loadAdminSettings() {
     return false;
   }
 
-  // Initialize Anthropic client with the resolved key
-  if (adminSettings.ai_api_key) {
-    claude = new Anthropic({ apiKey: adminSettings.ai_api_key });
-  } else {
-    console.warn('⚠ No Claude API key available — scoring will be skipped, jobs will save with score=0');
+  if (!adminSettings.ai_api_key) {
+    console.warn('⚠ No Agent API key available — scoring will be skipped, jobs will save with score=0');
   }
 
   return true;
@@ -331,16 +330,55 @@ async function fetchCareerJunctionJobs(source, query = 'software') {
 }
 
 /**
- * Score jobs using Claude API
+ * Calls whichever AI provider is actually configured (shared dispatch_settings
+ * key, or a per-seeker override) and returns the raw text response. Mirrors
+ * aiMatch.js's scoreWithAnthropic/scoreWithOpenAI split — this file used to
+ * always build an Anthropic client from the shared key regardless of what
+ * dispatch_settings.ai_provider actually said, so an admin who picked
+ * "OpenAI (GPT)" in the admin panel for the shared key silently got every
+ * autonomous-search job scored 0 (the Anthropic SDK rejects an OpenAI-shaped
+ * key) instead of a real error — this fixes that by picking the API to call
+ * based on the resolved provider, same as every other AI call in this app.
  */
-async function scoreJobsWithClaude(jobs, userProfile, clientOverride) {
+async function callScoringAI(prompt, override) {
+  const provider = override?.provider || adminSettings?.ai_provider;
+  const apiKey = override?.apiKey || adminSettings?.ai_api_key;
+  if (!provider || provider === 'none' || !apiKey) return null;
+  const model = override?.model || adminSettings?.ai_model || DEFAULT_MODEL_BY_PROVIDER[provider];
+
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model,
+      max_tokens: 200,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    return response.content?.[0]?.text || '';
+  } else if (provider === 'openai') {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: prompt }] })
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '';
+  }
+  return null; // unknown provider — treated the same as "not configured"
+}
+
+/**
+ * Score jobs using the configured AI provider (shared key or seeker override)
+ */
+async function scoreJobsWithClaude(jobs, userProfile, override) {
   if (jobs.length === 0) return [];
 
-  const activeClient = clientOverride || claude;
+  const provider = override?.provider || adminSettings?.ai_provider;
+  const apiKey = override?.apiKey || adminSettings?.ai_api_key;
 
-  // If no Claude client, save every job with a placeholder score (unscored)
-  if (!activeClient) {
-    console.log(`  ⚠ No Claude key — saving ${jobs.length} jobs unscored (score=0)`);
+  // If no usable key/provider, save every job with a placeholder score (unscored)
+  if (!provider || provider === 'none' || !apiKey) {
+    console.log(`  ⚠ No Agent API key — saving ${jobs.length} jobs unscored (score=0)`);
     return jobs.map(j => ({ ...j, match_score: 0 }));
   }
 
@@ -370,14 +408,13 @@ ${idx + 1}. ${j.title}
 Respond ONLY with JSON array of scores, e.g.: [85, 72, 91, ...]
 No explanation, no markdown, just the array.`;
 
-      const response = await activeClient.messages.create({
-        model: adminSettings.ai_model || DEFAULT_CLAUDE_MODEL,
-        max_tokens: 200,
-        messages: [{ role: 'user', content: prompt }]
-      });
+      const text = await callScoringAI(prompt, override);
 
-      const scoreStr = response.content[0].text.trim();
-      const scores = JSON.parse(scoreStr);
+      // Some providers occasionally wrap JSON in markdown code fences despite
+      // being told not to — strip those before parsing (same defensive
+      // handling aiMatch.js already uses for its own AI calls).
+      const cleaned = (text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const scores = JSON.parse(cleaned);
 
       batch.forEach((job, idx) => {
         scored.push({
@@ -391,7 +428,7 @@ No explanation, no markdown, just the array.`;
       // Rate limiting
       await new Promise(r => setTimeout(r, 500));
     } catch (err) {
-      console.error(`❌ Claude scoring failed for batch:`, err.message);
+      console.error(`❌ AI scoring failed for batch:`, err.message);
       batch.forEach(job => {
         scored.push({ ...job, match_score: 0 });
       });
@@ -552,22 +589,20 @@ async function run() {
       scored = allJobs.map(j => ({ ...j, match_score: 0 }));
     } else {
       // Bring-your-own-key: a seeker who opted into their own key gets scored
-      // with it instead of the shared one. Only Anthropic is supported here
-      // today (this file talks to Claude directly, unlike aiMatch.js which
-      // supports both providers) — an OpenAI personal key falls back to the
-      // shared client with a warning rather than silently mishandling it.
-      let userClaudeClient = null;
+      // with it instead of the shared one. callScoringAI() now handles both
+      // providers uniformly (see above), so this override works for an
+      // OpenAI personal key exactly the same as an Anthropic one — it used
+      // to only build a client for 'anthropic' and silently fall back to the
+      // shared key/provider for 'openai', which meant a seeker's own OpenAI
+      // key was never actually used here despite the admin panel offering it.
+      let userOverride = null;
       if (user.api_provider === 'user' && user.ai_provider && user.ai_provider !== 'none' && user.ai_api_key) {
-        if (user.ai_provider === 'anthropic') {
-          userClaudeClient = new Anthropic({ apiKey: user.ai_api_key });
-        } else {
-          console.warn(`  ⚠ ${user.full_name} set their own ${user.ai_provider} key, but autonomous board-search scoring only supports Anthropic today — using the shared key for this run instead.`);
-        }
+        userOverride = { provider: user.ai_provider, apiKey: user.ai_api_key, model: null };
       }
 
-      // Score with Claude
-      console.log(`  Scoring with the Agent${userClaudeClient ? ' (using their own API key)' : ''}...`);
-      scored = await scoreJobsWithClaude(allJobs, user, userClaudeClient);
+      // Score with the Agent
+      console.log(`  Scoring with the Agent${userOverride ? ' (using their own API key)' : ''}...`);
+      scored = await scoreJobsWithClaude(allJobs, user, userOverride);
     }
 
     // Save matches
