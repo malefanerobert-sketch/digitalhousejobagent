@@ -1,0 +1,13 @@
+# nixpacks.toml — Railway build configuration for the JobAgent worker
+# Ensures Playwright/Chromium and its system-level dependencies are
+# installed during the build phase so the worker can launch a headless
+# browser at runtime.
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npx playwright install chromium --with-deps"]
+
+[start]
+cmd = "node index.js"
