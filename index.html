@@ -456,6 +456,14 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
       </nav>
       <div class="side-foot">
         <div class="agent-pill"><span class="dot idle" id="agentDot"></span><span id="agentText">waking up…</span></div>
+        <div class="theme-picker-wrap">
+          <button id="themeToggleBtn" class="theme-toggle-btn" onclick="(function(){const m=document.getElementById('themeMenu');if(m.classList.contains('hidden')){renderThemeMenu();}else{m.classList.add('hidden');}})()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 0 14"/></svg>
+            Theme
+            <span id="themeCurrentSwatch" class="theme-swatch" style="background:linear-gradient(135deg,#c084fc,#ff7ab8);margin-left:auto"></span>
+          </button>
+          <div id="themeMenu" class="theme-menu hidden"></div>
+        </div>
         <button class="btn btn-ghost btn-sm btn-block" onclick="signOut()">Sign out</button>
       </div>
     </aside>
@@ -870,7 +878,27 @@ const THEMES={
     text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
     accent:'#c084fc', accentRgb:'192,132,252', accent2:'#ff7ab8', accent2Rgb:'255,122,184',
     tint:'#ddb8fe', btnA:'#ffb454', btnB:'#ff8e3c', btnText:'#221302',
-    btnShadow:'rgba(255,150,60,.25)', btnShadowHover:'rgba(255,150,60,.4)'}
+    btnShadow:'rgba(255,150,60,.25)', btnShadowHover:'rgba(255,150,60,.4)'},
+  nebula:{label:'Nebula', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
+    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
+    accent:'#ffb454', accentRgb:'255,180,84', accent2:'#4fd1c5', accent2Rgb:'79,209,197',
+    tint:'#ffd09a', btnA:'#ffb454', btnB:'#ff8e3c', btnText:'#221302',
+    btnShadow:'rgba(255,150,60,.25)', btnShadowHover:'rgba(255,150,60,.4)'},
+  signal:{label:'Signal', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
+    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
+    accent:'#4f9dff', accentRgb:'79,157,255', accent2:'#a3e635', accent2Rgb:'163,230,53',
+    tint:'#a8c8ff', btnA:'#4f9dff', btnB:'#2f7de0', btnText:'#071a33',
+    btnShadow:'rgba(79,157,255,.25)', btnShadowHover:'rgba(79,157,255,.4)'},
+  aurora:{label:'Aurora', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
+    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
+    accent:'#2dd4a7', accentRgb:'45,212,167', accent2:'#38bdf8', accent2Rgb:'56,189,248',
+    tint:'#99f0da', btnA:'#2dd4a7', btnB:'#14b892', btnText:'#052e24',
+    btnShadow:'rgba(45,212,167,.25)', btnShadowHover:'rgba(45,212,167,.4)'},
+  solstice:{label:'Solstice', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
+    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
+    accent:'#ffd166', accentRgb:'255,209,102', accent2:'#ff8f70', accent2Rgb:'255,143,112',
+    tint:'#ffe8a0', btnA:'#ffd166', btnB:'#ffab40', btnText:'#2e1900',
+    btnShadow:'rgba(255,209,102,.25)', btnShadowHover:'rgba(255,209,102,.4)'},
 };
 function applyTheme(name='relay'){
   const t=THEMES[name]||THEMES.relay;
@@ -895,9 +923,46 @@ function applyTheme(name='relay'){
   r.setProperty('--btn-shadow',t.btnShadow);
   r.setProperty('--btn-shadow-hover',t.btnShadowHover);
 }
+let _currentTheme = 'relay';
 (function initTheme(){
-  applyTheme('relay');
+  let saved = 'relay';
+  try { saved = localStorage.getItem('jobagentTheme') || 'relay'; } catch(e) {}
+  if (!THEMES[saved]) saved = 'relay';
+  _currentTheme = saved;
+  applyTheme(saved);
 })();
+function renderThemeMenu(){
+  const menu = document.getElementById('themeMenu');
+  if (!menu) return;
+  menu.innerHTML = Object.keys(THEMES).map(key => {
+    const t = THEMES[key];
+    const isActive = key === _currentTheme;
+    return `<button type="button" class="theme-menu-item${isActive?' active':''}" onclick="pickTheme('${key}')">
+      <span class="theme-swatch" style="background:linear-gradient(135deg,${t.accent},${t.accent2})"></span>
+      ${t.label}${isActive?'<span class="check">✓</span>':''}
+    </button>`;
+  }).join('');
+  menu.classList.remove('hidden');
+}
+function pickTheme(name){
+  if (!THEMES[name]) return;
+  _currentTheme = name;
+  applyTheme(name);
+  try { localStorage.setItem('jobagentTheme', name); } catch(e) {}
+  // update button swatch
+  const swatch = document.getElementById('themeCurrentSwatch');
+  const t = THEMES[name];
+  if (swatch) swatch.style.background = `linear-gradient(135deg,${t.accent},${t.accent2})`;
+  const menu = document.getElementById('themeMenu');
+  if (menu) menu.classList.add('hidden');
+}
+document.addEventListener('click', function(e){
+  const menu = document.getElementById('themeMenu');
+  const btn = document.getElementById('themeToggleBtn');
+  if (menu && !menu.classList.contains('hidden') && btn && !btn.contains(e.target) && !menu.contains(e.target)){
+    menu.classList.add('hidden');
+  }
+});
 
 /* ---------------- Password visibility toggles ---------------- */
 const EYE_OPEN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>';
