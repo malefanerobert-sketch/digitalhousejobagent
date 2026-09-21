@@ -116,50 +116,44 @@ async function run() {
     return;
   }
 
-  const { data: watched, error: wErr } = await supabase
+  // 1. Fetch all active global watched company sources
+  const { data: sources, error: sErr } = await supabase
     .from('job_custom_sources')
-    .select('*, job_seekers(*)');
+    .select('*')
+    .eq('is_global', true)
+    .eq('active', true);
 
-  if (wErr) { console.error('[discoverWatched] failed to load job_custom_sources:', wErr.message); return; }
-  if (!watched || watched.length === 0) {
-    console.log('[discoverWatched] no watched pages added by any user yet.');
+  if (sErr) { console.error('[discoverWatched] failed to load global sources:', sErr.message); return; }
+  if (!sources || sources.length === 0) {
+    console.log('[discoverWatched] no active global watched company sources found.');
+    return;
+  }
+
+  // 2. Fetch all active seekers
+  const { data: seekers, error: kErr } = await supabase
+    .from('job_seekers')
+    .select('*')
+    .eq('status', 'active');
+
+  if (kErr) { console.error('[discoverWatched] failed to load seekers:', kErr.message); return; }
+  if (!seekers || seekers.length === 0) {
+    console.log('[discoverWatched] no active seekers found.');
     return;
   }
 
   const browser = await chromium.launch({ headless: true });
 
-  for (const source of watched) {
-    const seeker = source.job_seekers;
-    if (!seeker || seeker.status !== 'active') continue;
+  for (const source of sources) {
+    console.log(`[discoverWatched] scanning global company: "${source.company_name}" (${source.career_page_url})`);
 
-    // AI is required to interpret an arbitrary page — use the seeker's own
-    // key if they've set one, otherwise the shared key. Only skip THIS
-    // seeker (not the whole run) when neither is available.
-    // A seeker set to 'none' has deliberately opted out of AI entirely —
-    // that must never silently fall back to the shared company key.
-    if (seeker.api_provider === 'none') {
-      console.log(`[discoverWatched]  ⚠ skipping "${source.company_name}" for ${seeker.full_name} — AI access is turned off for this seeker`);
-      continue;
-    }
-    const override = aiMatch.resolveSeekerOverride(seeker);
-    if (!aiMatch.isEnabled() && !override) {
-      console.log(`[discoverWatched]  ⚠ skipping "${source.company_name}" for ${seeker.full_name} — no AI key available (no shared key set, and this seeker has no personal key)`);
-      continue;
-    }
-
-    console.log(`[discoverWatched] checking "${source.company_name}" (${source.career_page_url}) for ${seeker.full_name}${override ? ' (using their own API key)' : ''}`);
-
-    // A crashed renderer ("Target crashed" / "Page crashed") is a transient
-    // resource hiccup in this container, not a real problem with the page
-    // itself — retry once on a brand-new page before reporting the watched
-    // page as unreachable (see apply.js for the same pattern and rationale).
+    // Scrape page ONCE per source
     let links = null;
     let lastErr = null;
     for (let attempt = 1; attempt <= 2 && links === null; attempt++) {
       const page = await browser.newPage();
       try {
         await page.goto(source.career_page_url, { waitUntil: 'domcontentloaded', timeout: 25000 });
-        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); // best effort — some pages never go fully idle
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
         links = await page.$$eval('a[href]', els => els
           .map(e => ({ text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href }))
           .filter(l => l.text && l.text.length > 2 && l.text.length < 200)
@@ -168,31 +162,30 @@ async function run() {
         lastErr = err;
         const isCrash = /crashed/i.test(err.message || '');
         if (isCrash && attempt === 1) {
-          console.warn(`[discoverWatched]  ⚠ browser tab crashed loading "${source.company_name}" — retrying once with a fresh page`);
+          console.warn(`[discoverWatched]  ⚠ browser tab crashed loading "${source.company_name}" — retrying once`);
         }
       } finally {
-        await page.close().catch(() => {}); // a crashed target can make close() itself throw
+        await page.close().catch(() => {});
       }
     }
+    
     if (links === null) {
-      const err = lastErr;
-      const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
-      const reason = isNetworkIssue
-        ? 'the address could not be reached (broken link, typo, or the site is down)'
-        : `an unexpected error occurred (${err.message})`;
-      console.error(`[discoverWatched]  ✖ could not load page:`, err.message);
-      await reportUnreachable(seeker, source, reason);
+      console.error(`[discoverWatched]  ✖ could not load page "${source.company_name}":`, lastErr?.message);
+      await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
     if (!links.length) {
       console.log(`[discoverWatched]  page loaded but no readable links found on "${source.company_name}"`);
+      await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
-    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()), override);
+    // Extract jobs with AI ONCE per source
+    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()), null);
     if (!raw) {
       console.log(`[discoverWatched]  ⚠ AI extraction failed or returned nothing for "${source.company_name}"`);
+      await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
@@ -203,38 +196,56 @@ async function run() {
       if (!Array.isArray(jobs)) throw new Error('AI did not return a JSON array');
     } catch (err) {
       console.error(`[discoverWatched]  ✖ could not parse AI extraction result:`, err.message);
+      await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
     console.log(`[discoverWatched]  ${jobs.length} posting(s) extracted from "${source.company_name}"`);
 
-    for (const job of jobs) {
-      if (!job.title || !job.url) continue;
+    // 3. Loop through all seekers and match jobs
+    for (const seeker of seekers) {
+      if (seeker.api_provider === 'none') continue;
+      const override = aiMatch.resolveSeekerOverride(seeker);
+      if (!aiMatch.isEnabled() && !override) continue;
 
-      let absoluteUrl;
-      try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
-      catch { continue; } // malformed URL from the AI — skip rather than insert garbage
+      // Check block list
+      const blocked = (seeker.blocked_companies || []).map(c => String(c || '').trim().toLowerCase());
+      if (blocked.includes(String(source.company_name).trim().toLowerCase())) {
+        continue;
+      }
 
-      const relevance = scoreMatch(`${job.title}`, seeker.job_title_keywords);
-      if (relevance < 0.3) continue; // lighter threshold than structured sources, since these are user-requested watches
+      for (const job of jobs) {
+        if (!job.title || !job.url) continue;
 
-      if (await alreadyKnown(seeker.id, absoluteUrl)) continue; // already discovered (and possibly already applied/reported) — never re-process the same posting
+        let absoluteUrl;
+        try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
+        catch { continue; }
 
-      const { error: insErr } = await supabase.from('job_matches').insert({
-        job_seeker_id: seeker.id,
-        job_source_id: null, // not tied to the shared job_sources catalog — user-added
-        job_title: job.title,
-        company_name: source.company_name,
-        job_url: absoluteUrl,
-        location: job.location || null,
-        match_score: Number(relevance.toFixed(2)),
-        status: 'pending',
-        is_custom_source: true
-      });
+        const relevance = scoreMatch(`${job.title}`, seeker.job_title_keywords);
+        if (relevance < 0.3) continue;
 
-      if (insErr) console.error('[discoverWatched]  ✖ insert failed:', insErr.message);
-      else console.log(`[discoverWatched]  ✔ new watched match: "${job.title}" @ ${source.company_name} for ${seeker.full_name}`);
+        if (await alreadyKnown(seeker.id, absoluteUrl)) continue;
+
+        const { error: insErr } = await supabase.from('job_matches').insert({
+          job_seeker_id: seeker.id,
+          job_source_id: null,
+          job_custom_source_id: source.id,
+          job_title: job.title,
+          company_name: source.company_name,
+          job_url: absoluteUrl,
+          location: job.location || null,
+          match_score: Number(relevance.toFixed(2)),
+          status: 'pending',
+          is_custom_source: true
+        });
+
+        if (insErr) console.error(`[discoverWatched]  ✖ insert failed for ${seeker.full_name}:`, insErr.message);
+        else console.log(`[discoverWatched]  ✔ new match: "${job.title}" @ ${source.company_name} for ${seeker.full_name}`);
+      }
     }
+
+    // Update last_checked_at for the source
+    await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
   }
 
   await browser.close();
