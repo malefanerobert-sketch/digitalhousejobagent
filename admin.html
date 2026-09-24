@@ -251,7 +251,8 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           <div class="row2">
             <div class="field"><label>AI provider</label>
               <select id="setProvider"><option value="none">None — Agent disabled app-wide</option>
-                <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option></select></div>
+                <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
+                <option value="google">Google (Gemini)</option></select></div>
             <div class="field"><label>API key</label><input type="password" id="setKey" placeholder="sk-…"></div>
           </div>
           <div class="field">
@@ -718,9 +719,29 @@ function renderAccounts(){
             '<select data-discovery-mode="'+a.id+'"><option value="manual">Manual (watched pages only)</option><option value="auto">Automatic (job board search only)</option><option value="both">Both manual + automatic</option></select>'+
           '</div>'+
         '</div>'+
-        '<div class="field" id="userKeyField-'+a.id+'" style="display:none">'+
-          '<label>User API Key (paste their key)</label>'+
-          '<input type="password" data-user-api-key="'+a.id+'" placeholder="sk-… or their provider key">'+
+        '<div id="userKeyField-'+a.id+'" style="display:none">'+
+          '<div class="field">'+
+            '<label>Job-board API key (Adzuna)</label>'+
+            '<input type="password" data-user-api-key="'+a.id+'" placeholder="their Adzuna key">'+
+          '</div>'+
+          // The AI key is a SEPARATE credential from the job-board key above:
+          // it drives match scoring, watched-page reading and application
+          // drafting, and is what resolveSeekerOverride() actually reads.
+          '<div class="row2">'+
+            '<div class="field">'+
+              '<label>AI provider (this user)</label>'+
+              '<select data-user-ai-provider="'+a.id+'">'+
+                '<option value="">Use the shared JobAgent key</option>'+
+                '<option value="anthropic">Anthropic (Claude)</option>'+
+                '<option value="openai">OpenAI (GPT)</option>'+
+                '<option value="google">Google (Gemini)</option>'+
+              '</select>'+
+            '</div>'+
+            '<div class="field">'+
+              '<label>AI API key (this user)</label>'+
+              '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza…">'+
+            '</div>'+
+          '</div>'+
         '</div>'+
         '<div class="field">'+
           '<label><input type="checkbox" data-remote-only="'+a.id+'" style="width:auto;margin-right:6px"> Remote jobs only</label>'+
@@ -814,6 +835,16 @@ function renderAccounts(){
     if(acct?.api_key){ inp.value=acct.api_key; }
   });
 
+  el.querySelectorAll('[data-user-ai-provider]').forEach(sel=>{
+    const acct=accounts.find(a=>a.id===sel.dataset.userAiProvider);
+    sel.value = acct?.ai_provider || '';
+  });
+
+  el.querySelectorAll('[data-user-ai-key]').forEach(inp=>{
+    const acct=accounts.find(a=>a.id===inp.dataset.userAiKey);
+    if(acct?.ai_api_key){ inp.value=acct.ai_api_key; }
+  });
+
   el.querySelectorAll('[data-remote-only]').forEach(chk=>{
     const id=chk.dataset.remoteOnly;
     const acct=accounts.find(a=>a.id===id);
@@ -826,13 +857,23 @@ function renderAccounts(){
       const apiProvider = $(`[data-api-provider="${id}"]`).value;
       const discoveryMode = $(`[data-discovery-mode="${id}"]`).value;
       const userApiKey = $(`[data-user-api-key="${id}"]`).value.trim() || null;
+      const userAiProvider = $(`[data-user-ai-provider="${id}"]`).value || null;
+      const userAiKey = $(`[data-user-ai-key="${id}"]`).value.trim() || null;
       const remoteOnly = $(`[data-remote-only="${id}"]`).checked;
+
+      // Only keep a per-user AI credential when the account is on its own API
+      // AND both halves are present — a provider with no key (or vice versa)
+      // makes resolveSeekerOverride() fall back to the shared key anyway, so
+      // storing half of it would just be misleading.
+      const keepAi = apiProvider==='user' && userAiProvider && userAiKey;
 
       btn.disabled=true;
       btn.textContent='Saving…';
       const {error} = await sb.from('job_seekers').update({
         api_provider: apiProvider,
         api_key: apiProvider==='user' ? userApiKey : null,
+        ai_provider: keepAi ? userAiProvider : null,
+        ai_api_key:  keepAi ? userAiKey : null,
         discovery_mode: discoveryMode,
         remote_only: remoteOnly,
         updated_at: new Date().toISOString()

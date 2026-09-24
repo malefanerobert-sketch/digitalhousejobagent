@@ -44,10 +44,20 @@ function agentPrompt() {
 // override never carries its own model preference today, so this always
 // falls through to the shared default — kept as a parameter so a future
 // per-seeker model choice has somewhere to plug in.
-const DEFAULT_MODEL = { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' };
-function currentModel(override) {
+const DEFAULT_MODEL = {
+  anthropic: 'claude-haiku-4-5-20251001',
+  openai: 'gpt-4o-mini',
+  google: 'gemini-2.0-flash'
+};
+// The model must follow the provider that is ACTUALLY being used. A seeker
+// override can be on a different provider than the shared key (e.g. the
+// company runs Anthropic while one seeker is on Gemini), in which case the
+// admin's ai_model string belongs to the shared provider and must not leak
+// into the override's call — that would send a Claude model name to Google.
+function currentModel(provider, override) {
   if (override?.model) return override.model;
-  return cachedSettings?.ai_model || DEFAULT_MODEL[cachedSettings?.ai_provider] || null;
+  if (override) return DEFAULT_MODEL[provider] || null;
+  return cachedSettings?.ai_model || DEFAULT_MODEL[provider] || null;
 }
 
 // Is the shared company key configured? Independent of whether the admin's
@@ -122,6 +132,29 @@ async function scoreWithOpenAI(apiKey, model, resumeText, job) {
   return data.choices?.[0]?.message?.content || '';
 }
 
+// Google Gemini speaks a different shape to the other two: the key goes in a
+// header, the prompt is nested under contents[].parts[], and the reply comes
+// back as candidates[].content.parts[].text.
+async function callGemini(apiKey, model, prompt, maxTokens) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens }
+      })
+    }
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Google API error: ${res.status}${detail ? ' — ' + detail.slice(0, 200) : ''}`);
+  }
+  const data = await res.json();
+  return (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('') || '';
+}
+
 // Returns { score: 0-1, reason: string } or null on failure/disabled (caller
 // should fall back to keyword score if this returns null). Pass a resolved
 // seeker override to use their own key/provider instead of the shared one.
@@ -129,7 +162,7 @@ async function scoreWithAI(resumeText, job, override) {
   const provider = override?.provider || cachedSettings?.ai_provider;
   const apiKey = override?.apiKey || cachedSettings?.ai_api_key;
   if (!provider || provider === 'none' || !apiKey) return null;
-  const model = currentModel(override);
+  const model = currentModel(provider, override);
 
   try {
     let text;
@@ -137,6 +170,8 @@ async function scoreWithAI(resumeText, job, override) {
       text = await scoreWithAnthropic(apiKey, model, resumeText, job);
     } else if (provider === 'openai') {
       text = await scoreWithOpenAI(apiKey, model, resumeText, job);
+    } else if (provider === 'google') {
+      text = await callGemini(apiKey, model, PROMPT_TEMPLATE(resumeText, job), 200);
     } else {
       return null; // unknown provider, silently skip
     }
@@ -159,7 +194,7 @@ async function completeWithAI(prompt, override) {
   const provider = override?.provider || cachedSettings?.ai_provider;
   const apiKey = override?.apiKey || cachedSettings?.ai_api_key;
   if (!provider || provider === 'none' || !apiKey) return null;
-  const model = currentModel(override);
+  const model = currentModel(provider, override);
   try {
     if (provider === 'anthropic') {
       const Anthropic = require('@anthropic-ai/sdk');
@@ -179,6 +214,8 @@ async function completeWithAI(prompt, override) {
       if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
       const data = await res.json();
       return data.choices?.[0]?.message?.content || '';
+    } else if (provider === 'google') {
+      return await callGemini(apiKey, model, prompt, 2000);
     }
     return null;
   } catch (err) {
