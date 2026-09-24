@@ -2047,19 +2047,17 @@ $('#docList').addEventListener('click', async (e)=>{
 async function loadCustomSources(){
   if(!currentSeeker){ customSources=[]; customSourceOptOuts=[]; return; }
 
-  const [srcRes, optRes] = await Promise.all([
-    sb.from('job_custom_sources').select('*')
-      .eq('added_by_seeker_id', currentSeeker.id)
-      .order('created_at',{ascending:false}),
-    sb.from('job_custom_source_optouts').select('job_custom_source_id')
-      .eq('job_seeker_id', currentSeeker.id)
-  ]);
+  // The watched list is driven by MEMBERSHIP, not ownership: adding a page
+  // someone else already added joins you to that single shared row, so it
+  // appears here and you can remove it again like any other.
+  const {data, error} = await sb
+    .from('job_custom_source_members')
+    .select('created_at, job_custom_sources(*)')
+    .eq('job_seeker_id', currentSeeker.id)
+    .order('created_at',{ascending:false});
 
-  customSourceOptOuts = optRes.error ? [] : (optRes.data||[]).map(o=>o.job_custom_source_id);
-  const rows = srcRes.error ? [] : (srcRes.data||[]);
-  // Pages this seeker opted out of are gone from THEIR account, even though
-  // the row itself is still live for the rest of the pipeline.
-  customSources = rows.filter(w => !customSourceOptOuts.includes(w.id));
+  customSources = error ? [] : (data||[]).map(m=>m.job_custom_sources).filter(Boolean);
+  customSourceOptOuts = [];
 }
 function renderWatch(){
   const el=$('#watchList');
@@ -2067,7 +2065,10 @@ function renderWatch(){
   el.innerHTML = customSources.map(w=>'<div class="lrow">'+
     '<div class="grow"><b>'+esc(w.company_name)+'</b><div class="sub2"><a href="'+esc(w.career_page_url)+'" target="_blank" rel="noopener">'+esc(w.career_page_url)+'</a></div></div>'+
     '<span class="pill teal">Search &amp; apply</span>'+
-    '<span class="pill gray" title="Added by you and shared with every job seeker">Shared</span>'+
+    '<span class="pill gray" title="'+(w.added_by_seeker_id===currentSeeker.id
+      ? 'You added this page — it is shared with every job seeker'
+      : 'Another job seeker added this page first — you are watching the same one')+'">'+
+      (w.added_by_seeker_id===currentSeeker.id ? 'Shared by you' : 'Shared')+'</span>'+
     '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'" title="Remove from your account only — this page keeps running for other users">Remove</button></div>'
   ).join('');
 }
@@ -2087,11 +2088,12 @@ async function addWatch(){
 
   const msg = {
     created:          'Watching '+name+'\u2019s careers page 👀 — now shared with everyone',
-    restored:         'Added back — the Agent will search '+name+' for you again',
-    already_watching: 'Already being watched — the Agent is searching this page for you',
-    reactivated:      'This page is paused by an administrator, so it isn\u2019t being searched right now'
+    joined:           'Already in the pipeline — added to your watched pages',
+    restored:         'Added back — the Agent will search this page for you again',
+    already_watching: 'You\u2019re already watching this page',
+    paused:           'Added, but an administrator has paused this page so it isn\u2019t being searched right now'
   }[data] || 'Saved';
-  toast(msg, data === 'reactivated' ? 'warn' : 'ok');
+  toast(msg, data === 'paused' ? 'warn' : 'ok');
 
   $('#wName').value=''; $('#wUrl').value='';
   await loadCustomSources(); renderWatch(); renderDashboard();
@@ -2102,9 +2104,16 @@ $('#watchList').addEventListener('click', async (e)=>{
   const id = btn.dataset.removeWatchId;
   btn.disabled = true;
   // Opt-out, not delete — the page stays active for every other job seeker.
+  // The membership row goes too, which is what takes it out of this list;
+  // adding the URL again re-joins and clears the opt-out.
   const {error} = await sb.from('job_custom_source_optouts')
     .upsert({job_seeker_id: currentSeeker.id, job_custom_source_id: id},
             {onConflict: 'job_seeker_id,job_custom_source_id'});
+  if(!error){
+    await sb.from('job_custom_source_members').delete()
+      .eq('job_seeker_id', currentSeeker.id)
+      .eq('job_custom_source_id', id);
+  }
   btn.disabled = false;
   if(error){ toast('⚠ '+error.message,'err'); return; }
   toast('Removed from your account — still active for other users','ok');

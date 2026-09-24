@@ -421,16 +421,18 @@ function setTab(name){
    and apply pipeline. A user can only opt their own account out of a
    company (job_custom_source_optouts); removing it from the system is
    admin-only, which is what this tab is for. */
-let companies=[], companyOptOuts=[];
+let companies=[], companyOptOuts=[], companyMembers=[];
 
 async function loadCompanies(){
-  const [coRes, optRes] = await Promise.all([
+  const [coRes, optRes, memRes] = await Promise.all([
     sb.from('job_custom_sources').select('*').order('created_at',{ascending:false}),
-    sb.from('job_custom_source_optouts').select('job_custom_source_id')
+    sb.from('job_custom_source_optouts').select('job_custom_source_id'),
+    sb.from('job_custom_source_members').select('job_custom_source_id')
   ]);
   companies = coRes.error ? [] : (coRes.data||[]);
   if(coRes.error) toast('⚠ Could not load companies: '+coRes.error.message,'err');
   companyOptOuts = optRes.error ? [] : (optRes.data||[]);
+  companyMembers = memRes.error ? [] : (memRes.data||[]);
   renderCompanies();
 }
 
@@ -458,12 +460,16 @@ function renderCompanies(){
     const addedBy = owner ? 'Added by '+esc(owner) : 'Added by admin';
     const checked = c.last_checked_at ? 'Last scanned '+new Date(c.last_checked_at).toLocaleString() : 'Never scanned yet';
     const optOuts = companyOptOuts.filter(o=>o.job_custom_source_id===c.id).length;
+    // Any seeker can add a page someone else already added — they join the
+    // same row rather than creating a duplicate, so this is the real reach.
+    const watchers = companyMembers.filter(m=>m.job_custom_source_id===c.id).length;
+    const also = watchers > 1 ? ' · also added by '+(watchers-1)+' other user'+(watchers-1>1?'s':'') : '';
     return '<div style="display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
       '<div style="flex:1;min-width:0">'+
         '<b>'+esc(c.company_name)+'</b>'+
         '<div style="font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">'+
           '<a href="'+esc(c.career_page_url)+'" target="_blank" rel="noopener">'+esc(c.career_page_url)+'</a></div>'+
-        '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+' · '+esc(checked)+
+        '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+also+' · '+esc(checked)+
           (optOuts ? ' · '+optOuts+' user'+(optOuts>1?'s':'')+' opted out' : '')+'</div>'+
       '</div>'+
       '<span class="pill '+(c.active?'green':'gray')+'">'+(c.active?'Active':'Paused')+'</span>'+
