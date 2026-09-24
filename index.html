@@ -550,6 +550,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <h3>Company career pages you want watched</h3>
           <p class="section-note">Add any company's careers page directly. Your agent reads it, matches roles, and applies automatically just like your other sources —
           if a page's layout is too different for it to submit safely, that attempt shows up in your Application report instead.</p>
+          <p class="section-note">This list shows the pages <b>you</b> added. Every page added here is shared with the whole JobAgent pipeline, so it also
+          works for other job seekers. Removing one takes it out of <b>your</b> account only — it keeps running for everyone else, and only an
+          administrator can remove it from the system entirely.</p>
           <div class="row2">
             <div class="field"><label>Company name</label><input id="wName" placeholder="e.g. Meridian Bank"></div>
             <div class="field"><label>Careers page URL</label><input id="wUrl" placeholder="https://careers.company.com"></div>
@@ -853,7 +856,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 let currentUser=null, currentSeeker=null;
-let matches=[], applications=[], customSources=[], documents=[];
+let matches=[], applications=[], customSources=[], customSourceOptOuts=[], documents=[];
 let state={mQ:'',mLoc:'all',view:'dashboard',selected:new Set()};
 
 function $(s){return document.querySelector(s)}
@@ -2036,10 +2039,27 @@ $('#docList').addEventListener('click', async (e)=>{
 });
 
 /* ================= WATCHED PAGES (job_custom_sources) ================= */
+// Watched pages are a single GLOBAL pool: anything added here immediately
+// feeds the whole pipeline for every job seeker. A user, however, only ever
+// sees the pages THEY added (RLS enforces this too), and "Remove" is a
+// per-user opt-out rather than a delete — the source keeps running for
+// everyone else and only a dispatch admin can remove it system-wide.
 async function loadCustomSources(){
-  if(!currentSeeker){ customSources=[]; return; }
-  const {data, error} = await sb.from('job_custom_sources').select('*').eq('job_seeker_id', currentSeeker.id).order('created_at',{ascending:false});
-  customSources = error ? [] : (data||[]);
+  if(!currentSeeker){ customSources=[]; customSourceOptOuts=[]; return; }
+
+  const [srcRes, optRes] = await Promise.all([
+    sb.from('job_custom_sources').select('*')
+      .eq('added_by_seeker_id', currentSeeker.id)
+      .order('created_at',{ascending:false}),
+    sb.from('job_custom_source_optouts').select('job_custom_source_id')
+      .eq('job_seeker_id', currentSeeker.id)
+  ]);
+
+  customSourceOptOuts = optRes.error ? [] : (optRes.data||[]).map(o=>o.job_custom_source_id);
+  const rows = srcRes.error ? [] : (srcRes.data||[]);
+  // Pages this seeker opted out of are gone from THEIR account, even though
+  // the row itself is still live for the rest of the pipeline.
+  customSources = rows.filter(w => !customSourceOptOuts.includes(w.id));
 }
 function renderWatch(){
   const el=$('#watchList');
@@ -2047,7 +2067,8 @@ function renderWatch(){
   el.innerHTML = customSources.map(w=>'<div class="lrow">'+
     '<div class="grow"><b>'+esc(w.company_name)+'</b><div class="sub2"><a href="'+esc(w.career_page_url)+'" target="_blank" rel="noopener">'+esc(w.career_page_url)+'</a></div></div>'+
     '<span class="pill teal">Search &amp; apply</span>'+
-    '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'">Remove</button></div>'
+    '<span class="pill gray" title="Added by you and shared with every job seeker">Shared</span>'+
+    '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'" title="Remove from your account only — this page keeps running for other users">Remove</button></div>'
   ).join('');
 }
 async function addWatch(){
@@ -2056,17 +2077,34 @@ async function addWatch(){
   if(!name || !url){ toast('Add both a company name and a URL','warn'); return; }
   if(!/^https?:\/\//i.test(url)){ toast('URL must start with http:// or https://','warn'); return; }
   const btn=$('#watchAddBtn'); btn.disabled=true;
-  const {error} = await sb.from('job_custom_sources').insert({job_seeker_id: currentSeeker.id, company_name: name, career_page_url: url});
+  // is_global/active are set explicitly: the insert policy requires both to be
+  // true, which is what makes a user-added page serve the entire system.
+  const {error} = await sb.from('job_custom_sources').insert({
+    job_seeker_id: currentSeeker.id,
+    added_by_seeker_id: currentSeeker.id,
+    company_name: name,
+    career_page_url: url,
+    is_global: true,
+    active: true
+  });
   btn.disabled=false;
   if(error){ toast('⚠ '+error.message,'err'); return; }
   $('#wName').value=''; $('#wUrl').value='';
-  toast('Watching '+name+'\u2019s careers page 👀','ok');
+  toast('Watching '+name+'\u2019s careers page 👀 — now shared with everyone','ok');
   await loadCustomSources(); renderWatch(); renderDashboard();
 }
 $('#watchList').addEventListener('click', async (e)=>{
   const btn=e.target.closest('button[data-remove-watch-id]');
   if(!btn) return;
-  await sb.from('job_custom_sources').delete().eq('id', btn.dataset.removeWatchId);
+  const id = btn.dataset.removeWatchId;
+  btn.disabled = true;
+  // Opt-out, not delete — the page stays active for every other job seeker.
+  const {error} = await sb.from('job_custom_source_optouts')
+    .upsert({job_seeker_id: currentSeeker.id, job_custom_source_id: id},
+            {onConflict: 'job_seeker_id,job_custom_source_id'});
+  btn.disabled = false;
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  toast('Removed from your account — still active for other users','ok');
   await loadCustomSources(); renderWatch(); renderDashboard();
 });
 

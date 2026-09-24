@@ -141,6 +141,16 @@ async function run() {
     return;
   }
 
+  // 2b. Per-seeker opt-outs. A user "removing" a watched page in the app does
+  // NOT delete it (only an admin can do that) — it records an opt-out here, so
+  // the source stops feeding THAT seeker while staying live for everyone else.
+  const { data: optOuts, error: oErr } = await supabase
+    .from('job_custom_source_optouts')
+    .select('job_seeker_id, job_custom_source_id');
+
+  if (oErr) console.warn('[discoverWatched] could not load opt-outs, continuing without them:', oErr.message);
+  const optedOut = new Set((optOuts || []).map(o => `${o.job_seeker_id}|${o.job_custom_source_id}`));
+
   const browser = await chromium.launch({ headless: true });
 
   for (const source of sources) {
@@ -205,6 +215,7 @@ async function run() {
     // 3. Loop through all seekers and match jobs
     for (const seeker of seekers) {
       if (seeker.api_provider === 'none') continue;
+      if (optedOut.has(`${seeker.id}|${source.id}`)) continue; // user removed it from their own account
       const override = aiMatch.resolveSeekerOverride(seeker);
       if (!aiMatch.isEnabled() && !override) continue;
 
