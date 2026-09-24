@@ -123,6 +123,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
     <div id="mainBox">
       <div class="tabs">
         <button class="tab active" data-tab="accounts" onclick="setTab('accounts')">Accounts</button>
+        <button class="tab" data-tab="companies" onclick="setTab('companies')">Companies</button>
         <button class="tab" data-tab="sources" onclick="setTab('sources')">Job Sources</button>
         <button class="tab" data-tab="settings" onclick="setTab('settings')">AI &amp; Agent settings</button>
       </div>
@@ -131,6 +132,29 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
       <section id="tab-accounts">
         <input class="search" id="acctSearch" placeholder="🔍 Search name or email…" oninput="renderAccounts()">
         <div class="card"><div id="acctList"></div></div>
+      </section>
+
+      <!-- COMPANIES (job_custom_sources — the global watched-page pool) -->
+      <section id="tab-companies" class="hidden">
+        <div class="card" style="margin-bottom:18px">
+          <h3 style="margin-bottom:6px;font-size:15px">➕ Add a company for the entire system</h3>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+            Every company here is scanned by the Agent and its jobs are matched and applied to for <b>all</b> active job seekers.
+            Users can add companies too — those appear in this list automatically. Only an admin can deactivate or delete a
+            company for the whole system; a user removing one only takes it out of their own account.</p>
+          <div class="row2">
+            <div class="field"><label>Company name</label><input type="text" id="newCoName" placeholder="e.g. Meridian Bank"></div>
+            <div class="field"><label>Careers page URL</label><input type="text" id="newCoUrl" placeholder="https://careers.company.com"></div>
+          </div>
+          <button class="btn btn-primary" id="addCoBtn" onclick="addCompany()">➕ Add company</button>
+        </div>
+        <div class="card">
+          <h3 style="margin-bottom:6px;font-size:15px">🏢 All companies in the pipeline</h3>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+            Deactivating stops the Agent scanning a company without losing its history. Deleting removes it permanently for everyone.</p>
+          <input class="search" id="coSearch" placeholder="🔍 Search company or URL…" oninput="renderCompanies()">
+          <div id="coList"></div>
+        </div>
       </section>
 
       <!-- JOB SOURCES -->
@@ -379,15 +403,123 @@ async function enterApp(){
   await loadAccounts();
   await loadSettings();
   await loadSources();
+  await loadCompanies();
 }
 
 function setTab(name){
-  ['accounts','sources','settings'].forEach(t=>{
+  ['accounts','companies','sources','settings'].forEach(t=>{
     document.querySelector('.tab[data-tab="'+t+'"]').classList.toggle('active', t===name);
     $('#tab-'+t).classList.toggle('hidden', t!==name);
   });
   if(name==='sources'){ loadSources(); }
+  if(name==='companies'){ loadCompanies(); }
 }
+
+/* ================= COMPANIES (job_custom_sources) =================
+   The global watched-page pool. Anything a user adds in their app lands
+   here automatically and immediately feeds every active seeker's search
+   and apply pipeline. A user can only opt their own account out of a
+   company (job_custom_source_optouts); removing it from the system is
+   admin-only, which is what this tab is for. */
+let companies=[], companyOptOuts=[];
+
+async function loadCompanies(){
+  const [coRes, optRes] = await Promise.all([
+    sb.from('job_custom_sources').select('*').order('created_at',{ascending:false}),
+    sb.from('job_custom_source_optouts').select('job_custom_source_id')
+  ]);
+  companies = coRes.error ? [] : (coRes.data||[]);
+  if(coRes.error) toast('⚠ Could not load companies: '+coRes.error.message,'err');
+  companyOptOuts = optRes.error ? [] : (optRes.data||[]);
+  renderCompanies();
+}
+
+function _seekerName(id){
+  if(!id) return null;
+  const a = accounts.find(x=>x.id===id);
+  return a ? (a.full_name || a.email || 'Unknown user') : 'Unknown user';
+}
+
+function renderCompanies(){
+  const el = $('#coList');
+  if(!el) return;
+  const q = ($('#coSearch')?.value || '').trim().toLowerCase();
+  const rows = companies.filter(c => !q ||
+    (c.company_name||'').toLowerCase().includes(q) ||
+    (c.career_page_url||'').toLowerCase().includes(q));
+
+  if(!rows.length){
+    el.innerHTML = '<div class="empty">'+(companies.length ? 'No companies match that search.' : 'No companies yet. Add one above — or wait for a user to add theirs.')+'</div>';
+    return;
+  }
+
+  el.innerHTML = rows.map(c=>{
+    const owner   = _seekerName(c.added_by_seeker_id);
+    const addedBy = owner ? 'Added by '+esc(owner) : 'Added by admin';
+    const checked = c.last_checked_at ? 'Last scanned '+new Date(c.last_checked_at).toLocaleString() : 'Never scanned yet';
+    const optOuts = companyOptOuts.filter(o=>o.job_custom_source_id===c.id).length;
+    return '<div style="display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
+      '<div style="flex:1;min-width:0">'+
+        '<b>'+esc(c.company_name)+'</b>'+
+        '<div style="font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">'+
+          '<a href="'+esc(c.career_page_url)+'" target="_blank" rel="noopener">'+esc(c.career_page_url)+'</a></div>'+
+        '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+' · '+esc(checked)+
+          (optOuts ? ' · '+optOuts+' user'+(optOuts>1?'s':'')+' opted out' : '')+'</div>'+
+      '</div>'+
+      '<span class="pill '+(c.active?'green':'gray')+'">'+(c.active?'Active':'Paused')+'</span>'+
+      '<button class="btn btn-sm" data-co-toggle="'+c.id+'">'+(c.active?'Pause':'Activate')+'</button>'+
+      '<button class="btn btn-sm btn-danger" data-co-delete="'+c.id+'">Delete</button>'+
+    '</div>';
+  }).join('');
+}
+
+async function addCompany(){
+  const name = ($('#newCoName').value || '').trim();
+  const url  = ($('#newCoUrl').value  || '').trim();
+  if(!name || !url){ toast('⚠ Company name and URL are both required','err'); return; }
+  if(!/^https?:\/\//i.test(url)){ toast('⚠ URL must start with http:// or https://','err'); return; }
+
+  const btn = $('#addCoBtn'); btn.disabled = true; btn.textContent = 'Adding…';
+  // Admin-added companies have no owning seeker — job_seeker_id and
+  // added_by_seeker_id stay null, which is how the list shows "Added by admin".
+  const {error} = await sb.from('job_custom_sources').insert({
+    company_name: name, career_page_url: url, is_global: true, active: true
+  });
+  btn.disabled = false; btn.textContent = '➕ Add company';
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+
+  $('#newCoName').value=''; $('#newCoUrl').value='';
+  toast('Added — the Agent will scan it for every job seeker','ok');
+  loadCompanies();
+}
+
+document.addEventListener('click', async (e)=>{
+  const toggleBtn = e.target.closest('[data-co-toggle]');
+  const deleteBtn = e.target.closest('[data-co-delete]');
+  if(!toggleBtn && !deleteBtn) return;
+
+  if(toggleBtn){
+    const c = companies.find(x=>x.id===toggleBtn.dataset.coToggle);
+    if(!c) return;
+    toggleBtn.disabled = true;
+    const {error} = await sb.from('job_custom_sources').update({active: !c.active}).eq('id', c.id);
+    toggleBtn.disabled = false;
+    if(error){ toast('⚠ '+error.message,'err'); return; }
+    toast(c.active ? 'Paused — the Agent will stop scanning it' : 'Activated for every job seeker','ok');
+    loadCompanies();
+    return;
+  }
+
+  const c = companies.find(x=>x.id===deleteBtn.dataset.coDelete);
+  if(!c) return;
+  if(!confirm('Delete "'+c.company_name+'" for the ENTIRE system?\n\nNo user will be able to get jobs from this page again. Pause it instead if you only want to stop scanning for now.')) return;
+  deleteBtn.disabled = true;
+  const {error} = await sb.from('job_custom_sources').delete().eq('id', c.id);
+  deleteBtn.disabled = false;
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  toast('Deleted for the entire system','ok');
+  loadCompanies();
+});
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
 let appSettings=null;
