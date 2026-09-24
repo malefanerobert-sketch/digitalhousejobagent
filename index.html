@@ -2077,20 +2077,23 @@ async function addWatch(){
   if(!name || !url){ toast('Add both a company name and a URL','warn'); return; }
   if(!/^https?:\/\//i.test(url)){ toast('URL must start with http:// or https://','warn'); return; }
   const btn=$('#watchAddBtn'); btn.disabled=true;
-  // is_global/active are set explicitly: the insert policy requires both to be
-  // true, which is what makes a user-added page serve the entire system.
-  const {error} = await sb.from('job_custom_sources').insert({
-    job_seeker_id: currentSeeker.id,
-    added_by_seeker_id: currentSeeker.id,
-    company_name: name,
-    career_page_url: url,
-    is_global: true,
-    active: true
-  });
+  // Goes through add_watched_company() rather than a plain insert: a careers
+  // page exists ONCE for the whole system, so the function either creates it,
+  // or - if it's already in the pool - clears this seeker's opt-out so adding
+  // it back restores it instead of creating a duplicate company.
+  const {data, error} = await sb.rpc('add_watched_company', {p_name: name, p_url: url});
   btn.disabled=false;
   if(error){ toast('⚠ '+error.message,'err'); return; }
+
+  const msg = {
+    created:          'Watching '+name+'\u2019s careers page 👀 — now shared with everyone',
+    restored:         'Added back — the Agent will search '+name+' for you again',
+    already_watching: 'Already being watched — the Agent is searching this page for you',
+    reactivated:      'This page is paused by an administrator, so it isn\u2019t being searched right now'
+  }[data] || 'Saved';
+  toast(msg, data === 'reactivated' ? 'warn' : 'ok');
+
   $('#wName').value=''; $('#wUrl').value='';
-  toast('Watching '+name+'\u2019s careers page 👀 — now shared with everyone','ok');
   await loadCustomSources(); renderWatch(); renderDashboard();
 }
 $('#watchList').addEventListener('click', async (e)=>{

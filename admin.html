@@ -486,7 +486,14 @@ async function addCompany(){
     company_name: name, career_page_url: url, is_global: true, active: true
   });
   btn.disabled = false; btn.textContent = '➕ Add company';
-  if(error){ toast('⚠ '+error.message,'err'); return; }
+  if(error){
+    // A careers page exists once for the whole system (unique index on the
+    // normalised URL) — a duplicate add is a clash, not a crash.
+    const dupe = error.code === '23505' || /duplicate key|unique/i.test(error.message||'');
+    toast(dupe ? '⚠ That careers page is already in the pipeline' : '⚠ '+error.message, 'err');
+    if(dupe) loadCompanies();
+    return;
+  }
 
   $('#newCoName').value=''; $('#newCoUrl').value='';
   toast('Added — the Agent will scan it for every job seeker','ok');
