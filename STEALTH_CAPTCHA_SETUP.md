@@ -1,118 +1,99 @@
 # Stealth Plugins + 2Captcha Setup Guide
 
-## What Changed
+## What This Gives You
 
-Your `apply.js` worker now has two new features:
+Your `apply.js` worker has two features that raise the success rate of automated job applications:
 
-1. **Stealth Plugins** — Makes Playwright look like a real human browser, avoiding basic anti-bot detection
-2. **2Captcha Integration** — Automatically solves reCAPTCHA, hCaptcha, and other CAPTCHAs
+1. **Stealth Plugins** — makes Playwright look like a real human browser, avoiding basic anti-bot detection.
+2. **2Captcha Integration** — automatically solves reCAPTCHA v2/v3, hCaptcha, and Cloudflare Turnstile.
 
 ## Installation
 
-Run this in your worker directory:
+Run this in the worker directory (or let Railway/Nixpacks do it on deploy):
 
 ```bash
 npm install
 ```
 
-This installs:
-- `playwright-extra` — Playwright with stealth plugins support
-- `puppeteer-extra-plugin-stealth` — The stealth evasion techniques
-- `2captcha-nodejs` — 2Captcha API client
+This installs (all pinned in `package.json`):
+
+- `playwright-extra` — Playwright with plugin support
+- `puppeteer-extra-plugin-stealth` — anti-fingerprinting evasion techniques
+- `2captcha` — the real 2Captcha API client (**not** `2captcha-nodejs`, which is a fake/empty package on npm — do not install it)
 
 ## Configuration
 
-### 1. Get a 2Captcha Account (Optional but Recommended)
+### 1. Create a 2Captcha *customer* account
 
-Visit https://2captcha.com and sign up:
-- **Free tier**: Available with limited speed, good for testing
-- **Paid**: ~$0.05-0.10 per CAPTCHA solved, paid as you use
+Sign up at [2captcha.com](https://2captcha.com). At the signup step choose the **Customer / Software developer** option (not "Worker / earn money" — that is the opposite side of the marketplace and has no API access).
 
-### 2. Add Your 2Captcha API Key to `.env`
+Fund the account at [2captcha.com/pay](https://2captcha.com/pay):
+
+- Minimum deposit: $3.
+- Cost per solve: ~$0.001 for reCAPTCHA v2, ~$0.002 for v3 / hCaptcha / Turnstile, higher for image challenges.
+- From South Africa the reliable payment methods are card (may need to enable international purchases at your bank) or **USDT-TRC20** bought on Luno/VALR.
+
+### 2. Add the API key to environment variables
+
+Copy your key from [2captcha.com/enterpage](https://2captcha.com/enterpage) (top of the page). Set it as:
 
 ```env
 CAPTCHA_API_KEY=your_2captcha_api_key_here
 ```
 
-If you don't have a key, the agent will still work:
-- **Stealth plugins** will bypass most job sites without triggering CAPTCHAs
-- If a CAPTCHA does appear and you have no API key, it will be reported as "needs manual action"
+- **Local dev:** put it in `.env`.
+- **Railway:** open the service → Variables → add `CAPTCHA_API_KEY`. Railway auto-redeploys.
 
-### 3. No Changes Needed Elsewhere
+### 3. That's it
 
-All your existing code (Greenhouse, Lever, SmartRecruiters, Ashby, Workable, AI-agent) now automatically:
-- Use the stealth browser
-- Detect CAPTCHAs
-- Attempt to solve them
-- Report if solving fails
+Every existing code path (Greenhouse, Lever, SmartRecruiters, Ashby, Workable, AI agent) already routes through `captchaSolver.js` — no per-integration changes needed.
 
-## How It Works
+## Runtime Behavior
 
-When applying to a job:
+At worker boot you should see one of these lines in the log:
 
-1. **Browser launches** with stealth plugins → looks like a real human browser
-2. **Form gets filled** (name, email, resume, etc.)
-3. **CAPTCHA detection** → checks if a reCAPTCHA/hCaptcha is present
-4. **Auto-solve** → if present, attempts to solve it automatically using 2Captcha
-5. **Submit** → if CAPTCHA solved (or none present), submits the form
-6. **Fallback** → if CAPTCHA can't be solved, logs it as "needs manual action"
+- `[captcha] enabled, balance $3.000` — key is valid, funds available.
+- `[captcha] ⚠ enabled but balance is $0.000 — solves WILL fail until you top up …` — key valid, out of funds.
+- `[captcha] CAPTCHA_API_KEY not set — solver disabled …` — key missing, applications will still run but CAPTCHA-guarded ones will log as `captcha_blocked`.
 
-## Cost Estimate
+Per application, when a CAPTCHA is hit you should see:
 
-For 100 job applications per month:
-- **Stealth plugins**: Free
-- **2Captcha**: $0-5 (depending on how many CAPTCHAs you hit; many job sites don't use them)
+```
+[captcha] detected recaptcha_v2 in iframe
+[captcha] solving recaptcha_v2 (sitekey 6Le-wvkS…)
+[captcha] ✔ solved
+[captcha] token injected (hiddenInput=true, callback=true)
+[apply] ✔ submitted
+```
 
-Typical job sites and CAPTCHA frequency:
-- LinkedIn: 2Captcha needed ~30% of time
-- Indeed: ~5% of time
-- CareerJunction: ~10% of time
-- Pnet: ~5% of time
-- Greenhouse/Lever/others: <1% of time
+If injection reports `callback=false`, the site does not use a `data-callback` handler — usually harmless, submission still works.
 
-## Testing
+## Approximate CAPTCHA Frequency by Site
 
-To test if it's working:
+| Site | reCAPTCHA/hCaptcha hit rate |
+| --- | --- |
+| LinkedIn Easy Apply | ~30% |
+| Indeed | ~5% |
+| CareerJunction | ~10% |
+| Pnet | ~5% |
+| Greenhouse / Lever / most ATS | <1% |
+| Cloudflare-fronted boards | ~15% (mostly Turnstile) |
 
-1. Deploy the updated `apply.js`
-2. Run a manual application to a job site that uses CAPTCHAs (LinkedIn)
-3. Check logs for:
-   - `[apply] agent is enabled...` → agent running
-   - `[captcha] detected recaptcha_v2` → CAPTCHA found
-   - `[captcha] ✔ solved successfully` → CAPTCHA solved
-   - `[apply] ✔ submitted` → application successful
-
-If you hit CAPTCHAs without an API key:
-- Log will show: `[captcha] 2Captcha API key not configured — skipping solve`
-- Status: `captcha_blocked` in your database
+For 100 applications a month, expect **$0-5** in 2Captcha spend.
 
 ## Troubleshooting
 
-### "Tool 'file_upload' failed" or deployment issues?
+### CAPTCHAs report as blocked even with a key set
 
-Use the password-protected ZIP workaround:
-1. Package your worker code as a ZIP
-2. Upload via your hosting provider's dashboard
-3. Password: dispatch2026
+1. Check the boot log for `[captcha] enabled, balance …`. If it says `disabled`, the env var did not reach the process — verify in Railway Variables and redeploy.
+2. Check your 2Captcha dashboard has balance.
+3. Watch for `[captcha] no CAPTCHA detected` right before submission on a site you *know* has one — that usually means the widget renders after our detection runs. Increase `MIN_ACTION_DELAY_MS` in `.env` (e.g. `6000`).
 
-### CAPTCHA solving fails repeatedly?
+### Solve succeeds but submit button stays disabled
 
-1. Check your 2Captcha account has enough balance
-2. Verify `CAPTCHA_API_KEY` is correct in `.env`
-3. Some CAPTCHAs are deliberately difficult; they'll fail ~10% of the time even on real humans
-4. The system logs these as `needs_manual_action` for you to handle manually
+The site is using a `data-callback` we did not catch. Grab the page HTML, find the widget's `data-callback="fnName"`, and confirm `[captcha] token injected (…, callback=true)` is in the log. If `callback=false`, tell me the site and I will add the specific hook.
 
-### Stealth plugins not working?
+### Getting blocked despite stealth plugins
 
-If you're still getting blocked despite stealth plugins:
-1. Try increasing `MIN_ACTION_DELAY_MS` and `MAX_ACTION_DELAY_MS` in `.env` (e.g., 5000-15000)
-2. Some advanced sites require genuine residential IP rotation (beyond this implementation)
-
-## Next Steps
-
-After deployment, monitor:
-- How many CAPTCHAs you're actually hitting
-- CAPTCHA solve success rate
-- Total cost (if using paid 2Captcha tier)
-
-Adjust as needed!
+1. Raise `MIN_ACTION_DELAY_MS` / `MAX_ACTION_DELAY_MS` (`5000` / `15000` is a safer default for aggressive sites).
+2. Some enterprise sites (Kasada, PerimeterX, DataDome) require residential proxy rotation — beyond the scope of this setup.
