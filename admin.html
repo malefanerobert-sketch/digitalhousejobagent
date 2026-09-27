@@ -744,9 +744,9 @@ async function loadReport(){
   // Pull all non-terminal-success matches with joined seeker + application_log for the error text
   const {data, error} = await sb
     .from('job_matches')
-    .select('id, job_title, company_name, job_url, status, applied_at, discovered_at, job_seekers(id, full_name, dedicated_email), application_log(result, notes, attempted_at)')
+    .select('id, job_title, company_name, job_url, status, decided_at, discovered_at, job_seekers(id, full_name, dedicated_email), application_log(result, notes, attempted_at)')
     .in('status', ['failed','needs_manual_action','captcha_blocked'])
-    .order('applied_at', {ascending:false, nullsFirst:false})
+    .order('decided_at', {ascending:false, nullsFirst:false})
     .limit(500);
   if(error){
     if(el) el.innerHTML = '<div class="empty">⚠ '+esc(error.message)+'</div>';
@@ -797,7 +797,7 @@ function renderReport(){
     const logs = (r.application_log||[]).slice().sort((a,b)=> new Date(b.attempted_at||0) - new Date(a.attempted_at||0));
     const lastLog = logs[0];
     const errText = lastLog?.notes || '(no error notes)';
-    const when = r.applied_at || r.discovered_at;
+    const when = r.decided_at || r.discovered_at;
     const statusPill = r.status === 'failed' ? '<span class="pill red">Failed</span>'
       : r.status === 'captcha_blocked' ? '<span class="pill amber">CAPTCHA</span>'
       : '<span class="pill amber">Manual action</span>';
