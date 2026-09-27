@@ -1,0 +1,51 @@
+# Auto-deploy admin.html + index.html to GitHub Pages on every push to main.
+# The `enablement: true` flag on configure-pages turns Pages on for this
+# repo the first time this workflow runs — no manual UI click needed.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only run one deploy at a time; cancel in-progress if a newer push arrives.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages (auto-enables Pages on first run)
+        uses: actions/configure-pages@v4
+        with:
+          enablement: true
+
+      # Only ship the two frontend HTML files — the Node worker files
+      # (apply.js, discoverAuto.js, etc.) are already public in the repo
+      # anyway, but there's no reason to serve them at the site URL.
+      - name: Prepare site directory
+        run: |
+          mkdir -p _site
+          cp index.html admin.html _site/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
