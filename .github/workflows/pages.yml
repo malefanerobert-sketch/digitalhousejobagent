@@ -1,6 +1,5 @@
 # Auto-deploy admin.html + index.html to GitHub Pages on every push to main.
-# The `enablement: true` flag on configure-pages turns Pages on for this
-# repo the first time this workflow runs — no manual UI click needed.
+# Pages must be enabled in repo Settings → Pages → Source = GitHub Actions.
 name: Deploy to GitHub Pages
 
 on:
@@ -28,14 +27,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Pages (auto-enables Pages on first run)
+      - name: Setup Pages
         uses: actions/configure-pages@v4
-        with:
-          enablement: true
 
       # Only ship the two frontend HTML files — the Node worker files
-      # (apply.js, discoverAuto.js, etc.) are already public in the repo
-      # anyway, but there's no reason to serve them at the site URL.
+      # (apply.js, discoverAuto.js, etc.) stay in the repo but aren't
+      # served at the site URL.
       - name: Prepare site directory
         run: |
           mkdir -p _site
