@@ -853,7 +853,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 let currentUser=null, currentSeeker=null;
-let matches=[], applications=[], customSources=[], documents=[];
+let matches=[], applications=[], customSources=[], customSourceOptOuts=[], documents=[];
 let state={mQ:'',mLoc:'all',view:'dashboard',selected:new Set()};
 
 function $(s){return document.querySelector(s)}
@@ -2036,10 +2036,25 @@ $('#docList').addEventListener('click', async (e)=>{
 });
 
 /* ================= WATCHED PAGES (job_custom_sources) ================= */
+// Watched pages are a single GLOBAL pool: anything added here immediately
+// feeds the whole pipeline for every job seeker. A user, however, only ever
+// sees the pages THEY added (RLS enforces this too), and "Remove" is a
+// per-user opt-out rather than a delete — the source keeps running for
+// everyone else and only a dispatch admin can remove it system-wide.
 async function loadCustomSources(){
-  if(!currentSeeker){ customSources=[]; return; }
-  const {data, error} = await sb.from('job_custom_sources').select('*').eq('job_seeker_id', currentSeeker.id).order('created_at',{ascending:false});
-  customSources = error ? [] : (data||[]);
+  if(!currentSeeker){ customSources=[]; customSourceOptOuts=[]; return; }
+
+  // The watched list is driven by MEMBERSHIP, not ownership: adding a page
+  // someone else already added joins you to that single shared row, so it
+  // appears here and you can remove it again like any other.
+  const {data, error} = await sb
+    .from('job_custom_source_members')
+    .select('created_at, job_custom_sources(*)')
+    .eq('job_seeker_id', currentSeeker.id)
+    .order('created_at',{ascending:false});
+
+  customSources = error ? [] : (data||[]).map(m=>m.job_custom_sources).filter(Boolean);
+  customSourceOptOuts = [];
 }
 function renderWatch(){
   const el=$('#watchList');
@@ -2047,7 +2062,11 @@ function renderWatch(){
   el.innerHTML = customSources.map(w=>'<div class="lrow">'+
     '<div class="grow"><b>'+esc(w.company_name)+'</b><div class="sub2"><a href="'+esc(w.career_page_url)+'" target="_blank" rel="noopener">'+esc(w.career_page_url)+'</a></div></div>'+
     '<span class="pill teal">Search &amp; apply</span>'+
-    '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'">Remove</button></div>'
+    '<span class="pill gray" title="'+(w.added_by_seeker_id===currentSeeker.id
+      ? 'You added this page — it is shared with every job seeker'
+      : 'Another job seeker added this page first — you are watching the same one')+'">'+
+      (w.added_by_seeker_id===currentSeeker.id ? 'Shared by you' : 'Shared')+'</span>'+
+    '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'" title="Remove from your account only — this page keeps running for other users">Remove</button></div>'
   ).join('');
 }
 async function addWatch(){
@@ -2056,17 +2075,45 @@ async function addWatch(){
   if(!name || !url){ toast('Add both a company name and a URL','warn'); return; }
   if(!/^https?:\/\//i.test(url)){ toast('URL must start with http:// or https://','warn'); return; }
   const btn=$('#watchAddBtn'); btn.disabled=true;
-  const {error} = await sb.from('job_custom_sources').insert({job_seeker_id: currentSeeker.id, company_name: name, career_page_url: url});
+  // Goes through add_watched_company() rather than a plain insert: a careers
+  // page exists ONCE for the whole system, so the function either creates it,
+  // or - if it's already in the pool - clears this seeker's opt-out so adding
+  // it back restores it instead of creating a duplicate company.
+  const {data, error} = await sb.rpc('add_watched_company', {p_name: name, p_url: url});
   btn.disabled=false;
   if(error){ toast('⚠ '+error.message,'err'); return; }
+
+  const msg = {
+    created:          'Watching '+name+'\u2019s careers page 👀 — now shared with everyone',
+    joined:           'Already in the pipeline — added to your watched pages',
+    restored:         'Added back — the Agent will search this page for you again',
+    already_watching: 'You\u2019re already watching this page',
+    paused:           'Added, but an administrator has paused this page so it isn\u2019t being searched right now'
+  }[data] || 'Saved';
+  toast(msg, data === 'paused' ? 'warn' : 'ok');
+
   $('#wName').value=''; $('#wUrl').value='';
-  toast('Watching '+name+'\u2019s careers page 👀','ok');
   await loadCustomSources(); renderWatch(); renderDashboard();
 }
 $('#watchList').addEventListener('click', async (e)=>{
   const btn=e.target.closest('button[data-remove-watch-id]');
   if(!btn) return;
-  await sb.from('job_custom_sources').delete().eq('id', btn.dataset.removeWatchId);
+  const id = btn.dataset.removeWatchId;
+  btn.disabled = true;
+  // Opt-out, not delete — the page stays active for every other job seeker.
+  // The membership row goes too, which is what takes it out of this list;
+  // adding the URL again re-joins and clears the opt-out.
+  const {error} = await sb.from('job_custom_source_optouts')
+    .upsert({job_seeker_id: currentSeeker.id, job_custom_source_id: id},
+            {onConflict: 'job_seeker_id,job_custom_source_id'});
+  if(!error){
+    await sb.from('job_custom_source_members').delete()
+      .eq('job_seeker_id', currentSeeker.id)
+      .eq('job_custom_source_id', id);
+  }
+  btn.disabled = false;
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  toast('Removed from your account — still active for other users','ok');
   await loadCustomSources(); renderWatch(); renderDashboard();
 });
 
@@ -2136,6 +2183,5 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   }
 })();
 </script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"f0f03d0605bf45f1a3b17cf7d5e6861f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>
