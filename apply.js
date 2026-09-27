@@ -824,6 +824,34 @@ async function run() {
     const blockedLocations = m.job_seekers?.blocked_locations || [];
     const isBlockedLocation = blockedLocations.some(loc => (m.location || '').toLowerCase().includes(loc.toLowerCase()));
     if (isBlockedLocation) return false;
+
+    // APPLY-SCOPE LOCATION FILTER
+    // ---------------------------
+    // Discovery is intentionally national — every match a seeker could care
+    // about is still saved to job_matches and shown in their Matches view.
+    // Apply-scope, on the other hand, is what the seeker actually picked in
+    // Profile > Preferred locations: if they narrowed it to specific cities,
+    // the agent must NOT auto-apply to jobs outside that set (matches from
+    // other cities stay pending and simply aren't attempted).
+    //
+    // Sentinel handling: [] or ['All locations'] both mean "no narrowing —
+    // apply anywhere". Any other array is a real narrow list, matched with a
+    // case-insensitive substring test so "Johannesburg" catches
+    // "Johannesburg, ZA" / "Johannesburg, Gauteng" / etc. When the seeker
+    // later switches back to All locations, the previously-skipped rows are
+    // still status='pending' (this filter never mutates status), so they get
+    // picked up on the very next apply run — that IS the "revisit past
+    // matches" behaviour Preferred locations promises in the UI.
+    const preferredLocs = m.job_seekers?.preferred_locations || [];
+    const scopeIsAll =
+      preferredLocs.length === 0 ||
+      (preferredLocs.length === 1 && preferredLocs[0] === 'All locations');
+    if (!scopeIsAll) {
+      const matchLoc = (m.location || '').toLowerCase();
+      const inScope = preferredLocs.some(loc => matchLoc.includes(String(loc).toLowerCase()));
+      if (!inScope) return false;
+    }
+
     if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
   }).slice(0, MAX_PER_RUN);
