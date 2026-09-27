@@ -123,7 +123,6 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
     <div id="mainBox">
       <div class="tabs">
         <button class="tab active" data-tab="accounts" onclick="setTab('accounts')">Accounts</button>
-        <button class="tab" data-tab="companies" onclick="setTab('companies')">Companies</button>
         <button class="tab" data-tab="sources" onclick="setTab('sources')">Job Sources</button>
         <button class="tab" data-tab="settings" onclick="setTab('settings')">AI &amp; Agent settings</button>
       </div>
@@ -132,29 +131,6 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
       <section id="tab-accounts">
         <input class="search" id="acctSearch" placeholder="🔍 Search name or email…" oninput="renderAccounts()">
         <div class="card"><div id="acctList"></div></div>
-      </section>
-
-      <!-- COMPANIES (job_custom_sources — the global watched-page pool) -->
-      <section id="tab-companies" class="hidden">
-        <div class="card" style="margin-bottom:18px">
-          <h3 style="margin-bottom:6px;font-size:15px">➕ Add a company for the entire system</h3>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Every company here is scanned by the Agent and its jobs are matched and applied to for <b>all</b> active job seekers.
-            Users can add companies too — those appear in this list automatically. Only an admin can deactivate or delete a
-            company for the whole system; a user removing one only takes it out of their own account.</p>
-          <div class="row2">
-            <div class="field"><label>Company name</label><input type="text" id="newCoName" placeholder="e.g. Meridian Bank"></div>
-            <div class="field"><label>Careers page URL</label><input type="text" id="newCoUrl" placeholder="https://careers.company.com"></div>
-          </div>
-          <button class="btn btn-primary" id="addCoBtn" onclick="addCompany()">➕ Add company</button>
-        </div>
-        <div class="card">
-          <h3 style="margin-bottom:6px;font-size:15px">🏢 All companies in the pipeline</h3>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Deactivating stops the Agent scanning a company without losing its history. Deleting removes it permanently for everyone.</p>
-          <input class="search" id="coSearch" placeholder="🔍 Search company or URL…" oninput="renderCompanies()">
-          <div id="coList"></div>
-        </div>
       </section>
 
       <!-- JOB SOURCES -->
@@ -251,8 +227,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           <div class="row2">
             <div class="field"><label>AI provider</label>
               <select id="setProvider"><option value="none">None — Agent disabled app-wide</option>
-                <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
-                <option value="google">Google (Gemini)</option></select></div>
+                <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option></select></div>
             <div class="field"><label>API key</label><input type="password" id="setKey" placeholder="sk-…"></div>
           </div>
           <div class="field">
@@ -404,136 +379,15 @@ async function enterApp(){
   await loadAccounts();
   await loadSettings();
   await loadSources();
-  await loadCompanies();
 }
 
 function setTab(name){
-  ['accounts','companies','sources','settings'].forEach(t=>{
+  ['accounts','sources','settings'].forEach(t=>{
     document.querySelector('.tab[data-tab="'+t+'"]').classList.toggle('active', t===name);
     $('#tab-'+t).classList.toggle('hidden', t!==name);
   });
   if(name==='sources'){ loadSources(); }
-  if(name==='companies'){ loadCompanies(); }
 }
-
-/* ================= COMPANIES (job_custom_sources) =================
-   The global watched-page pool. Anything a user adds in their app lands
-   here automatically and immediately feeds every active seeker's search
-   and apply pipeline. A user can only opt their own account out of a
-   company (job_custom_source_optouts); removing it from the system is
-   admin-only, which is what this tab is for. */
-let companies=[], companyOptOuts=[], companyMembers=[];
-
-async function loadCompanies(){
-  const [coRes, optRes, memRes] = await Promise.all([
-    sb.from('job_custom_sources').select('*').order('created_at',{ascending:false}),
-    sb.from('job_custom_source_optouts').select('job_custom_source_id'),
-    sb.from('job_custom_source_members').select('job_custom_source_id')
-  ]);
-  companies = coRes.error ? [] : (coRes.data||[]);
-  if(coRes.error) toast('⚠ Could not load companies: '+coRes.error.message,'err');
-  companyOptOuts = optRes.error ? [] : (optRes.data||[]);
-  companyMembers = memRes.error ? [] : (memRes.data||[]);
-  renderCompanies();
-}
-
-function _seekerName(id){
-  if(!id) return null;
-  const a = accounts.find(x=>x.id===id);
-  return a ? (a.full_name || a.email || 'Unknown user') : 'Unknown user';
-}
-
-function renderCompanies(){
-  const el = $('#coList');
-  if(!el) return;
-  const q = ($('#coSearch')?.value || '').trim().toLowerCase();
-  const rows = companies.filter(c => !q ||
-    (c.company_name||'').toLowerCase().includes(q) ||
-    (c.career_page_url||'').toLowerCase().includes(q));
-
-  if(!rows.length){
-    el.innerHTML = '<div class="empty">'+(companies.length ? 'No companies match that search.' : 'No companies yet. Add one above — or wait for a user to add theirs.')+'</div>';
-    return;
-  }
-
-  el.innerHTML = rows.map(c=>{
-    const owner   = _seekerName(c.added_by_seeker_id);
-    const addedBy = owner ? 'Added by '+esc(owner) : 'Added by admin';
-    const checked = c.last_checked_at ? 'Last scanned '+new Date(c.last_checked_at).toLocaleString() : 'Never scanned yet';
-    const optOuts = companyOptOuts.filter(o=>o.job_custom_source_id===c.id).length;
-    // Any seeker can add a page someone else already added — they join the
-    // same row rather than creating a duplicate, so this is the real reach.
-    const watchers = companyMembers.filter(m=>m.job_custom_source_id===c.id).length;
-    const also = watchers > 1 ? ' · also added by '+(watchers-1)+' other user'+(watchers-1>1?'s':'') : '';
-    return '<div style="display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
-      '<div style="flex:1;min-width:0">'+
-        '<b>'+esc(c.company_name)+'</b>'+
-        '<div style="font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">'+
-          '<a href="'+esc(c.career_page_url)+'" target="_blank" rel="noopener">'+esc(c.career_page_url)+'</a></div>'+
-        '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+also+' · '+esc(checked)+
-          (optOuts ? ' · '+optOuts+' user'+(optOuts>1?'s':'')+' opted out' : '')+'</div>'+
-      '</div>'+
-      '<span class="pill '+(c.active?'green':'gray')+'">'+(c.active?'Active':'Paused')+'</span>'+
-      '<button class="btn btn-sm" data-co-toggle="'+c.id+'">'+(c.active?'Pause':'Activate')+'</button>'+
-      '<button class="btn btn-sm btn-danger" data-co-delete="'+c.id+'">Delete</button>'+
-    '</div>';
-  }).join('');
-}
-
-async function addCompany(){
-  const name = ($('#newCoName').value || '').trim();
-  const url  = ($('#newCoUrl').value  || '').trim();
-  if(!name || !url){ toast('⚠ Company name and URL are both required','err'); return; }
-  if(!/^https?:\/\//i.test(url)){ toast('⚠ URL must start with http:// or https://','err'); return; }
-
-  const btn = $('#addCoBtn'); btn.disabled = true; btn.textContent = 'Adding…';
-  // Admin-added companies have no owning seeker — job_seeker_id and
-  // added_by_seeker_id stay null, which is how the list shows "Added by admin".
-  const {error} = await sb.from('job_custom_sources').insert({
-    company_name: name, career_page_url: url, is_global: true, active: true
-  });
-  btn.disabled = false; btn.textContent = '➕ Add company';
-  if(error){
-    // A careers page exists once for the whole system (unique index on the
-    // normalised URL) — a duplicate add is a clash, not a crash.
-    const dupe = error.code === '23505' || /duplicate key|unique/i.test(error.message||'');
-    toast(dupe ? '⚠ That careers page is already in the pipeline' : '⚠ '+error.message, 'err');
-    if(dupe) loadCompanies();
-    return;
-  }
-
-  $('#newCoName').value=''; $('#newCoUrl').value='';
-  toast('Added — the Agent will scan it for every job seeker','ok');
-  loadCompanies();
-}
-
-document.addEventListener('click', async (e)=>{
-  const toggleBtn = e.target.closest('[data-co-toggle]');
-  const deleteBtn = e.target.closest('[data-co-delete]');
-  if(!toggleBtn && !deleteBtn) return;
-
-  if(toggleBtn){
-    const c = companies.find(x=>x.id===toggleBtn.dataset.coToggle);
-    if(!c) return;
-    toggleBtn.disabled = true;
-    const {error} = await sb.from('job_custom_sources').update({active: !c.active}).eq('id', c.id);
-    toggleBtn.disabled = false;
-    if(error){ toast('⚠ '+error.message,'err'); return; }
-    toast(c.active ? 'Paused — the Agent will stop scanning it' : 'Activated for every job seeker','ok');
-    loadCompanies();
-    return;
-  }
-
-  const c = companies.find(x=>x.id===deleteBtn.dataset.coDelete);
-  if(!c) return;
-  if(!confirm('Delete "'+c.company_name+'" for the ENTIRE system?\n\nNo user will be able to get jobs from this page again. Pause it instead if you only want to stop scanning for now.')) return;
-  deleteBtn.disabled = true;
-  const {error} = await sb.from('job_custom_sources').delete().eq('id', c.id);
-  deleteBtn.disabled = false;
-  if(error){ toast('⚠ '+error.message,'err'); return; }
-  toast('Deleted for the entire system','ok');
-  loadCompanies();
-});
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
 let appSettings=null;
@@ -719,29 +573,9 @@ function renderAccounts(){
             '<select data-discovery-mode="'+a.id+'"><option value="manual">Manual (watched pages only)</option><option value="auto">Automatic (job board search only)</option><option value="both">Both manual + automatic</option></select>'+
           '</div>'+
         '</div>'+
-        '<div id="userKeyField-'+a.id+'" style="display:none">'+
-          '<div class="field">'+
-            '<label>Job-board API key (Adzuna)</label>'+
-            '<input type="password" data-user-api-key="'+a.id+'" placeholder="their Adzuna key">'+
-          '</div>'+
-          // The AI key is a SEPARATE credential from the job-board key above:
-          // it drives match scoring, watched-page reading and application
-          // drafting, and is what resolveSeekerOverride() actually reads.
-          '<div class="row2">'+
-            '<div class="field">'+
-              '<label>AI provider (this user)</label>'+
-              '<select data-user-ai-provider="'+a.id+'">'+
-                '<option value="">Use the shared JobAgent key</option>'+
-                '<option value="anthropic">Anthropic (Claude)</option>'+
-                '<option value="openai">OpenAI (GPT)</option>'+
-                '<option value="google">Google (Gemini)</option>'+
-              '</select>'+
-            '</div>'+
-            '<div class="field">'+
-              '<label>AI API key (this user)</label>'+
-              '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza…">'+
-            '</div>'+
-          '</div>'+
+        '<div class="field" id="userKeyField-'+a.id+'" style="display:none">'+
+          '<label>User API Key (paste their key)</label>'+
+          '<input type="password" data-user-api-key="'+a.id+'" placeholder="sk-… or their provider key">'+
         '</div>'+
         '<div class="field">'+
           '<label><input type="checkbox" data-remote-only="'+a.id+'" style="width:auto;margin-right:6px"> Remote jobs only</label>'+
@@ -835,16 +669,6 @@ function renderAccounts(){
     if(acct?.api_key){ inp.value=acct.api_key; }
   });
 
-  el.querySelectorAll('[data-user-ai-provider]').forEach(sel=>{
-    const acct=accounts.find(a=>a.id===sel.dataset.userAiProvider);
-    sel.value = acct?.ai_provider || '';
-  });
-
-  el.querySelectorAll('[data-user-ai-key]').forEach(inp=>{
-    const acct=accounts.find(a=>a.id===inp.dataset.userAiKey);
-    if(acct?.ai_api_key){ inp.value=acct.ai_api_key; }
-  });
-
   el.querySelectorAll('[data-remote-only]').forEach(chk=>{
     const id=chk.dataset.remoteOnly;
     const acct=accounts.find(a=>a.id===id);
@@ -857,23 +681,13 @@ function renderAccounts(){
       const apiProvider = $(`[data-api-provider="${id}"]`).value;
       const discoveryMode = $(`[data-discovery-mode="${id}"]`).value;
       const userApiKey = $(`[data-user-api-key="${id}"]`).value.trim() || null;
-      const userAiProvider = $(`[data-user-ai-provider="${id}"]`).value || null;
-      const userAiKey = $(`[data-user-ai-key="${id}"]`).value.trim() || null;
       const remoteOnly = $(`[data-remote-only="${id}"]`).checked;
-
-      // Only keep a per-user AI credential when the account is on its own API
-      // AND both halves are present — a provider with no key (or vice versa)
-      // makes resolveSeekerOverride() fall back to the shared key anyway, so
-      // storing half of it would just be misleading.
-      const keepAi = apiProvider==='user' && userAiProvider && userAiKey;
 
       btn.disabled=true;
       btn.textContent='Saving…';
       const {error} = await sb.from('job_seekers').update({
         api_provider: apiProvider,
         api_key: apiProvider==='user' ? userApiKey : null,
-        ai_provider: keepAi ? userAiProvider : null,
-        ai_api_key:  keepAi ? userAiKey : null,
         discovery_mode: discoveryMode,
         remote_only: remoteOnly,
         updated_at: new Date().toISOString()
@@ -1004,5 +818,6 @@ function renderSources(){
   if(session) await enterApp();
 })();
 </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"f0f03d0605bf45f1a3b17cf7d5e6861f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>
