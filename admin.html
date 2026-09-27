@@ -124,6 +124,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
       <div class="tabs">
         <button class="tab active" data-tab="accounts" onclick="setTab('accounts')">Accounts</button>
         <button class="tab" data-tab="companies" onclick="setTab('companies')">Companies</button>
+        <button class="tab" data-tab="report" onclick="setTab('report')">Application Report</button>
         <button class="tab" data-tab="sources" onclick="setTab('sources')">Job Sources</button>
         <button class="tab" data-tab="settings" onclick="setTab('settings')">AI &amp; Agent settings</button>
       </div>
@@ -154,6 +155,30 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             Deactivating stops the Agent scanning a company without losing its history. Deleting removes it permanently for everyone.</p>
           <input class="search" id="coSearch" placeholder="🔍 Search company or URL…" oninput="renderCompanies()">
           <div id="coList"></div>
+        </div>
+      </section>
+
+      <!-- APPLICATION REPORT (admin-wide view of failed/manual/blocked applies) -->
+      <section id="tab-report" class="hidden">
+        <div class="card" style="margin-bottom:18px">
+          <h3 style="margin-bottom:6px;font-size:15px">📋 Application Report — engineering log</h3>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+            Every application that failed, needed manual action, or was CAPTCHA-blocked across <b>all</b> users — aggregated here so the technical team can spot patterns and improve the agent. Users still see their own report in their account; this is the system-wide view.
+          </p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="renderReport()" style="flex:1;min-width:260px">
+            <select id="repFilter" onchange="renderReport()" style="padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
+              <option value="all">All problems</option>
+              <option value="failed">Failed</option>
+              <option value="needs_manual_action">Needs manual action</option>
+              <option value="captcha_blocked">CAPTCHA blocked</option>
+            </select>
+            <button class="btn" onclick="loadReport()">🔄 Refresh</button>
+          </div>
+          <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
+        </div>
+        <div class="card">
+          <div id="repList"></div>
         </div>
       </section>
 
@@ -440,12 +465,13 @@ async function enterApp(){
 }
 
 function setTab(name){
-  ['accounts','companies','sources','settings'].forEach(t=>{
+  ['accounts','companies','report','sources','settings'].forEach(t=>{
     document.querySelector('.tab[data-tab="'+t+'"]').classList.toggle('active', t===name);
     $('#tab-'+t).classList.toggle('hidden', t!==name);
   });
   if(name==='sources'){ loadSources(); }
   if(name==='companies'){ loadCompanies(); }
+  if(name==='report'){ loadReport(); }
 }
 
 /* ================= COMPANIES (job_custom_sources) =================
@@ -497,19 +523,124 @@ function renderCompanies(){
     // same row rather than creating a duplicate, so this is the real reach.
     const watchers = companyMembers.filter(m=>m.job_custom_source_id===c.id).length;
     const also = watchers > 1 ? ' · also added by '+(watchers-1)+' other user'+(watchers-1>1?'s':'') : '';
-    return '<div style="display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
-      '<div style="flex:1;min-width:0">'+
-        '<b>'+esc(c.company_name)+'</b>'+
-        '<div style="font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">'+
-          '<a href="'+esc(c.career_page_url)+'" target="_blank" rel="noopener">'+esc(c.career_page_url)+'</a></div>'+
-        '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+also+' · '+esc(checked)+
-          (optOuts ? ' · '+optOuts+' user'+(optOuts>1?'s':'')+' opted out' : '')+'</div>'+
+
+    // 🔐 Credentials status pill — tells admin at a glance whether the agent
+    // has what it needs to get past this company's login page (if any).
+    const hasCreds = !!(c.admin_username && c.admin_password);
+    let credPill, credPillClass;
+    if(!hasCreds){ credPill = '🔒 No credentials'; credPillClass = 'gray'; }
+    else if(c.login_status === 'ok'){ credPill = '✅ Login OK'; credPillClass = 'green'; }
+    else if(c.login_status === 'failed'){ credPill = '❌ Login failed'; credPillClass = 'red'; }
+    else if(c.login_status === 'needs_review'){ credPill = '⚠ Needs review'; credPillClass = 'amber'; }
+    else { credPill = '🕒 Not yet tested'; credPillClass = 'gray'; }
+
+    return '<div style="padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
+      '<div style="display:flex;align-items:center;gap:12px">'+
+        '<div style="flex:1;min-width:0">'+
+          '<b>'+esc(c.company_name)+'</b>'+
+          '<div style="font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">'+
+            '<a href="'+esc(c.career_page_url)+'" target="_blank" rel="noopener">'+esc(c.career_page_url)+'</a></div>'+
+          '<div style="font-size:12px;color:var(--muted);margin-top:3px">'+addedBy+also+' · '+esc(checked)+
+            (optOuts ? ' · '+optOuts+' user'+(optOuts>1?'s':'')+' opted out' : '')+'</div>'+
+        '</div>'+
+        '<span class="pill '+credPillClass+'" title="'+esc(c.login_last_error||'')+'">'+credPill+'</span>'+
+        '<span class="pill '+(c.active?'green':'gray')+'">'+(c.active?'Active':'Paused')+'</span>'+
+        '<button class="btn btn-sm" onclick="toggleCreds(\''+c.id+'\')">🔐 Credentials</button>'+
+        '<button class="btn btn-sm" data-co-toggle="'+c.id+'">'+(c.active?'Pause':'Activate')+'</button>'+
+        '<button class="btn btn-sm btn-danger" data-co-delete="'+c.id+'">Delete</button>'+
       '</div>'+
-      '<span class="pill '+(c.active?'green':'gray')+'">'+(c.active?'Active':'Paused')+'</span>'+
-      '<button class="btn btn-sm" data-co-toggle="'+c.id+'">'+(c.active?'Pause':'Activate')+'</button>'+
-      '<button class="btn btn-sm btn-danger" data-co-delete="'+c.id+'">Delete</button>'+
+
+      // Credentials editor — hidden by default, toggled by the button above.
+      // The agent uses ONE admin-owned account per company for every user's
+      // applications (a recruitment-agency pattern). Passwords stored in DB
+      // are RLS-locked so only the Railway worker's service_role can read them.
+      '<div id="creds-'+c.id+'" class="hidden" style="margin-top:14px;padding:14px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:10px">'+
+        '<div style="font-size:13px;color:var(--muted);margin-bottom:12px">'+
+          '💡 If this company requires login to view or apply for jobs, register with them yourself first, then paste the account details here. '+
+          'The agent will log in with these before submitting applications for every user. Leave blank if the site is public.'+
+        '</div>'+
+        '<div class="row2">'+
+          '<div class="field">'+
+            '<label>Login page URL <span style="color:var(--muted);font-weight:400">(optional — defaults to careers page)</span></label>'+
+            '<input type="text" id="cred-url-'+c.id+'" value="'+esc(c.login_url||'')+'" placeholder="https://example.com/login">'+
+          '</div>'+
+          '<div class="field">'+
+            '<label>Username / Email</label>'+
+            '<input type="text" id="cred-user-'+c.id+'" value="'+esc(c.admin_username||'')+'" placeholder="admin@digitalhouse.co.za">'+
+          '</div>'+
+        '</div>'+
+        '<div class="row2">'+
+          '<div class="field">'+
+            '<label>Password</label>'+
+            '<div style="display:flex;gap:6px">'+
+              '<input type="password" id="cred-pass-'+c.id+'" value="'+esc(c.admin_password||'')+'" placeholder="Password" style="flex:1">'+
+              '<button type="button" class="btn btn-sm" onclick="togglePass(\''+c.id+'\')" title="Show/hide">👁</button>'+
+            '</div>'+
+          '</div>'+
+          '<div class="field">'+
+            '<label>Notes <span style="color:var(--muted);font-weight:400">(security questions, quirks…)</span></label>'+
+            '<input type="text" id="cred-notes-'+c.id+'" value="'+esc(c.login_notes||'')+'" placeholder="e.g. Security Q: pet name = Rex">'+
+          '</div>'+
+        '</div>'+
+        (c.login_last_error ? '<div style="font-size:12px;color:#ff8f8f;margin-bottom:10px">⚠ Last login error: '+esc(c.login_last_error)+'</div>' : '')+
+        (c.last_login_at ? '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Last login attempt: '+esc(new Date(c.last_login_at).toLocaleString())+'</div>' : '')+
+        '<div style="display:flex;gap:8px;align-items:center">'+
+          '<button class="btn btn-primary btn-sm" onclick="saveCreds(\''+c.id+'\')">💾 Save credentials</button>'+
+          (hasCreds ? '<button class="btn btn-sm btn-danger" onclick="clearCreds(\''+c.id+'\')">🗑 Clear</button>' : '')+
+          '<span style="flex:1"></span>'+
+          '<span style="font-size:11.5px;color:var(--muted)">🔒 Stored in DB, service_role only</span>'+
+        '</div>'+
+      '</div>'+
     '</div>';
   }).join('');
+}
+
+// Toggle the credentials editor open/closed for a company row.
+function toggleCreds(id){
+  const el = document.getElementById('creds-'+id);
+  if(el) el.classList.toggle('hidden');
+}
+
+// Toggle the password input between hidden/visible while editing.
+function togglePass(id){
+  const el = document.getElementById('cred-pass-'+id);
+  if(!el) return;
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// Save the login credentials for one company. Also resets login_status to
+// 'not_tried' so the agent takes a fresh attempt next application run — no
+// leftover ❌ Login failed pill after fixing a typo'd password.
+async function saveCreds(id){
+  const url   = document.getElementById('cred-url-'+id).value.trim();
+  const user  = document.getElementById('cred-user-'+id).value.trim();
+  const pass  = document.getElementById('cred-pass-'+id).value;
+  const notes = document.getElementById('cred-notes-'+id).value.trim();
+
+  const {error} = await sb.from('job_custom_sources').update({
+    login_url: url || null,
+    admin_username: user || null,
+    admin_password: pass || null,
+    login_notes: notes || null,
+    login_status: 'not_tried',
+    login_last_error: null
+  }).eq('id', id);
+
+  if(error){ toast('⚠ Could not save: '+error.message,'err'); return; }
+  toast('✅ Credentials saved — agent will use them on the next apply run','ok');
+  loadCompanies();
+}
+
+// Clear all credentials for a company (revert to public-site flow).
+async function clearCreds(id){
+  if(!confirm('Clear saved login for this company?\nThe agent will fall back to trying the public form.')) return;
+  const {error} = await sb.from('job_custom_sources').update({
+    login_url: null, admin_username: null, admin_password: null,
+    login_notes: null, login_status: 'not_tried', login_last_error: null
+  }).eq('id', id);
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  toast('Credentials cleared','ok');
+  loadCompanies();
 }
 
 async function addCompany(){
@@ -566,6 +697,100 @@ document.addEventListener('click', async (e)=>{
   toast('Deleted for the entire system','ok');
   loadCompanies();
 });
+
+/* ================= APPLICATION REPORT (admin-wide troubleshooting view) =================
+   Users see their own failed/manual/blocked applications in their own account
+   (that view is unchanged). Admin sees the same data aggregated across every
+   seeker so the engineering team can spot systemic issues — e.g. "12 jobs
+   failed with 'Target page closed' → retry logic needs work" or "8 all blocked
+   by CAPTCHA on Careers24 → confirm 2Captcha budget". Read-only view: nothing
+   to click through here except opening the actual posting. */
+let reportRows = [];
+
+async function loadReport(){
+  const el = $('#repList');
+  if(el) el.innerHTML = '<div class="empty">Loading…</div>';
+  // Pull all non-terminal-success matches with joined seeker + application_log for the error text
+  const {data, error} = await sb
+    .from('job_matches')
+    .select('id, job_title, company_name, job_url, status, applied_at, discovered_at, job_seekers(id, full_name, dedicated_email), application_log(result, notes, created_at)')
+    .in('status', ['failed','needs_manual_action','captcha_blocked'])
+    .order('applied_at', {ascending:false, nullsFirst:false})
+    .limit(500);
+  if(error){
+    if(el) el.innerHTML = '<div class="empty">⚠ '+esc(error.message)+'</div>';
+    return;
+  }
+  reportRows = data || [];
+  renderReport();
+}
+
+function renderReport(){
+  const el = $('#repList');
+  const stats = $('#repStats');
+  if(!el) return;
+  const q = ($('#repSearch')?.value || '').trim().toLowerCase();
+  const filter = $('#repFilter')?.value || 'all';
+
+  let rows = reportRows;
+  if(filter !== 'all') rows = rows.filter(r => r.status === filter);
+  if(q){
+    rows = rows.filter(r => {
+      const seeker = r.job_seekers?.full_name || '';
+      const email = r.job_seekers?.dedicated_email || '';
+      const notes = (r.application_log||[]).map(l=>l.notes||'').join(' ');
+      return (r.job_title||'').toLowerCase().includes(q) ||
+             (r.company_name||'').toLowerCase().includes(q) ||
+             seeker.toLowerCase().includes(q) ||
+             email.toLowerCase().includes(q) ||
+             notes.toLowerCase().includes(q);
+    });
+  }
+
+  // Stats line at the top: quick totals so eng sees the shape of the problems
+  const counts = { failed:0, needs_manual_action:0, captcha_blocked:0 };
+  for(const r of reportRows) if(counts[r.status] !== undefined) counts[r.status]++;
+  if(stats) stats.innerHTML = 'Totals in system: '+
+    '<b style="color:#ff8f8f">'+counts.failed+'</b> failed · '+
+    '<b style="color:var(--accent)">'+counts.needs_manual_action+'</b> needs manual · '+
+    '<b style="color:#f6c66c">'+counts.captcha_blocked+'</b> captcha blocked · '+
+    'showing <b>'+rows.length+'</b>';
+
+  if(!rows.length){
+    el.innerHTML = '<div class="empty">'+(reportRows.length ? 'Nothing matches that filter.' : '✅ No failed applications in the system.')+'</div>';
+    return;
+  }
+
+  el.innerHTML = rows.map(r=>{
+    // application_log is ordered as returned — take the most recent (highest created_at)
+    const logs = (r.application_log||[]).slice().sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+    const lastLog = logs[0];
+    const errText = lastLog?.notes || '(no error notes)';
+    const when = r.applied_at || r.discovered_at;
+    const statusPill = r.status === 'failed' ? '<span class="pill red">Failed</span>'
+      : r.status === 'captcha_blocked' ? '<span class="pill amber">CAPTCHA</span>'
+      : '<span class="pill amber">Manual action</span>';
+    const seeker = r.job_seekers?.full_name || '(unknown user)';
+    return '<div style="padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
+      '<div style="display:flex;gap:12px;align-items:flex-start">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+            '<b>'+esc(r.job_title||'(no title)')+'</b>'+
+            statusPill+
+          '</div>'+
+          '<div style="font-size:12.5px;color:var(--muted);margin-top:2px">'+
+            esc(r.company_name||'')+' · for <b>'+esc(seeker)+'</b>'+
+            (when ? ' · '+esc(new Date(when).toLocaleString()) : '')+
+          '</div>'+
+          '<div style="font-size:12.5px;color:#ffb3b3;margin-top:6px;font-family:ui-monospace,monospace;background:rgba(255,107,107,.06);padding:6px 9px;border-radius:6px;word-break:break-word">'+
+            esc(errText)+
+          '</div>'+
+        '</div>'+
+        '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
 let appSettings=null;

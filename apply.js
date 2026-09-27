@@ -207,6 +207,110 @@ async function attachDocument(fileInput, seeker, docType, documentsByType) {
 }
 
 // Greenhouse job pages use a fairly consistent embedded application form.
+// ADMIN LOGIN — used before applying on watched-page sites that gate jobs
+// behind an account. The admin registers ONCE per company; the agent uses
+// that single account for every seeker's application (recruitment-agency
+// pattern). This function is intentionally best-effort: no site-specific
+// tricks, just find username/password/submit and try. If the form is exotic
+// (SSO redirect, multi-step, requires OTP), it fails cleanly and the row
+// gets marked login_status='failed' so the admin sees it.
+//
+// Returns { ok: true } on success, { ok: false, reason: '...' } on failure.
+async function attemptAdminLogin(page, watched) {
+  const loginUrl = watched.login_url || watched.career_page_url;
+  if (!loginUrl) return { ok: false, reason: 'no login URL configured' };
+
+  try {
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+  } catch (err) {
+    return { ok: false, reason: `could not reach login page: ${err.message}` };
+  }
+
+  // Any CAPTCHA on the login page — the same 2Captcha pipeline handles it.
+  const captchaBlock = await handleCaptcha(page);
+  if (captchaBlock) return { ok: false, reason: captchaBlock.reason || 'CAPTCHA on login page' };
+
+  // Try broadly: email inputs first, then any type=text with a name/id hinting
+  // at username/login. Skip anything hidden or disabled.
+  const userSelectors = [
+    'input[type="email"]:not([disabled])',
+    'input[name*="email" i]:not([disabled])',
+    'input[id*="email" i]:not([disabled])',
+    'input[name*="user" i]:not([disabled])',
+    'input[id*="user" i]:not([disabled])',
+    'input[name*="login" i]:not([disabled])',
+    'input[autocomplete="username"]',
+    'input[type="text"]:not([disabled])'
+  ];
+  let userField = null;
+  for (const sel of userSelectors) {
+    userField = await page.$(sel).catch(() => null);
+    if (userField) break;
+  }
+  if (!userField) return { ok: false, reason: 'no username/email input found on login page' };
+
+  const passField = await page.$('input[type="password"]:not([disabled])').catch(() => null);
+  if (!passField) return { ok: false, reason: 'no password input found on login page' };
+
+  try {
+    await userField.fill(watched.admin_username);
+    await humanDelay();
+    await passField.fill(watched.admin_password);
+    await humanDelay();
+  } catch (err) {
+    return { ok: false, reason: `could not fill login fields: ${err.message}` };
+  }
+
+  // Prefer a submit button that lives inside the same form as the password
+  // field — avoids clicking a random "Sign up" button in the page header.
+  let submitBtn = await passField.evaluateHandle(el => {
+    const form = el.closest('form');
+    if (!form) return null;
+    return form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+  });
+  submitBtn = submitBtn && submitBtn.asElement ? submitBtn.asElement() : null;
+  if (!submitBtn) {
+    // Fallbacks — a "Sign in" / "Log in" button by visible text
+    submitBtn = await page.$('button:has-text("Sign in"), button:has-text("Log in"), button:has-text("Login"), a:has-text("Sign in")').catch(() => null);
+  }
+  if (!submitBtn) return { ok: false, reason: 'no submit button found on login form' };
+
+  try {
+    // Kick off both the click AND wait for either navigation OR a re-render;
+    // some SPAs update in place with no full navigation.
+    await Promise.race([
+      Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
+        submitBtn.click()
+      ]),
+      page.waitForTimeout(15000)
+    ]);
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+  } catch (err) {
+    return { ok: false, reason: `submit click failed: ${err.message}` };
+  }
+
+  // Post-login CAPTCHA check (sites sometimes ONLY show it after submit).
+  await handleCaptcha(page);
+
+  // Verify: still on a login page? Look for password fields or "invalid"
+  // text — if we see either, the login didn't take.
+  const stillHasPassword = await page.$('input[type="password"]:not([disabled])').catch(() => null);
+  const bodyText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 3000)).catch(() => '');
+  const looksInvalid = /invalid|incorrect|wrong|failed|try again|does not match|not recognised|not recognized/i.test(bodyText);
+
+  if (stillHasPassword && looksInvalid) {
+    return { ok: false, reason: 'credentials rejected (invalid username or password)' };
+  }
+  if (stillHasPassword) {
+    // No clear error but still a password field visible — might be a
+    // multi-step form (email → password) or SSO detour. Flag it for review.
+    return { ok: false, reason: 'still on a login page after submit (multi-step or SSO login?)' };
+  }
+  return { ok: true };
+}
+
 async function applyOnGreenhouse(page, seeker) {
   await page.waitForLoadState('networkidle');
 
@@ -784,7 +888,7 @@ async function run() {
 
   const { data: pending, error } = await supabase
     .from('job_matches')
-    .select('*, job_seekers(*), job_sources(*)')
+    .select('*, job_seekers(*), job_sources(*), job_custom_sources(*)')
     .in('status', ['approved', 'pending'])
     // watched/custom-source postings now go through the same auto-apply
     // attempt as any other source — they only land in the user's
@@ -877,6 +981,39 @@ async function run() {
       const context = await browser.newContext();
       const page = await context.newPage();
       try {
+        // ADMIN-CREDENTIAL LOGIN (watched pages only)
+        // -----------------------------------------
+        // Some employer sites require an account to view jobs or submit the
+        // application form. Admin registers ONCE per company (recruitment-
+        // agency pattern) and stores creds on job_custom_sources; the agent
+        // uses the same login for every seeker's application. If the login
+        // fails, the row is marked needs_manual_action + login_status='failed'
+        // and the admin sees it in the Companies tab pill.
+        const watched = match.job_custom_sources;
+        if (watched && watched.admin_username && watched.admin_password) {
+          const loginRes = await attemptAdminLogin(page, watched);
+          if (!loginRes.ok) {
+            console.log(`[apply]  ✖ admin login failed for "${watched.company_name}": ${loginRes.reason}`);
+            await supabase.from('job_custom_sources').update({
+              login_status: 'failed',
+              login_last_error: loginRes.reason,
+              last_login_at: new Date().toISOString()
+            }).eq('id', watched.id);
+            await logResult(match, 'needs_manual_action', `Admin login failed for ${watched.company_name}: ${loginRes.reason}. Check credentials in admin → Companies.`);
+            attempted = true;
+            await context.close().catch(() => {});
+            break;
+          }
+          // Success — record it and continue to the job URL in the SAME context
+          // so the session cookie is carried across.
+          await supabase.from('job_custom_sources').update({
+            login_status: 'ok',
+            login_last_error: null,
+            last_login_at: new Date().toISOString()
+          }).eq('id', watched.id);
+          console.log(`[apply]  🔓 logged in to "${watched.company_name}" as ${watched.admin_username}`);
+        }
+
         await page.goto(match.job_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await humanDelay();
 
