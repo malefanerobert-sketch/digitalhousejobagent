@@ -11,11 +11,13 @@
 <style>
 :root{
   color-scheme:dark;   /* keeps native controls (calendar picker, dropdown chevrons, spinners) light-on-dark */
+  /* Single built-in theme: Signal (blue + lime). The theme picker has been
+     removed — these values are the app's fixed palette. */
   --bg:#0a0f1e; --panel:#111a33; --panel2:#0d1428; --line:#23305a;
-  --text:#e9edf9; --muted:#8b96b8; --accent:#ffb454; --accent2:#4fd1c5;
-  --accent-rgb:255,180,84; --accent2-rgb:79,209,197; --accent-tint:#ffd9a3;
-  --btn-a:#ffb454; --btn-b:#ff8e3c; --btn-text:#221302;
-  --btn-shadow:rgba(255,150,60,.25); --btn-shadow-hover:rgba(255,150,60,.4);
+  --text:#e9edf9; --muted:#8b96b8; --accent:#4f9dff; --accent2:#a3e635;
+  --accent-rgb:79,157,255; --accent2-rgb:163,230,53; --accent-tint:#a8c8ff;
+  --btn-a:#4f9dff; --btn-b:#2f7de0; --btn-text:#071a33;
+  --btn-shadow:rgba(79,157,255,.25); --btn-shadow-hover:rgba(79,157,255,.4);
   --danger:#ff6b6b; --ok:#34d399; --radius:14px;
   --card-bg:linear-gradient(180deg,#121b38,#0f1730); --card-text:#e9edf9; --sidebar-bg:#0c1226;
   --input-bg:#0d1428;
@@ -176,22 +178,6 @@ select{cursor:pointer}
 .agent-pill{display:flex;align-items:center;gap:8px;background:var(--input-bg);border:1px solid var(--line);
   border-radius:99px;padding:8px 12px;font-size:12px;color:var(--muted);margin-bottom:10px}
 
-/* ---------- theme picker ---------- */
-.theme-picker-wrap{position:relative;margin-bottom:10px}
-.theme-toggle-btn{display:flex;align-items:center;gap:8px;width:100%;background:var(--input-bg);color:var(--text);
-  border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;
-  font-family:inherit;cursor:pointer;transition:.15s}
-.theme-toggle-btn:hover{border-color:var(--accent)}
-.theme-toggle-btn svg{flex:none;color:var(--accent)}
-.theme-menu{position:absolute;bottom:calc(100% + 8px);left:0;right:0;z-index:80;background:var(--panel);
-  border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.5);padding:6px}
-.theme-menu-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;
-  border:none;color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;font-family:inherit;
-  font-weight:600;cursor:pointer;transition:.12s}
-.theme-menu-item:hover{background:var(--panel2)}
-.theme-menu-item.active{background:var(--panel2)}
-.theme-swatch{width:16px;height:16px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.12)}
-.theme-menu-item .check{margin-left:auto;color:var(--accent2);font-size:13px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
 .dot.busy{background:var(--accent);animation:blink 1s infinite}
 .dot.idle{background:var(--muted)}
@@ -266,6 +252,10 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 
 /* ---------- block chips ---------- */
 .block-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip-unblock{background:rgba(52,211,153,.14);border:1px solid rgba(52,211,153,.4);color:#5ee6b0;
+  border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;
+  transition:.15s;letter-spacing:.02em}
+.chip-unblock:hover{background:rgba(52,211,153,.28);color:#8ff2c8}
 .block-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(255,107,107,.1);
   border:1px solid rgba(255,107,107,.35);color:#ffb0b0;border-radius:99px;padding:6px 8px 6px 14px;font-size:13px;font-weight:600}
 .block-chip button{background:none;border:none;color:#ff8f8f;cursor:pointer;font-size:15px;line-height:1;padding:0 4px}
@@ -456,14 +446,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
       </nav>
       <div class="side-foot">
         <div class="agent-pill"><span class="dot idle" id="agentDot"></span><span id="agentText">waking up…</span></div>
-        <div class="theme-picker-wrap">
-          <button id="themeToggleBtn" class="theme-toggle-btn" onclick="(function(){const m=document.getElementById('themeMenu');if(m.classList.contains('hidden')){renderThemeMenu();}else{m.classList.add('hidden');}})()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 0 14"/></svg>
-            Theme
-            <span id="themeCurrentSwatch" class="theme-swatch" style="background:linear-gradient(135deg,#c084fc,#ff7ab8);margin-left:auto"></span>
-          </button>
-          <div id="themeMenu" class="theme-menu hidden"></div>
-        </div>
         <button class="btn btn-ghost btn-sm btn-block" onclick="signOut()">Sign out</button>
       </div>
     </aside>
@@ -565,14 +547,17 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         <div class="grid2">
           <div class="card">
             <h3>🏢 Blocked companies</h3>
-            <p class="section-note">Your agent will never show you roles from these companies.</p>
+            <p class="section-note">Your agent will never show you roles from these companies.
+              Made a mistake? Click the <b>Unblock</b> button on any chip below to remove the block —
+              the company will start showing up in your matches again and the agent will apply to its roles as normal.</p>
             <div class="addrow"><input id="bcInput" placeholder="Company name" onkeydown="if(event.key==='Enter')addBlock('companies')">
               <button class="btn btn-danger btn-sm" onclick="addBlock('companies')">🚫 Block</button></div>
             <div class="block-chips" id="bcList"></div>
           </div>
           <div class="card">
             <h3>📍 Blocked places</h3>
-            <p class="section-note">Stop posts from certain cities or regions. Add "Remote" to exclude remote-only roles too.</p>
+            <p class="section-note">Stop posts from certain cities or regions. Add "Remote" to exclude remote-only roles too.
+              Click <b>Unblock</b> on any place below to remove the block and let the agent search and apply there again.</p>
             <div class="addrow"><input id="blInput" placeholder="City or region" onkeydown="if(event.key==='Enter')addBlock('locations')">
               <button class="btn btn-danger btn-sm" onclick="addBlock('locations')">🚫 Block</button></div>
             <div class="block-chips" id="blList"></div>
@@ -674,10 +659,17 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
                 <span class="loc-ms-caret">▾</span>
               </button>
               <div id="pfLocsMenu" class="loc-ms-menu hidden">
-                <label class="loc-ms-opt all-opt"><input type="checkbox" id="pfLocAll" onchange="onPfLocAllChange()"> 🌍 Search all locations</label>
+                <label class="loc-ms-opt all-opt"><input type="checkbox" id="pfLocAll" onchange="onPfLocAllChange()"> 🌍 Search and apply to all locations</label>
                 <div class="loc-ms-sep"></div>
                 <div id="pfLocsList"></div>
               </div>
+              <p style="color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5">
+                Your agent will <b>only apply</b> to jobs in the locations you pick here.
+                Matches from across the country are still shown in <b>Matched jobs</b> so you can review them —
+                only the ones in your preferred locations get auto-applied.
+                Switch to <b>🌍 Search and apply to all locations</b> and the agent will revisit
+                every match it already found and start applying to them too.
+              </p>
             </div>
             <div class="field"><label>Salary range</label>
               <div style="display:flex;gap:8px"><input type="number" id="pfSalaryMin" placeholder="Min"><input type="number" id="pfSalaryMax" placeholder="Max"></div>
@@ -872,97 +864,9 @@ function toast(msg,type){const t=document.createElement('div');t.className='toas
   t.textContent=msg;$('#toasts').appendChild(t);
   setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),400)},3400)}
 
-/* ================= THEME PICKER ================= */
-const THEMES={
-  relay:{label:'Relay', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
-    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
-    accent:'#c084fc', accentRgb:'192,132,252', accent2:'#ff7ab8', accent2Rgb:'255,122,184',
-    tint:'#ddb8fe', btnA:'#ffb454', btnB:'#ff8e3c', btnText:'#221302',
-    btnShadow:'rgba(255,150,60,.25)', btnShadowHover:'rgba(255,150,60,.4)'},
-  nebula:{label:'Nebula', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
-    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
-    accent:'#ffb454', accentRgb:'255,180,84', accent2:'#4fd1c5', accent2Rgb:'79,209,197',
-    tint:'#ffd09a', btnA:'#ffb454', btnB:'#ff8e3c', btnText:'#221302',
-    btnShadow:'rgba(255,150,60,.25)', btnShadowHover:'rgba(255,150,60,.4)'},
-  signal:{label:'Signal', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
-    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
-    accent:'#4f9dff', accentRgb:'79,157,255', accent2:'#a3e635', accent2Rgb:'163,230,53',
-    tint:'#a8c8ff', btnA:'#4f9dff', btnB:'#2f7de0', btnText:'#071a33',
-    btnShadow:'rgba(79,157,255,.25)', btnShadowHover:'rgba(79,157,255,.4)'},
-  aurora:{label:'Aurora', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
-    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
-    accent:'#2dd4a7', accentRgb:'45,212,167', accent2:'#38bdf8', accent2Rgb:'56,189,248',
-    tint:'#99f0da', btnA:'#2dd4a7', btnB:'#14b892', btnText:'#052e24',
-    btnShadow:'rgba(45,212,167,.25)', btnShadowHover:'rgba(45,212,167,.4)'},
-  solstice:{label:'Solstice', bg:'#0a0f1e', panel:'#111a33', panel2:'#0d1428', line:'#23305a',
-    text:'#e9edf9', muted:'#8b96b8', cardBg:'linear-gradient(180deg,#121b38,#0f1730)', sidebarBg:'#0c1226', inputBg:'#0d1428',
-    accent:'#ffd166', accentRgb:'255,209,102', accent2:'#ff8f70', accent2Rgb:'255,143,112',
-    tint:'#ffe8a0', btnA:'#ffd166', btnB:'#ffab40', btnText:'#2e1900',
-    btnShadow:'rgba(255,209,102,.25)', btnShadowHover:'rgba(255,209,102,.4)'},
-};
-function applyTheme(name='relay'){
-  const t=THEMES[name]||THEMES.relay;
-  const r=document.documentElement.style;
-  r.setProperty('--bg',t.bg);
-  r.setProperty('--panel',t.panel);
-  r.setProperty('--panel2',t.panel2);
-  r.setProperty('--line',t.line);
-  r.setProperty('--text',t.text);
-  r.setProperty('--muted',t.muted);
-  r.setProperty('--card-bg',t.cardBg);
-  r.setProperty('--sidebar-bg',t.sidebarBg);
-  r.setProperty('--input-bg',t.inputBg);
-  r.setProperty('--accent',t.accent);
-  r.setProperty('--accent-rgb',t.accentRgb);
-  r.setProperty('--accent2',t.accent2);
-  r.setProperty('--accent2-rgb',t.accent2Rgb);
-  r.setProperty('--accent-tint',t.tint);
-  r.setProperty('--btn-a',t.btnA);
-  r.setProperty('--btn-b',t.btnB);
-  r.setProperty('--btn-text',t.btnText);
-  r.setProperty('--btn-shadow',t.btnShadow);
-  r.setProperty('--btn-shadow-hover',t.btnShadowHover);
-}
-let _currentTheme = 'relay';
-(function initTheme(){
-  let saved = 'relay';
-  try { saved = localStorage.getItem('jobagentTheme') || 'relay'; } catch(e) {}
-  if (!THEMES[saved]) saved = 'relay';
-  _currentTheme = saved;
-  applyTheme(saved);
-})();
-function renderThemeMenu(){
-  const menu = document.getElementById('themeMenu');
-  if (!menu) return;
-  menu.innerHTML = Object.keys(THEMES).map(key => {
-    const t = THEMES[key];
-    const isActive = key === _currentTheme;
-    return `<button type="button" class="theme-menu-item${isActive?' active':''}" onclick="pickTheme('${key}')">
-      <span class="theme-swatch" style="background:linear-gradient(135deg,${t.accent},${t.accent2})"></span>
-      ${t.label}${isActive?'<span class="check">✓</span>':''}
-    </button>`;
-  }).join('');
-  menu.classList.remove('hidden');
-}
-function pickTheme(name){
-  if (!THEMES[name]) return;
-  _currentTheme = name;
-  applyTheme(name);
-  try { localStorage.setItem('jobagentTheme', name); } catch(e) {}
-  // update button swatch
-  const swatch = document.getElementById('themeCurrentSwatch');
-  const t = THEMES[name];
-  if (swatch) swatch.style.background = `linear-gradient(135deg,${t.accent},${t.accent2})`;
-  const menu = document.getElementById('themeMenu');
-  if (menu) menu.classList.add('hidden');
-}
-document.addEventListener('click', function(e){
-  const menu = document.getElementById('themeMenu');
-  const btn = document.getElementById('themeToggleBtn');
-  if (menu && !menu.classList.contains('hidden') && btn && !btn.contains(e.target) && !menu.contains(e.target)){
-    menu.classList.add('hidden');
-  }
-});
+/* Theme picker removed — the app now ships only the built-in "Signal"
+   palette, baked into :root at the top of this file. */
+try { localStorage.removeItem('jobagentTheme'); } catch(e) {}
 
 /* ---------------- Password visibility toggles ---------------- */
 const EYE_OPEN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -1322,7 +1226,22 @@ async function saveProfile(){
     // Build the payload from PF_FIELDS
     const payload = { user_id: currentUser.id };
     PF_FIELDS.forEach(([id, col, kind]) => { payload[col] = pfGetVal(id, kind); });
-    payload.preferred_locations = getSelectedLocs();
+    const newLocs = getSelectedLocs();
+    payload.preferred_locations = newLocs;
+
+    // When the user widens their apply-scope back to "all locations" (either
+    // from a narrower set OR their very first save), signal the backend to
+    // revisit every match already discovered and try to apply the ones that
+    // were skipped for being outside the previously-selected locations. The
+    // backend apply worker reads apply_revisit_requested_at and, on seeing a
+    // value newer than the last revisit, re-queues past matches for apply.
+    const prevLocs = currentSeeker?.preferred_locations || [];
+    const wasAll   = prevLocs.length===1 && prevLocs[0]==='All locations';
+    const nowAll   = newLocs.length===1  && newLocs[0]==='All locations';
+    if (nowAll && !wasAll) {
+      payload.apply_revisit_requested_at = new Date().toISOString();
+    }
+
     // Missing "soft" answers are filled in by the agent at apply-time by default.
     payload.agent_can_autofill_soft = true;
     payload.resume_url = resumeUrl;
@@ -1718,7 +1637,7 @@ function updatePfLocsLabel(){
   const sel=getSelectedLocs();
   if(!sel.length){ label.textContent='Select locations…'; label.classList.add('placeholder'); return; }
   label.classList.remove('placeholder');
-  label.textContent = sel[0]==='All locations' ? '🌍 All locations'
+  label.textContent = sel[0]==='All locations' ? '🌍 Searching and applying to all locations'
     : (sel.length<=2 ? sel.join(', ') : sel[0]+', '+sel[1]+' +'+(sel.length-2)+' more');
 }
 
@@ -2144,16 +2063,30 @@ async function removeBlock(kind, val){
   const {error} = await sb.from('job_seekers').update({[field]: updated}).eq('id', currentSeeker.id);
   if(error){ toast('⚠ '+error.message,'err'); return; }
   currentSeeker[field] = updated;
+  // Confirm the unblock and remind the user the pipeline will resume for this
+  // company/place — matches show up again immediately (isBlocked() reads the
+  // fresh currentSeeker) and future runs of the apply worker will queue it.
+  toast(
+    kind==='companies'
+      ? '✓ Unblocked "'+val+'" — the agent will show and apply to its jobs again'
+      : '✓ Unblocked "'+val+'" — the agent will search and apply in this place again',
+    'ok'
+  );
   renderBlocked(); renderMatches(); renderDashboard();
+  if(kind==='companies' && typeof renderApplications==='function' && $('#attnList')) renderApplications();
 }
 function renderBlocked(){
   const companies = currentSeeker?.blocked_companies || [];
   const locations = currentSeeker?.blocked_locations || [];
   $('#bcList').innerHTML = companies.length
-    ? companies.map(c=>'<span class="block-chip">🏢 '+esc(c)+'<button data-unblock-co="'+esc(c)+'" title="Remove">✕</button></span>').join('')
+    ? companies.map(c=>'<span class="block-chip">🏢 '+esc(c)+
+        '<button class="chip-unblock" data-unblock-co="'+esc(c)+'" title="Unblock — the agent will start showing and applying to jobs from this company again">Unblock</button>'+
+      '</span>').join('')
     : '<span style="color:var(--muted);font-size:13px">Nothing blocked yet.</span>';
   $('#blList').innerHTML = locations.length
-    ? locations.map(l=>'<span class="block-chip loc">📍 '+esc(l)+'<button data-unblock-loc="'+esc(l)+'" title="Remove">✕</button></span>').join('')
+    ? locations.map(l=>'<span class="block-chip loc">📍 '+esc(l)+
+        '<button class="chip-unblock" data-unblock-loc="'+esc(l)+'" title="Unblock — the agent will start searching and applying in this place again">Unblock</button>'+
+      '</span>').join('')
     : '<span style="color:var(--muted);font-size:13px">Nothing blocked yet.</span>';
 }
 $('#bcList').addEventListener('click', e=>{ const b=e.target.closest('button[data-unblock-co]'); if(b) removeBlock('companies', b.dataset.unblockCo); });
