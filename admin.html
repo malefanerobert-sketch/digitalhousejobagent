@@ -95,8 +95,12 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
   <div class="auth-card">
     <h1>📡 JobAgent Admin</h1>
     <p>Sign in with your admin account.</p>
-    <div class="field"><label>Email</label><input type="email" id="adEmail"></div>
-    <div class="field"><label>Password</label><input type="password" id="adPass"></div>
+    <div class="field"><label>Email</label><input type="email" id="adEmail" autocomplete="username"></div>
+    <div class="field"><label>Password</label><input type="password" id="adPass" autocomplete="current-password"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-bottom:14px;cursor:pointer;user-select:none">
+      <input type="checkbox" id="adRemember" checked style="width:16px;height:16px;cursor:pointer">
+      Stay signed in on this device
+    </label>
     <div class="err" id="adErr"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center" id="adBtn" onclick="doSignin()">Sign in</button>
   </div>
@@ -352,7 +356,26 @@ const SUPABASE_ANON_KEY = 'sb_publishable_QBseann9rrODgfZP9V0oXg_u9brFEVh';
 let sb;
 (async () => {
   while (!window.supabase) await new Promise(r => setTimeout(r, 10));
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // Custom storage adapter — respects the "Stay signed in" checkbox from the
+  // login screen. When checked (default), the session lives in localStorage
+  // and survives browser restarts. When unchecked, it lives in sessionStorage
+  // and is cleared as soon as the tab is closed. Both are read on boot so
+  // sign-out never gets stuck.
+  const REMEMBER_KEY = 'jobagent_admin_remember';
+  const authStorage = {
+    getItem: (k) => { try { return localStorage.getItem(k) || sessionStorage.getItem(k); } catch(_) { return null; } },
+    setItem: (k, v) => {
+      try {
+        const remember = localStorage.getItem(REMEMBER_KEY) !== 'false'; // default TRUE
+        if (remember) { localStorage.setItem(k, v); sessionStorage.removeItem(k); }
+        else          { sessionStorage.setItem(k, v); localStorage.removeItem(k); }
+      } catch(_) { /* private mode / storage disabled — degrade silently */ }
+    },
+    removeItem: (k) => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch(_) {} }
+  };
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { storage: authStorage, persistSession: true, autoRefreshToken: true }
+  });
 })();
 
 let accounts=[], jobSources=[], userJobSources=[];
@@ -433,6 +456,14 @@ async function doSignin(){
   const errorEl=$('#adErr'); errorEl.textContent='';
   const email=$('#adEmail').value.trim(), password=$('#adPass').value;
   if(!email||!password){ errorEl.textContent='Enter email and password.'; return; }
+
+  // Record the "Stay signed in" choice BEFORE the auth call, so the storage
+  // adapter (see boot at the top) puts the token in the right bucket:
+  //   checked   → localStorage (persists across browser restarts)
+  //   unchecked → sessionStorage (cleared when the tab is closed)
+  const remember = document.getElementById('adRemember')?.checked !== false;
+  try { localStorage.setItem('jobagent_admin_remember', remember ? 'true' : 'false'); } catch(_) {}
+
   const btn=$('#adBtn'); btn.disabled=true; btn.textContent='Signing in…';
   const {data,error} = await sb.auth.signInWithPassword({email,password});
   btn.disabled=false; btn.textContent='Sign in';
@@ -1394,6 +1425,13 @@ function renderSources(){
 }
 
 /* ================= BOOT ================= */
+// Let the user press Enter in the email or password field to sign in —
+// small UX polish, prevents them having to reach for the mouse every time.
+['adEmail','adPass'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSignin(); } });
+});
+
 (async function boot(){
   const {data:{session}} = await sb.auth.getSession();
   if(session) await enterApp();
