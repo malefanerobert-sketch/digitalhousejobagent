@@ -197,16 +197,48 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         <div class="card" style="margin-bottom:18px">
           <h3 style="margin-bottom:6px;font-size:15px">⏰ Agent Time Window</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            When the Agent runs. The worker only performs discovery inside this window — outside it, the run exits
-            immediately and no tokens are spent. Set start and end hour (0–23) and the timezone they're expressed in.
-            Master switch still applies on top of this: if it's OFF, nothing runs regardless of the window.</p>
-          <div class="row2">
-            <div class="field"><label>Start hour (0–23)</label><input type="number" id="setStartHour" min="0" max="23" value="8"></div>
-            <div class="field"><label>End hour (0–23)</label><input type="number" id="setEndHour" min="0" max="23" value="16"></div>
+            When the Agent scans job boards (Adzuna, Jobmail, RemoteOK, etc.) for new matches.
+            Watched pages and auto-apply run 24/7 regardless — this window only gates autonomous board search.</p>
+
+          <!-- Live status pill: shows current TZ time, open/closed, and countdown to next flip -->
+          <div id="windowStatus" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;flex-wrap:wrap"></div>
+
+          <!-- Always-on toggle. When ticked, start === end is saved (24/7 sentinel). -->
+          <label id="alwaysOnRow" style="display:flex;gap:10px;align-items:center;padding:12px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;margin-bottom:14px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="setAlwaysOn" style="width:auto;margin:0" onchange="onAlwaysOnChange()">
+            <span><b>Always on (24/7)</b> — remove the time restriction entirely</span>
+          </label>
+
+          <!-- Alarm-clock style time pickers. Native <input type=time> gives a
+               clock UI on mobile and a spinner on desktop; step=3600 restricts
+               to whole hours so the two saved integers stay authoritative. -->
+          <div id="timeWindowPickers" class="row2" style="gap:14px;margin-bottom:12px">
+            <div class="field" style="margin:0">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block"></span>
+                Start
+              </label>
+              <input type="time" id="setStartTime" step="3600" value="08:00"
+                     onchange="updateWindowStatus()"
+                     style="font-size:26px;font-weight:800;text-align:center;letter-spacing:.02em;padding:14px 12px;font-variant-numeric:tabular-nums">
+            </div>
+            <div class="field" style="margin:0">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block"></span>
+                End
+              </label>
+              <input type="time" id="setEndTime" step="3600" value="16:00"
+                     onchange="updateWindowStatus()"
+                     style="font-size:26px;font-weight:800;text-align:center;letter-spacing:.02em;padding:14px 12px;font-variant-numeric:tabular-nums">
+            </div>
           </div>
+          <p id="overnightHint" style="display:none;color:var(--accent);font-size:12px;margin:0 0 12px 2px">
+            🌙 Overnight window — the Agent runs past midnight and stops at the End time the following morning.
+          </p>
+
           <div class="field">
             <label>Timezone</label>
-            <select id="setTimezone">
+            <select id="setTimezone" onchange="updateWindowStatus()">
               <option value="Africa/Johannesburg">Africa/Johannesburg (South Africa)</option>
               <option value="UTC">UTC</option>
             </select>
@@ -545,21 +577,154 @@ async function loadSettings(){
     $('#setKey').value = appSettings.ai_api_key || '';
     $('#setModel').value = appSettings.ai_model || '';
     $('#setAgentPrompt').value = appSettings.agent_prompt || '';
-    // Time window
-    $('#setStartHour').value = appSettings.agent_run_start_hour ?? 8;
-    $('#setEndHour').value   = appSettings.agent_run_end_hour   ?? 16;
+    // Time window — three shapes: normal (start<end), overnight (start>end),
+    // always-on (start===end). All three are just two ints in the DB; the UI
+    // just picks the right controls to match.
+    const startH = appSettings.agent_run_start_hour ?? 8;
+    const endH   = appSettings.agent_run_end_hour   ?? 16;
+    const alwaysOn = (startH === endH);
+    $('#setAlwaysOn').checked = alwaysOn;
+    $('#setStartTime').value = pad2(startH) + ':00';
+    $('#setEndTime').value   = pad2(endH)   + ':00';
     $('#setTimezone').value  = appSettings.agent_timezone || 'Africa/Johannesburg';
+    onAlwaysOnChange(); // reflect visibility of the pickers
     renderMasterSwitch(appSettings.agent_enabled === true);
   }
 }
 
+/* ================= TIME WINDOW HELPERS ================= */
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+// Read the current hour+minute in a given IANA timezone. en-US locale with
+// 24h format returns "HH:MM" — no am/pm suffix, no legacy "24" for midnight
+// on modern Node/Chromium. We tolerate a stray "24" defensively anyway.
+function nowInTz(tz){
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(new Date()).split(':').map(s => parseInt(s, 10));
+  let h = parts[0], m = parts[1] || 0;
+  if (h === 24) h = 0; // paranoia — some very old runtimes emitted "24:00" for midnight
+  return { h, m };
+}
+
+// Compute whether the current time in tz is inside a window described by
+// start/end integer hours, applying the same three-shape semantics the
+// backend uses in discoverAuto.js#isWithinTimeWindow: 24/7 when start===end,
+// wrap-past-midnight when start>end, plain [start,end) otherwise.
+function windowIsOpen(start, end, tz){
+  if (start === end) return true; // 24/7
+  const { h } = nowInTz(tz);
+  if (start > end) return h >= start || h < end; // overnight
+  return h >= start && h < end;
+}
+
+// Minutes from "now in tz" until the next hh:00 boundary of targetHour.
+// Used to render "Opens in 4h 15m at 08:00" copy in the live status pill.
+function minsUntilHour(targetHour, tz){
+  const { h, m } = nowInTz(tz);
+  const nowMin = h * 60 + m;
+  const targetMin = targetHour * 60;
+  return ((targetMin - nowMin) + 24 * 60) % (24 * 60);
+}
+
+function fmtDuration(mins){
+  if (mins <= 0) return 'now';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h)      return `${h}h`;
+  return `${m}m`;
+}
+
+// Reflects state to the DOM without touching the DB. Cheap enough to call
+// on every input change AND on a 30s tick, so the countdown stays honest.
+function updateWindowStatus(){
+  const box = $('#windowStatus'); if (!box) return;
+  const tz = $('#setTimezone').value || 'Africa/Johannesburg';
+  const alwaysOn = $('#setAlwaysOn').checked;
+  const startH = parseInt(($('#setStartTime').value || '08:00').split(':')[0], 10);
+  const endH   = parseInt(($('#setEndTime').value   || '16:00').split(':')[0], 10);
+  const { h, m } = nowInTz(tz);
+  const nowLabel = `${pad2(h)}:${pad2(m)}`;
+
+  // Overnight hint under the pickers — only shown when the picked values
+  // would wrap midnight and always-on isn't overriding them.
+  const hint = $('#overnightHint');
+  if (hint) hint.style.display = (!alwaysOn && startH > endH) ? 'block' : 'none';
+
+  if (alwaysOn){
+    box.innerHTML =
+      '<span style="width:12px;height:12px;border-radius:50%;background:var(--ok);flex:none"></span>' +
+      '<div style="flex:1"><b style="color:var(--ok)">Currently OPEN</b> · Always on (24/7)</div>' +
+      `<div style="color:var(--muted);font-size:12.5px">${escapeHtml(tz)} · <b style="color:var(--text);font-variant-numeric:tabular-nums">${nowLabel}</b></div>`;
+    return;
+  }
+
+  const open = windowIsOpen(startH, endH, tz);
+  const nextTargetHour = open ? endH : startH;
+  const untilMins = minsUntilHour(nextTargetHour, tz);
+  const label = open ? 'Currently OPEN' : 'Currently CLOSED';
+  const color = open ? 'var(--ok)' : 'var(--danger)';
+  const verb  = open ? 'Closes' : 'Opens';
+
+  box.innerHTML =
+    `<span style="width:12px;height:12px;border-radius:50%;background:${color};flex:none"></span>` +
+    `<div style="flex:1"><b style="color:${color}">${label}</b> · ${verb} in <b>${fmtDuration(untilMins)}</b> at <b style="font-variant-numeric:tabular-nums">${pad2(nextTargetHour)}:00</b></div>` +
+    `<div style="color:var(--muted);font-size:12.5px">${escapeHtml(tz)} · <b style="color:var(--text);font-variant-numeric:tabular-nums">${nowLabel}</b></div>`;
+}
+
+// Tiny escaper for the timezone string only — everything else in the pill is
+// numeric/static. Same shape as esc() elsewhere in this file so we don't
+// depend on load order.
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Toggle the time pickers open/closed. When Always on is checked we grey
+// them out AND ignore their values on save (start=end=0 sentinel) so the
+// operator can flip back and see their previous hours without re-typing.
+function onAlwaysOnChange(){
+  const on = $('#setAlwaysOn').checked;
+  const wrap = $('#timeWindowPickers');
+  const hint = $('#overnightHint');
+  if (wrap){
+    wrap.style.opacity = on ? '.4' : '1';
+    wrap.style.pointerEvents = on ? 'none' : '';
+  }
+  if (hint && on) hint.style.display = 'none';
+  updateWindowStatus();
+}
+
+// Refresh the live pill every 30s so the countdown doesn't go stale while
+// an operator is staring at the panel deciding what to change.
+setInterval(() => { if ($('#windowStatus')) updateWindowStatus(); }, 30000);
+
 async function saveTimeWindow(){
-  const startHour = parseInt($('#setStartHour').value, 10);
-  const endHour   = parseInt($('#setEndHour').value, 10);
-  const timezone  = $('#setTimezone').value;
-  if(!Number.isFinite(startHour) || startHour < 0 || startHour > 23){ toast('⚠ Start hour must be 0–23','err'); return; }
-  if(!Number.isFinite(endHour)   || endHour   < 0 || endHour   > 23){ toast('⚠ End hour must be 0–23','err'); return; }
-  if(startHour >= endHour){ toast('⚠ End hour must be greater than start hour','err'); return; }
+  const timezone = $('#setTimezone').value;
+  const alwaysOn = $('#setAlwaysOn').checked;
+  let startHour, endHour;
+
+  if (alwaysOn){
+    // 24/7 sentinel — discoverAuto.js#isWithinTimeWindow treats start===end
+    // as "always open". Using 0/0 (rather than reusing whatever was in the
+    // pickers) keeps the DB value unambiguous.
+    startHour = 0;
+    endHour   = 0;
+  } else {
+    startHour = parseInt(($('#setStartTime').value || '').split(':')[0], 10);
+    endHour   = parseInt(($('#setEndTime').value   || '').split(':')[0], 10);
+    if (!Number.isFinite(startHour) || startHour < 0 || startHour > 23){
+      toast('⚠ Pick a valid start time','err'); return;
+    }
+    if (!Number.isFinite(endHour) || endHour < 0 || endHour > 23){
+      toast('⚠ Pick a valid end time','err'); return;
+    }
+    // start === end while Always-on is OFF would silently become 24/7 on the
+    // backend — that's almost certainly not what the operator meant, so we
+    // stop them and ask for the Always-on toggle instead.
+    if (startHour === endHour){
+      toast('⚠ Start and End can\u2019t be the same hour. Use "Always on" for 24/7.','err'); return;
+    }
+    // Overnight windows (start > end) are now allowed — no rejection here.
+  }
+
   const btn = $('#setTimeWindowBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
   const {error} = await sb.from('dispatch_settings').update({
@@ -569,13 +734,18 @@ async function saveTimeWindow(){
     updated_at: new Date().toISOString()
   }).eq('id', true);
   btn.disabled = false; btn.textContent = '💾 Save Time Window';
-  if(error){ toast('⚠ '+error.message,'err'); return; }
-  if(appSettings){
+  if (error){ toast('⚠ '+error.message,'err'); return; }
+  if (appSettings){
     appSettings.agent_run_start_hour = startHour;
     appSettings.agent_run_end_hour   = endHour;
     appSettings.agent_timezone       = timezone;
   }
-  toast('Time window saved — worker picks it up on the next run','ok');
+  updateWindowStatus();
+
+  const shape = alwaysOn
+    ? 'Always on (24/7)'
+    : (startHour > endHour ? `${pad2(startHour)}:00 → ${pad2(endHour)}:00 (overnight)` : `${pad2(startHour)}:00 – ${pad2(endHour)}:00`);
+  toast(`Time window saved: ${shape} ${timezone} — worker picks it up on the next run`,'ok');
 }
 
 async function addNewJobSource(){

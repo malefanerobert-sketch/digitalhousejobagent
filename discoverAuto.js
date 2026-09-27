@@ -86,7 +86,22 @@ async function loadAdminSettings() {
 }
 
 /**
- * Check if current time is within admin-configured time window
+ * Check if current time is within the admin-configured time window.
+ *
+ * Supports three shapes, all encoded on the same two integer hours the admin
+ * panel writes to dispatch_settings:
+ *
+ *   1. Daytime window: start < end. Open when hour ∈ [start, end).
+ *      Example: 8 → 16 covers 08:00–15:59.
+ *   2. Overnight window: start > end. Wraps midnight, open when
+ *      hour ≥ start OR hour < end. Example: 22 → 6 covers 22:00–05:59.
+ *   3. Always on (24/7): start === end. Any hour is inside the window.
+ *
+ * Historically only case #1 was supported and start ≥ end silently made the
+ * agent never fire (the admin panel used to reject those saves outright).
+ * The new panel offers an "Always on" toggle and lets end wrap past midnight,
+ * so this function must recognise both cases or those saves would be dead on
+ * arrival.
  */
 function isWithinTimeWindow() {
   // Allow skipping time window check for testing via SKIP_TIME_CHECK env var
@@ -100,6 +115,12 @@ function isWithinTimeWindow() {
     return true;
   }
 
+  const { start_hour: start, end_hour: end } = adminSettings;
+
+  // 24/7 sentinel: start === end means "no time restriction". This is what
+  // the admin panel writes when the operator toggles "Always on".
+  if (start === end) return true;
+
   const now = new Date();
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: adminSettings.timezone,
@@ -108,7 +129,14 @@ function isWithinTimeWindow() {
   });
   const [hourStr] = formatter.format(now).split(':');
   const hour = parseInt(hourStr);
-  return hour >= adminSettings.start_hour && hour < adminSettings.end_hour;
+
+  // Overnight window (e.g. 22 → 6): open when we're past `start` today OR
+  // before `end` tomorrow. A plain `hour >= start && hour < end` would be
+  // false for every hour in this case, which is exactly the bug the old code
+  // shipped for anyone who managed to save such a window.
+  if (start > end) return hour >= start || hour < end;
+
+  return hour >= start && hour < end;
 }
 
 /**
@@ -492,7 +520,9 @@ async function run() {
 
   // Check time window
   if (!isWithinTimeWindow()) {
-    console.log(`⏰ [discoverAuto] Outside configured time window (${adminSettings.start_hour}:00-${adminSettings.end_hour}:00 ${adminSettings.timezone}). Skipping this run.`);
+    const { start_hour: s, end_hour: e, timezone: tz } = adminSettings;
+    const shape = s === e ? '24/7' : (s > e ? `${s}:00→${e}:00 (overnight)` : `${s}:00-${e}:00`);
+    console.log(`⏰ [discoverAuto] Outside configured time window (${shape} ${tz}). Skipping this run.`);
     return;
   }
 
