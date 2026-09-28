@@ -29,7 +29,29 @@ const aiMatch = require('./aiMatch');
 // clean list of "link text + URL" pairs to the AI rather than raw HTML —
 // smaller, cheaper, and immune to markup bloat burying the real content.
 
-const MAX_LINKS = 400; // keep the AI prompt a reasonable size/cost
+const MAX_LINKS = 600; // hard cap on links considered per page
+const LINKS_PER_CHUNK = 150; // links per AI extraction call — keeps each
+// request (and its JSON response) small enough that big boards like Pnet
+// don't blow past the model's output limit and truncate the JSON mid-array
+// ("Unterminated string in JSON"), which used to silently drop the whole page.
+
+// Tolerant parse of the AI's job array. Strips markdown fences, isolates the
+// first JSON array, and — if the response was cut off mid-way — salvages it by
+// trimming back to the last complete object and closing the array. Returns an
+// array on success, or null if nothing usable could be recovered.
+function parseJobsLoose(raw) {
+  if (!raw) return null;
+  let s = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const start = s.indexOf('[');
+  if (start === -1) return null;
+  s = s.slice(start);
+  try { const a = JSON.parse(s); if (Array.isArray(a)) return a; } catch (_) {}
+  const lastBrace = s.lastIndexOf('}');
+  if (lastBrace !== -1) {
+    try { const a = JSON.parse(s.slice(0, lastBrace + 1) + ']'); if (Array.isArray(a)) return a; } catch (_) {}
+  }
+  return null;
+}
 
 function buildExtractPrompt(links, pageUrl, agentPrompt) {
   const preamble = agentPrompt
@@ -89,6 +111,7 @@ async function reportUnreachable(seeker, source, reason) {
   const { data: match, error: insErr } = await supabase.from('job_matches').insert({
     job_seeker_id: seeker.id,
     job_source_id: null,
+    job_custom_source_id: source.id,
     job_title: '(watched page)',
     company_name: source.company_name,
     job_url: placeholderUrl,
@@ -104,6 +127,18 @@ async function reportUnreachable(seeker, source, reason) {
     notes: `Could not reach ${source.company_name}'s watched page (${placeholderUrl}) — ${reason}. Check the URL is correct and the page is public.`
   });
   console.log(`[discoverWatched]  ⚠ reported "${source.company_name}" as unreachable`);
+}
+
+// Report a discovery problem for a source to every active seeker who still
+// has it (i.e. hasn't opted out). This is what surfaces a broken/silent
+// watched page in the admin's Application Report and the user's Applications
+// tab — previously reportUnreachable existed but was never called, so every
+// failure only ever hit the Railway console and nothing reached the DB.
+async function reportProblemToSeekers(seekers, optedOut, source, reason) {
+  for (const seeker of (seekers || [])) {
+    if (optedOut.has(`${seeker.id}|${source.id}`)) continue;
+    await reportUnreachable(seeker, source, reason);
+  }
 }
 
 async function run() {
@@ -181,31 +216,56 @@ async function run() {
     
     if (links === null) {
       console.error(`[discoverWatched]  ✖ could not load page "${source.company_name}":`, lastErr?.message);
+      await reportProblemToSeekers(seekers, optedOut, source, `the page could not be loaded (${lastErr?.message || 'unknown error'}) — the site may be down, the URL may be wrong, or the domain may no longer exist`);
       await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
     if (!links.length) {
       console.log(`[discoverWatched]  page loaded but no readable links found on "${source.company_name}"`);
+      await reportProblemToSeekers(seekers, optedOut, source, 'the page loaded but no readable links were found — it is likely a JavaScript-rendered board that needs a different scraping approach, or it is behind a login/anti-bot wall');
       await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
-    // Extract jobs with AI ONCE per source
-    const raw = await aiMatch.completeWithAI(buildExtractPrompt(links.slice(0, MAX_LINKS), source.career_page_url, aiMatch.agentPrompt()), null);
-    if (!raw) {
-      console.log(`[discoverWatched]  ⚠ AI extraction failed or returned nothing for "${source.company_name}"`);
+    // Extract jobs with AI. Big boards can list hundreds of links, and asking
+    // the model to return them all in one JSON array used to overflow its
+    // output limit and truncate the response mid-array (Pnet's "Unterminated
+    // string in JSON"). We now send the links in small chunks and merge the
+    // results, so no single response has to be large enough to truncate.
+    const linkSlice = links.slice(0, MAX_LINKS);
+    const aiAvailable = aiMatch.isEnabled();
+    let jobs = [];
+    let sawAnyResponse = false;
+    let anyChunkUnparseable = false;
+    for (let i = 0; i < linkSlice.length; i += LINKS_PER_CHUNK) {
+      const chunk = linkSlice.slice(i, i + LINKS_PER_CHUNK);
+      const raw = await aiMatch.completeWithAI(buildExtractPrompt(chunk, source.career_page_url, aiMatch.agentPrompt()), null);
+      if (raw === null || raw === '') continue; // AI disabled or empty for this chunk
+      sawAnyResponse = true;
+      const parsed = parseJobsLoose(raw);
+      if (parsed === null) { anyChunkUnparseable = true; continue; }
+      jobs = jobs.concat(parsed);
+    }
+
+    if (!sawAnyResponse) {
+      console.log(`[discoverWatched]  ⚠ AI extraction returned nothing for "${source.company_name}"`);
+      // Only surface this to seekers when the AI is actually configured — a
+      // missing shared key is a global config problem, not a per-company one,
+      // and shouldn't spam every company's report.
+      if (aiAvailable) {
+        await reportProblemToSeekers(seekers, optedOut, source, 'the job list on this page could not be read (the AI extraction service returned no response)');
+      }
       await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
 
-    let jobs;
-    try {
-      const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      jobs = JSON.parse(cleaned);
-      if (!Array.isArray(jobs)) throw new Error('AI did not return a JSON array');
-    } catch (err) {
-      console.error(`[discoverWatched]  ✖ could not parse AI extraction result:`, err.message);
+    if (jobs.length === 0) {
+      const reason = anyChunkUnparseable
+        ? 'the job list on this page could not be read (the AI response was not valid JSON, even after recovery)'
+        : 'no job postings could be identified on this page — it is likely a landing or search page rather than a direct job list, or the postings require login to view';
+      console.log(`[discoverWatched]  ⚠ 0 postings from "${source.company_name}" — ${reason}`);
+      await reportProblemToSeekers(seekers, optedOut, source, reason);
       await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }

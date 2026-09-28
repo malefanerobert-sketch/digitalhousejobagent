@@ -480,6 +480,7 @@ async function saveMatches(userId, matches) {
 
   const rows = matches.map(job => ({
     job_seeker_id: userId,
+    job_source_id: job.job_source_id || null,
     job_title: job.title,
     company_name: job.company,
     location: job.location,
@@ -585,6 +586,12 @@ async function run() {
     for (const source of enabledSources) {
       const keywords = (user.job_title_keywords || []).join(' ') || 'software';
       const jobs = await fetchJobsFromSource(source, keywords);
+      // Stamp the originating source id onto every job so saveMatches can
+      // persist job_matches.job_source_id. This was previously left null,
+      // which meant feed matches (e.g. Jobmail) were never linked back to
+      // their source and any admin stat grouping matches by source
+      // under-reported the feeds.
+      jobs.forEach(j => { j.job_source_id = source.id; });
       allJobs = allJobs.concat(jobs);
     }
 
