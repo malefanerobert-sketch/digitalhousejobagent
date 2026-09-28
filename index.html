@@ -1981,10 +1981,6 @@ function renderWatch(){
   el.innerHTML = customSources.map(w=>'<div class="lrow">'+
     '<div class="grow"><b>'+esc(w.company_name)+'</b><div class="sub2"><a href="'+esc(w.career_page_url)+'" target="_blank" rel="noopener">'+esc(w.career_page_url)+'</a></div></div>'+
     '<span class="pill teal">Search &amp; apply</span>'+
-    '<span class="pill gray" title="'+(w.added_by_seeker_id===currentSeeker.id
-      ? 'You added this page — it is shared with every job seeker'
-      : 'Another job seeker added this page first — you are watching the same one')+'">'+
-      (w.added_by_seeker_id===currentSeeker.id ? 'Shared by you' : 'Shared')+'</span>'+
     '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'" title="Remove from your account only — this page keeps running for other users">Remove</button></div>'
   ).join('');
 }
