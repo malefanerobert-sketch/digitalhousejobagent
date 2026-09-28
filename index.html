@@ -1455,9 +1455,9 @@ function isBlocked(kind,val){
 }
 
 function renderDashboard(){
-  // "Matches" now only ever holds jobs the agent has actually applied for
-  // (loadMatches filters to status==='applied'), so this card is a simple
-  // count. "Needs your input" mirrors the exact rows renderApplications()
+  // "Matches" only holds the agent's own pipeline — discovered, queued and
+  // applied jobs (loadMatches excludes needs_manual_action), so this card is a
+  // simple count. "Needs your input" mirrors the exact rows renderApplications()
   // groups into the Application report's red section — same filters, so
   // the number on the card always matches what's actually in that list.
   const blockedCos = (currentSeeker?.blocked_companies||[]).map(c=>c.toLowerCase());
@@ -1643,12 +1643,15 @@ function updatePfLocsLabel(){
 
 async function loadMatches(){
   if(!currentSeeker){ matches=[]; return; }
-  // Show discovered jobs the seeker can act on: pending (auto-discovery output),
-  // approved (queued for auto-apply), applied (already applied by agent), and
-  // needs_manual_action (agent couldn't apply itself). Skip rejected/failed/paused.
+  // Matches is for the AGENT's own pipeline only: pending (discovered) and
+  // applied (already applied by the agent). In automatic mode jobs go straight
+  // from pending -> applied, so those are the only two states that occur here.
+  // needs_manual_action is deliberately EXCLUDED — those jobs need a human,
+  // so they live only in the Applications tab (Application report), never here.
+  // Skip approved/rejected/failed/paused too.
   const {data, error} = await sb.from('job_matches').select('*')
     .eq('job_seeker_id', currentSeeker.id)
-    .in('status', ['pending','approved','applied','needs_manual_action'])
+    .in('status', ['pending','applied'])
     .order('discovered_at', {ascending:false});
   // v1 scope: South Africa only. The classifyLocationCountry() function above
   // supports the full country list already — when international expansion
@@ -1684,11 +1687,10 @@ function renderMatches(){
     updateBulkBar();
     return;
   }
-  // Status → pill mapping. Same list of statuses loadMatches() filters on.
+  // Status → pill mapping. loadMatches() only ever loads pending + applied
+  // (needs_manual_action lives in Applications; approved isn't used in automatic mode).
   const statusPill = (s) => {
-    if (s === 'applied')             return '<span class="pill teal">✔ Applied</span>';
-    if (s === 'approved')            return '<span class="pill amber">🟢 Queued</span>';
-    if (s === 'needs_manual_action') return '<span class="pill amber">⚠ Needs your input</span>';
+    if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
     return '<span class="pill gray">🔍 Discovered</span>'; // pending
   };
   g.innerHTML = list.map(m=>{
