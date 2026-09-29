@@ -112,8 +112,26 @@ function isSubDegree(qualification) {
   return /(matric|grade 12|grade 11|grade 10|senior certificate|nsc|certificate|diploma|n[1-6]\b|nqf|no formal|high school)/.test(q);
 }
 
+// ---------- User-chosen apply scope (profile: "Qualification levels" + "Experience ranges") ----------
+// When a seeker has ticked qualification levels / experience ranges in their
+// profile, THEY decide what they may apply for. Those ticks replace the old
+// automatic guards (level guard, "ad needs more than your profile") so the
+// agent never second-guesses the user. Seekers without ticks keep legacy behaviour.
+function scopeQuals(seeker) {
+  return Array.isArray(seeker && seeker.apply_qualifications) ? seeker.apply_qualifications.filter(Boolean) : [];
+}
+function scopeRanges(seeker) {
+  return (Array.isArray(seeker && seeker.apply_experience_ranges) ? seeker.apply_experience_ranges : [])
+    .map(r => String(r).split('-').map(Number))
+    .filter(r => r.length === 2 && r.every(Number.isFinite) && r[1] >= r[0]);
+}
+function hasApplyScope(seeker) {
+  return scopeQuals(seeker).length > 0 || scopeRanges(seeker).length > 0;
+}
+
 /** Does the title look like a role above the seeker's qualification level? */
 function tooSenior(title, seeker) {
+  if (hasApplyScope(seeker)) return false; // user's own ticks override the level guard
   if (!isSubDegree(seeker && seeker.highest_qualification)) return false;
   const t = norm(title);
   const own = (seeker.job_title_keywords || []).map(norm).join(' ');
@@ -147,6 +165,9 @@ const RANK_LABEL = { 1: 'Matric', 2: 'Certificate', 3: 'Diploma', 4: "Bachelor's
 
 function buildRequirementsPrompt(seeker, title, adText) {
   const skills = (seeker.skills || []).slice(0, 20).join(', ') || 'not stated';
+  const scope = hasApplyScope(seeker)
+    ? `\n- The candidate has CHOSEN to apply for jobs requiring these qualification levels: ${scopeQuals(seeker).join(', ') || 'any'}; and these experience ranges (years): ${(seeker.apply_experience_ranges || []).join(', ') || 'any'}.\n- Qualification level and years of experience are checked separately in code — do NOT set fits=false because of qualification or years. Set fits=false ONLY for a mandatory professional registration/licence or mandatory technical skill the candidate clearly lacks.`
+    : '';
   return `You are checking whether a job ad is realistic for a candidate. Read the job ad and decide if the candidate MEETS the ad's stated minimum requirements.
 
 CANDIDATE
@@ -155,7 +176,7 @@ CANDIDATE
 - Years of experience: ${seeker.years_experience ?? 'not stated'}
 - Current position: ${seeker.current_position || 'not stated'}
 - Skills: ${skills}
-- Roles they are looking for: ${(seeker.job_title_keywords || []).join(', ') || 'any'}
+- Roles they are looking for: ${(seeker.job_title_keywords || []).join(', ') || 'any'}${scope}
 
 JOB TITLE: ${title}
 
@@ -165,7 +186,7 @@ ${adText}
 """
 
 Rules:
-- min_qualification = the LOWEST qualification the ad would accept ("Diploma or degree" -> diploma). One of: "matric", "certificate", "diploma", "degree", "honours", "masters", "doctorate", "unknown" (if the ad states none).
+- min_qualification = the LOWEST qualification the ad would accept ("Diploma or degree" -> diploma). One of: "matric", "certificate", "diploma", "degree", "honours", "postgraduate", "masters", "doctorate", "unknown" (if the ad states none).
 - min_years = the minimum years of experience the ad requires, as a number, or null if none is stated.
 - Things described as "advantageous", "preferred", "a plus" or "recommended" are NOT requirements.
 - fits = false ONLY when the ad clearly states a minimum qualification, experience level, professional registration or mandatory technical skill set that the candidate clearly does NOT have. If the ad is vague or the candidate plausibly qualifies, fits = true.
@@ -174,7 +195,7 @@ Reply with ONLY this JSON, no other text:
 {"fits": true, "min_qualification": "unknown", "min_years": null, "reason": "one short sentence"}`;
 }
 
-const MIN_QUAL_RANK = { matric: 1, certificate: 2, diploma: 3, degree: 4, honours: 5, masters: 6, doctorate: 7 };
+const MIN_QUAL_RANK = { matric: 1, certificate: 2, diploma: 3, degree: 4, honours: 5, postgraduate: 5, masters: 6, doctorate: 7 };
 
 function parseVerdict(raw) {
   if (!raw) return null;
@@ -190,6 +211,28 @@ function parseVerdict(raw) {
  */
 function evaluateVerdict(verdict, seeker) {
   if (!verdict || typeof verdict !== 'object') return { ok: true };
+
+  if (hasApplyScope(seeker)) {
+    // Qualification: an ad's min level is the LOWEST it accepts, so the ad is in
+    // scope if the user ticked that level or anything above it.
+    const ticked = scopeQuals(seeker).map(qualificationRank).filter(Boolean);
+    const need = MIN_QUAL_RANK[String(verdict.min_qualification || '').toLowerCase()] || null;
+    if (need && ticked.length && need > Math.max(...ticked)) {
+      return { ok: false, reason: `ad requires at least a ${RANK_LABEL[need]}; you allow up to ${RANK_LABEL[Math.max(...ticked)]} (${scopeQuals(seeker).join(', ')})` };
+    }
+    // Experience: the ad's minimum years must fall inside one of the ticked ranges.
+    const ranges = scopeRanges(seeker);
+    const minY = Number(verdict.min_years);
+    if (ranges.length && Number.isFinite(minY) && minY > 0 && !ranges.some(([lo, hi]) => minY >= lo && minY <= hi)) {
+      return { ok: false, reason: `ad asks for ${minY} years experience; you allow ${(seeker.apply_experience_ranges || []).join(', ')} years` };
+    }
+    // Licence / registration / mandatory technical skills (AI, fails open)
+    if (verdict.fits === false) {
+      return { ok: false, reason: String(verdict.reason || 'ad requires a licence or skills not on the profile').slice(0, 200) };
+    }
+    return { ok: true };
+  }
+
   const seekerRank = qualificationRank(seeker.highest_qualification);
   const need = MIN_QUAL_RANK[String(verdict.min_qualification || '').toLowerCase()] || null;
   if (need && seekerRank && need > seekerRank) {
@@ -225,4 +268,4 @@ async function checkRequirements({ seeker, title, adText, complete }) {
   }
 }
 
-module.exports = { locationInScope, scoreTitle, tooSenior, titleFitsSeeker, isSubDegree, norm, qualificationRank, evaluateVerdict, parseVerdict, checkRequirements, buildRequirementsPrompt };
+module.exports = { hasApplyScope, locationInScope, scoreTitle, tooSenior, titleFitsSeeker, isSubDegree, norm, qualificationRank, evaluateVerdict, parseVerdict, checkRequirements, buildRequirementsPrompt };

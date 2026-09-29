@@ -428,7 +428,9 @@ User Profile:
 - Years of experience: ${userProfile.years_experience ?? 'not stated'}
 - Current position: ${userProfile.current_position || 'not stated'}
 
-IMPORTANT: score a job LOW (below 30) if its title is a more senior or more technical role than the profile supports (for example engineer, architect, scientist, senior, lead or manager roles when the person only has a matric, certificate or diploma). Only score high when the job title is one of the titles they are interested in, or a very close variant.
+${jobFit.hasApplyScope(userProfile)
+  ? `IMPORTANT: this person has chosen which qualification levels (${(userProfile.apply_qualifications || []).join(', ') || 'any'}) and experience ranges (${(userProfile.apply_experience_ranges || []).join(', ') || 'any'} years) they want to apply for. Do NOT lower a score because a role looks senior or technical. Only score high when the job title is one of the titles they are interested in, or a very close variant.`
+  : `IMPORTANT: score a job LOW (below 30) if its title is a more senior or more technical role than the profile supports (for example engineer, architect, scientist, senior, lead or manager roles when the person only has a matric, certificate or diploma). Only score high when the job title is one of the titles they are interested in, or a very close variant.`}
 
 Jobs to score (0-100, higher = better match):
 ${batch.map((j, idx) => `

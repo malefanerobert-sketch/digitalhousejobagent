@@ -101,6 +101,25 @@ input[type=time]::-webkit-calendar-picker-indicator{
 select{cursor:pointer}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 
+
+/* apply-scope cards (qualifications / experience) */
+.scope-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.scope-card{display:flex;align-items:center;gap:12px;background:var(--input-bg);border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px;cursor:pointer;transition:.15s;position:relative;user-select:none;margin:0;
+  text-transform:none;letter-spacing:0;font-size:14px;font-weight:600;color:var(--text)}
+.scope-card:hover{border-color:var(--accent)}
+.scope-card.on{border-color:var(--accent);background:rgba(var(--accent-rgb),.10)}
+.scope-card input{width:18px;height:18px;flex:none;padding:0;accent-color:var(--accent);cursor:pointer}
+.scope-card .sc-x{margin-left:auto;width:24px;height:24px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(255,107,107,.15);color:#ff6b6b;border:1px solid rgba(255,107,107,.35);border-radius:8px;
+  cursor:pointer;font-size:13px;font-weight:700;line-height:1}
+.scope-card.yrs{font-size:18px;font-variant-numeric:tabular-nums}
+.scope-card.yrs small{font-size:12px;color:var(--muted);font-weight:600;margin-left:2px}
+.scope-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.scope-add input{width:auto;flex:1;min-width:160px}
+.scope-add input.num{flex:none !important;width:90px !important;text-align:center}
+.scope-err{border-radius:12px;outline:2px solid var(--danger);outline-offset:6px}
+
 /* preferred-locations multiselect (Profile) */
 .loc-multiselect{position:relative}
 .loc-ms-btn{width:100%;background:var(--input-bg);border:1px solid var(--line);color:var(--text);
@@ -677,9 +696,42 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           </div>
         </div>
 
-        <!-- ============= 5. WORK EXPERIENCE ============= -->
+        <!-- ============= 5. APPLY SCOPE: QUALIFICATIONS (REQUIRED) ============= -->
+        <div class="card" id="pfQualCard" style="margin-bottom:14px">
+          <h3 style="margin-bottom:6px">5&nbsp;· Qualification levels <span style="color:var(--accent);font-size:12px">* required</span></h3>
+          <p class="hint" style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:12px">
+            Allow the agent to search &amp; apply for jobs that may require the following qualifications.
+            Tick <b>one or more</b> (e.g. Diploma, Degree and Honours Degrees). The agent will only apply to jobs whose minimum requirement is one of the levels you tick.
+          </p>
+          <div class="scope-grid" id="pfQualGrid"></div>
+          <div class="scope-add">
+            <input id="pfQualNew" placeholder="Not listed? Add a qualification, e.g. Master's Degree" maxlength="60"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomQual();}">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addCustomQual()">+ Add card</button>
+          </div>
+        </div>
+
+        <!-- ============= 6. APPLY SCOPE: EXPERIENCE (REQUIRED) ============= -->
+        <div class="card" id="pfExpCard" style="margin-bottom:14px">
+          <h3 style="margin-bottom:6px">6&nbsp;· Experience ranges <span style="color:var(--accent);font-size:12px">* required</span></h3>
+          <p class="hint" style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:12px">
+            Allow the agent to search &amp; apply for jobs that may require experience of the ranges below (in years).
+            Tick <b>one or more</b>. The agent reads this together with your form, uploaded CV and other documents before it applies.
+          </p>
+          <div class="scope-grid" id="pfExpGrid"></div>
+          <div class="scope-add">
+            <span style="color:var(--muted);font-size:13px">Custom range:</span>
+            <input type="number" class="num" id="pfExpFrom" min="0" max="60" placeholder="From">
+            <span style="color:var(--muted)">to</span>
+            <input type="number" class="num" id="pfExpTo" min="1" max="60" placeholder="To">
+            <span style="color:var(--muted);font-size:13px">years</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addCustomExp()">+ Add range</button>
+          </div>
+        </div>
+
+        <!-- ============= 7. WORK EXPERIENCE ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">5&nbsp;· Work experience</h3>
+          <h3 style="margin-bottom:12px">7&nbsp;· Work experience</h3>
           <div class="row2">
             <div class="field"><label>Current / most recent employer</label><input id="pfCurEmployer" placeholder="Company name"></div>
             <div class="field"><label>Current / most recent position</label><input id="pfCurPosition" placeholder="Job title"></div>
@@ -706,9 +758,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           </div>
         </div>
 
-        <!-- ============= 6. EDUCATION ============= -->
+        <!-- ============= 8. EDUCATION ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">6&nbsp;· Education</h3>
+          <h3 style="margin-bottom:12px">8&nbsp;· Education</h3>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div class="hint" style="color:var(--muted);font-size:12px">Add each qualification separately</div>
             <button type="button" class="btn btn-ghost btn-sm" onclick="addEduRow()">+ Add qualification</button>
@@ -716,9 +768,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <div id="pfEduList" style="display:grid;gap:12px"></div>
         </div>
 
-        <!-- ============= 7. SKILLS & LANGUAGES ============= -->
+        <!-- ============= 9. SKILLS & LANGUAGES ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">7&nbsp;· Skills &amp; languages</h3>
+          <h3 style="margin-bottom:12px">9&nbsp;· Skills &amp; languages</h3>
           <div class="field"><label>Skills (comma-separated)</label>
             <input id="pfSkills" placeholder="e.g. Microsoft Excel, Data Entry, SAP, Sage Pastel">
           </div>
@@ -727,9 +779,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           </div>
         </div>
 
-        <!-- ============= 8. ABOUT YOU ============= -->
+        <!-- ============= 10. ABOUT YOU ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">8&nbsp;· About you</h3>
+          <h3 style="margin-bottom:12px">10&nbsp;· About you</h3>
           <div class="field"><label>Short bio &nbsp;<span style="color:var(--muted);font-size:11px">"Tell us about yourself"</span></label>
             <textarea id="pfBio" rows="4" placeholder="A few sentences about your background and what you're looking for."></textarea>
           </div>
@@ -746,9 +798,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           </div>
         </div>
 
-        <!-- ============= 9. REFERENCES ============= -->
+        <!-- ============= 11. REFERENCES ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">9&nbsp;· References</h3>
+          <h3 style="margin-bottom:12px">11&nbsp;· References</h3>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div class="hint" style="color:var(--muted);font-size:12px">Usually 2-3 professional references</div>
             <button type="button" class="btn btn-ghost btn-sm" onclick="addRefRow()">+ Add reference</button>
@@ -756,9 +808,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <div id="pfRefList" style="display:grid;gap:12px"></div>
         </div>
 
-        <!-- ============= 10. CV UPLOAD (OPTIONAL) ============= -->
+        <!-- ============= 12. CV UPLOAD (OPTIONAL) ============= -->
         <div class="card" style="margin-bottom:14px">
-          <h3 style="margin-bottom:12px">10&nbsp;· CV upload <span class="pill gray" style="font-size:10px">optional</span></h3>
+          <h3 style="margin-bottom:12px">12&nbsp;· CV upload <span class="pill gray" style="font-size:10px">optional</span></h3>
           <input type="file" id="pfResume" accept=".pdf,.doc,.docx">
           <div class="hint" id="pfResumeName"></div>
         </div>
@@ -1085,6 +1137,85 @@ function toggleDrawer(){
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDrawer(); });
 
 /* ================= PROFILE ================= */
+
+/* ================= PROFILE — APPLY SCOPE (qualifications + experience) ================= */
+// What the user allows the agent to apply for. Both are REQUIRED (>=1 pick each)
+// and saved to job_seekers.apply_qualifications / apply_experience_ranges (text[]).
+var PF_QUAL_PRESETS = ['Matric','Certificates','Advanced Certificate','Diploma','Advanced Diploma',
+  'Degree','Bachelor Degrees','Honours Degrees','Postgraduate Diplomas'];
+var PF_EXP_PRESETS  = ['0-1','1-4','4-8','8-12','12-16'];
+var pfQualSel = [];   // selected labels (presets + custom)
+var pfQualCustom = []; // custom labels added by the user
+var pfExpSel = [];    // selected ranges e.g. '1-4'
+var pfExpCustom = []; // custom ranges
+
+function renderQualGrid(){
+  const all = [...PF_QUAL_PRESETS, ...pfQualCustom];
+  $('#pfQualGrid').innerHTML = all.map((q,i)=>{
+    const on = pfQualSel.includes(q), custom = i >= PF_QUAL_PRESETS.length;
+    return '<label class="scope-card'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked ':'')+'data-q="'+esc(q)+'" onchange="onQualToggle(this)"> <span>'+esc(q)+'</span>'+
+      (custom?'<button type="button" class="sc-x" title="Remove" onclick="removeCustomQual(event,\''+esc(q).replace(/'/g,"\\'")+'\')">✕</button>':'')+'</label>';
+  }).join('');
+}
+function onQualToggle(cb){
+  const q = cb.getAttribute('data-q');
+  pfQualSel = cb.checked ? [...new Set([...pfQualSel,q])] : pfQualSel.filter(x=>x!==q);
+  cb.closest('.scope-card').classList.toggle('on', cb.checked);
+  $('#pfQualCard').classList.remove('scope-err');
+}
+function addCustomQual(){
+  const inp = $('#pfQualNew'); const v = inp.value.trim().replace(/\s+/g,' ');
+  if(!v) return;
+  const exists = [...PF_QUAL_PRESETS,...pfQualCustom].some(x=>x.toLowerCase()===v.toLowerCase());
+  if(exists){ toast('That qualification is already listed','warn'); inp.value=''; return; }
+  pfQualCustom.push(v); pfQualSel.push(v);       // a newly added card starts ticked
+  inp.value=''; renderQualGrid(); $('#pfQualCard').classList.remove('scope-err');
+}
+function removeCustomQual(e,q){
+  e.preventDefault(); e.stopPropagation();
+  pfQualCustom = pfQualCustom.filter(x=>x!==q); pfQualSel = pfQualSel.filter(x=>x!==q);
+  renderQualGrid();
+}
+
+function expLabel(r){ return r.replace('-',' – '); }
+function renderExpGrid(){
+  const all = [...PF_EXP_PRESETS, ...pfExpCustom];
+  $('#pfExpGrid').innerHTML = all.map((r,i)=>{
+    const on = pfExpSel.includes(r), custom = i >= PF_EXP_PRESETS.length;
+    return '<label class="scope-card yrs'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked ':'')+'data-r="'+esc(r)+'" onchange="onExpToggle(this)"> <span>'+esc(expLabel(r))+' <small>years</small></span>'+
+      (custom?'<button type="button" class="sc-x" title="Remove" onclick="removeCustomExp(event,\''+esc(r)+'\')">✕</button>':'')+'</label>';
+  }).join('');
+}
+function onExpToggle(cb){
+  const r = cb.getAttribute('data-r');
+  pfExpSel = cb.checked ? [...new Set([...pfExpSel,r])] : pfExpSel.filter(x=>x!==r);
+  cb.closest('.scope-card').classList.toggle('on', cb.checked);
+  $('#pfExpCard').classList.remove('scope-err');
+}
+function addCustomExp(){
+  const a = parseInt($('#pfExpFrom').value,10), b = parseInt($('#pfExpTo').value,10);
+  if(isNaN(a)||isNaN(b)||a<0||b<=a||b>60){ toast('Enter a valid range, e.g. 16 to 20','warn'); return; }
+  const r = a+'-'+b;
+  if([...PF_EXP_PRESETS,...pfExpCustom].includes(r)){ toast('That range is already listed','warn'); return; }
+  pfExpCustom.push(r); pfExpSel.push(r);
+  $('#pfExpFrom').value=''; $('#pfExpTo').value='';
+  renderExpGrid(); $('#pfExpCard').classList.remove('scope-err');
+}
+function removeCustomExp(e,r){
+  e.preventDefault(); e.stopPropagation();
+  pfExpCustom = pfExpCustom.filter(x=>x!==r); pfExpSel = pfExpSel.filter(x=>x!==r);
+  renderExpGrid();
+}
+// Restore from saved arrays: anything not in the presets becomes a custom card.
+function setApplyScope(quals, exps){
+  pfQualSel = Array.isArray(quals) ? [...quals] : [];
+  pfQualCustom = pfQualSel.filter(q=>!PF_QUAL_PRESETS.includes(q));
+  pfExpSel = Array.isArray(exps) ? [...exps] : [];
+  pfExpCustom = pfExpSel.filter(r=>!PF_EXP_PRESETS.includes(r));
+  renderQualGrid(); renderExpGrid();
+  $('#pfQualCard')?.classList.remove('scope-err'); $('#pfExpCard')?.classList.remove('scope-err');
+}
+
 /* ================= PROFILE — LOAD ================= */
 // The list of every simple <input> / <select> / <textarea> we round-trip
 // to a single column on job_seekers. Structure: [fieldId, columnName, kind].
@@ -1160,6 +1291,7 @@ async function loadProfile(){
   // Reset every simple field
   PF_FIELDS.forEach(([id,,kind]) => pfSetVal(id, null, kind));
   renderLocMenu([]);
+  setApplyScope([], []);
   $('#pfResumeName').textContent = '';
   $('#pfResume').value = '';
   $('#pfSaveStatus').textContent = '';
@@ -1175,6 +1307,7 @@ async function loadProfile(){
   if(!data) return;
   PF_FIELDS.forEach(([id, col, kind]) => pfSetVal(id, data[col], kind));
   renderLocMenu(data.preferred_locations || []);
+  setApplyScope(data.apply_qualifications || [], data.apply_experience_ranges || []);
   $('#pfResumeName').textContent = data.resume_url ? '✓ CV on file' : '';
 
   // Sub-tables
@@ -1209,6 +1342,20 @@ async function saveProfile(){
     return;
   }
 
+
+  // 1b. Apply-scope guard — qualifications AND experience ranges are compulsory
+  const scopeMissing = [];
+  if (!pfQualSel.length) scopeMissing.push('Qualification levels (tick at least one)');
+  if (!pfExpSel.length)  scopeMissing.push('Experience ranges (tick at least one)');
+  if (scopeMissing.length) {
+    alert('Cannot save yet — please complete:\n\n• ' + scopeMissing.join('\n• '));
+    const target = !pfQualSel.length ? $('#pfQualCard') : $('#pfExpCard');
+    $('#pfQualCard').classList.toggle('scope-err', !pfQualSel.length);
+    $('#pfExpCard').classList.toggle('scope-err', !pfExpSel.length);
+    target.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
     // Optional CV upload
@@ -1228,6 +1375,8 @@ async function saveProfile(){
     PF_FIELDS.forEach(([id, col, kind]) => { payload[col] = pfGetVal(id, kind); });
     const newLocs = getSelectedLocs();
     payload.preferred_locations = newLocs;
+    payload.apply_qualifications = [...pfQualSel];
+    payload.apply_experience_ranges = [...pfExpSel];
 
     // When the user widens their apply-scope back to "all locations" (either
     // from a narrower set OR their very first save), signal the backend to
@@ -1249,7 +1398,10 @@ async function saveProfile(){
     payload.status = 'active';
 
     const {data, error} = await sb.from('job_seekers').upsert(payload, {onConflict:'user_id'}).select().single();
-    if (error) throw error;
+    if (error) {
+      if (/apply_qualifications|apply_experience_ranges/.test(error.message||'')) throw new Error('Database is missing the new apply-scope columns — run the migration SQL in Supabase first.');
+      throw error;
+    }
     currentSeeker = data;
 
     // Save sub-tables in parallel — replace-mode: wipe existing rows for this
@@ -1483,7 +1635,9 @@ function renderDashboard(){
     && currentSeeker.id_number
     && currentSeeker.gender
     && currentSeeker.date_of_birth
-    && currentSeeker.nationality);
+    && currentSeeker.nationality
+    && currentSeeker.apply_qualifications?.length
+    && currentSeeker.apply_experience_ranges?.length);
   $('#setupBanner').classList.toggle('hidden', done);
   if(done){
     $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Your agent checks your watched pages every few hours and applies automatically.';
