@@ -15,6 +15,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 const sb = require('./supabaseClient');
+const jobFit = require('./jobFit');
 
 // Adzuna's app_id is a public identifier (not a secret); default to the one
 // registered for this project so Railway only has to hold the secret app_key.
@@ -423,6 +424,11 @@ User Profile:
 - Job Titles Interested: ${(userProfile.job_title_keywords || []).join(', ') || 'Any'}
 - Remote Only: ${userProfile.remote_only ? 'Yes' : 'No'}
 - Location: South Africa
+- Highest qualification: ${userProfile.highest_qualification || 'not stated'}
+- Years of experience: ${userProfile.years_experience ?? 'not stated'}
+- Current position: ${userProfile.current_position || 'not stated'}
+
+IMPORTANT: score a job LOW (below 30) if its title is a more senior or more technical role than the profile supports (for example engineer, architect, scientist, senior, lead or manager roles when the person only has a matric, certificate or diploma). Only score high when the job title is one of the titles they are interested in, or a very close variant.
 
 Jobs to score (0-100, higher = better match):
 ${batch.map((j, idx) => `
@@ -614,6 +620,15 @@ async function run() {
     if (user.remote_only) {
       allJobs = allJobs.filter(j => j.remote);
       console.log(`  🌐 Filtered to remote only: ${allJobs.length} jobs`);
+    }
+
+    // Drop roles above the seeker's qualification level (engineer / architect /
+    // scientist / senior / lead…) before they are scored or saved.
+    {
+      const before = allJobs.length;
+      allJobs = allJobs.filter(j => jobFit.titleFitsSeeker(j.title, user));
+      if (allJobs.length !== before) console.log(`  🎓 Removed ${before - allJobs.length} job(s) above ${user.full_name}'s qualification level: ${allJobs.length} left`);
+      if (allJobs.length === 0) { console.log('  ℹ No suitable jobs left after level check'); continue; }
     }
 
     // A seeker set to 'none' has deliberately opted out of AI entirely —

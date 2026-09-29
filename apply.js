@@ -21,6 +21,7 @@ try {
 }
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
+const jobFit = require('./jobFit');
 const captchaSolver = require('./captchaSolver');
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
@@ -951,10 +952,15 @@ async function run() {
       preferredLocs.length === 0 ||
       (preferredLocs.length === 1 && preferredLocs[0] === 'All locations');
     if (!scopeIsAll) {
-      const matchLoc = (m.location || '').toLowerCase();
-      const inScope = preferredLocs.some(loc => matchLoc.includes(String(loc).toLowerCase()));
-      if (!inScope) return false;
+      // Alias-aware: "Johannesburg" and "Gauteng" (plus Johannesburg-metro
+      // suburbs like Sandton/Midrand/Randburg) count as the same place.
+      if (!jobFit.locationInScope(m.location, preferredLocs)) return false;
     }
+
+    // LEVEL GUARD: never auto-apply to roles above the seeker's qualification
+    // (engineer / architect / scientist / senior / lead…). The row stays as it
+    // is; it just isn't attempted.
+    if (jobFit.tooSenior(m.job_title, m.job_seekers)) return false;
 
     if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');

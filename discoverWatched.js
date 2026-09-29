@@ -14,6 +14,7 @@ try {
 }
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
+const jobFit = require('./jobFit');
 
 // Handles job_custom_sources — company/job-board pages a user has added
 // themselves ("Watched pages" in the app). This is now the ONLY discovery
@@ -292,8 +293,13 @@ async function run() {
         try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
         catch { continue; }
 
-        const relevance = scoreMatch(`${job.title}`, seeker.job_title_keywords);
+        // A title must contain ALL words of one of the seeker's target roles
+        // ("data capture" needs "data" AND "capture") — sharing the single word
+        // "data" no longer counts — and must not be a role above their
+        // qualification level (engineer / architect / scientist / senior…).
+        const relevance = jobFit.scoreTitle(`${job.title}`, seeker.job_title_keywords);
         if (relevance < 0.3) continue;
+        if (jobFit.tooSenior(job.title, seeker)) continue;
 
         if (await alreadyKnown(seeker.id, absoluteUrl)) continue;
 
@@ -305,7 +311,7 @@ async function run() {
           company_name: source.company_name,
           job_url: absoluteUrl,
           location: job.location || null,
-          match_score: Number(relevance.toFixed(2)),
+          match_score: Math.round(relevance * 100), // stored as integer 0..100 like every other source
           status: 'pending',
           is_custom_source: true
         });
