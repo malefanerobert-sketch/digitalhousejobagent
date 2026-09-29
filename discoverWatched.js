@@ -299,7 +299,9 @@ async function run() {
         // qualification level (engineer / architect / scientist / senior…).
         const relevance = jobFit.scoreTitle(`${job.title}`, seeker.job_title_keywords);
         if (relevance < 0.3) continue;
-        if (jobFit.tooSenior(job.title, seeker)) continue;
+        // Above the seeker's level: still saved so it shows in Matches, but as 'skipped'
+        // (with a reason) so the agent doesn't apply unless the user presses Apply.
+        const skipWhy = jobFit.titleSkipReason(job.title, seeker);
 
         if (await alreadyKnown(seeker.id, absoluteUrl)) continue;
 
@@ -312,7 +314,8 @@ async function run() {
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: Math.round(relevance * 100), // stored as integer 0..100 like every other source
-          status: 'pending',
+          status: skipWhy ? 'skipped' : 'pending',
+          skip_reason: skipWhy ? jobFit.skipMessage(skipWhy) : null,
           is_custom_source: true
         });
 

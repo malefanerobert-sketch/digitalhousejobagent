@@ -918,7 +918,11 @@ async function run() {
       .map(l => `${l.job_seeker_id}|${l.job_matches.job_url}`)
   );
 
+  const titleSkips = []; // pending rows above the seeker's level: marked 'skipped' (still visible in Matches)
   const toProcess = pending.filter(m => {
+    // An 'approved' row means the user pressed Apply on the Matches card — an
+    // explicit decision that overrides the location / level guards below.
+    const userForced = m.status === 'approved';
     // Respect paused/frozen accounts — admin can pause an account and the
     // worker must stop processing pending matches for it, otherwise it keeps
     // burning tokens on someone whose account has been switched off.
@@ -954,17 +958,27 @@ async function run() {
     if (!scopeIsAll) {
       // Alias-aware: "Johannesburg" and "Gauteng" (plus Johannesburg-metro
       // suburbs like Sandton/Midrand/Randburg) count as the same place.
-      if (!jobFit.locationInScope(m.location, preferredLocs)) return false;
+      if (!userForced && !jobFit.locationInScope(m.location, preferredLocs)) return false;
     }
 
     // LEVEL GUARD: never auto-apply to roles above the seeker's qualification
     // (engineer / architect / scientist / senior / lead…). The row stays as it
     // is; it just isn't attempted.
-    if (jobFit.tooSenior(m.job_title, m.job_seekers)) return false;
+    if (!userForced) {
+      const why = jobFit.titleSkipReason(m.job_title, m.job_seekers);
+      if (why) { titleSkips.push({ id: m.id, msg: jobFit.skipMessage(why) }); return false; }
+    }
 
     if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
   }).slice(0, MAX_PER_RUN);
+
+  // Keep skipped jobs visible: status 'skipped' + a reason the Matches card shows.
+  // The user can press Apply on the card, which sets status='approved' (queued).
+  for (const t of titleSkips) {
+    await supabase.from('job_matches').update({ status: 'skipped', skip_reason: t.msg, decided_at: new Date().toISOString() }).eq('id', t.id);
+  }
+  if (titleSkips.length) console.log(`[apply] ${titleSkips.length} job(s) above the seeker's level marked 'skipped' (still visible in Matches)`);
 
   if (toProcess.length === 0) { console.log('[apply] no approved/automatic matches ready'); return; }
 
@@ -1029,7 +1043,7 @@ async function run() {
         // unavailable AI never blocks an application. A rejected match is NOT
         // a "needs your input" case (nothing a human could do), so it is
         // marked 'rejected' and simply drops out of Matches and Applications.
-        if (seeker.api_provider !== 'none' && (aiMatch.isEnabled() || aiMatch.resolveSeekerOverride(seeker))) {
+        if (match.status !== 'approved' && seeker.api_provider !== 'none' && (aiMatch.isEnabled() || aiMatch.resolveSeekerOverride(seeker))) {
           const adText = await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
           const override = aiMatch.resolveSeekerOverride(seeker);
           const fit = await jobFit.checkRequirements({
@@ -1039,8 +1053,8 @@ async function run() {
           if (!fit.ok) {
             console.log(`[apply]  ⏭ skipping "${match.job_title}" — ${fit.reason}`);
             await supabase.from('job_matches').update({
-              status: 'rejected',
-              match_reason: `Skipped: ${fit.reason}`,
+              status: 'skipped',
+              skip_reason: jobFit.skipMessage(fit.reason),
               decided_at: new Date().toISOString()
             }).eq('id', match.id);
             attempted = true;

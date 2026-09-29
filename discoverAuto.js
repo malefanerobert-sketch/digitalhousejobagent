@@ -495,7 +495,8 @@ async function saveMatches(userId, matches) {
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,
     match_score: parseInt(job.match_score) || 0,
-    status: 'pending', // job_matches_status_check allows: pending, approved, rejected, applied, failed, needs_manual_action, seeker_paused
+    status: job.skip_reason ? 'skipped' : 'pending', // job_matches_status_check allows: pending, approved, rejected, applied, failed, needs_manual_action, seeker_paused, skipped
+    skip_reason: job.skip_reason || null,
     discovered_at: new Date().toISOString(),
     match_reason: `Matched from ${job.source}`,
     is_custom_source: false,
@@ -624,14 +625,13 @@ async function run() {
       console.log(`  🌐 Filtered to remote only: ${allJobs.length} jobs`);
     }
 
-    // Drop roles above the seeker's qualification level (engineer / architect /
-    // scientist / senior / lead…) before they are scored or saved.
-    {
-      const before = allJobs.length;
-      allJobs = allJobs.filter(j => jobFit.titleFitsSeeker(j.title, user));
-      if (allJobs.length !== before) console.log(`  🎓 Removed ${before - allJobs.length} job(s) above ${user.full_name}'s qualification level: ${allJobs.length} left`);
-      if (allJobs.length === 0) { console.log('  ℹ No suitable jobs left after level check'); continue; }
-    }
+    // Roles above the seeker's level are NOT dropped any more: they are scored like
+    // any other job and, if they match, saved with status 'skipped' + a reason so the
+    // user still sees them in Matches and can press Apply.
+    allJobs.forEach(j => {
+      const why = jobFit.titleSkipReason(j.title, user);
+      if (why) { j.skip_reason = jobFit.skipMessage(why); }
+    });
 
     // A seeker set to 'none' has deliberately opted out of AI entirely —
     // that must never silently fall back to the shared company key, so this

@@ -227,17 +227,17 @@ function evaluateVerdict(verdict, seeker) {
     const ticked = scopeQuals(seeker).map(qualificationRank).filter(Boolean);
     const need = MIN_QUAL_RANK[String(verdict.min_qualification || '').toLowerCase()] || null;
     if (need && ticked.length && need > Math.max(...ticked)) {
-      return { ok: false, reason: `ad requires at least a ${RANK_LABEL[need]}; you allow up to ${RANK_LABEL[Math.max(...ticked)]} (${scopeQuals(seeker).join(', ')})` };
+      return { ok: false, reason: `requires at least a ${RANK_LABEL[need]}, which is above the qualification levels you selected (${scopeQuals(seeker).join(', ')})` };
     }
     // Experience: the ad's minimum years must fall inside one of the ticked ranges.
     const ranges = scopeRanges(seeker);
     const minY = Number(verdict.min_years);
     if (ranges.length && Number.isFinite(minY) && minY > 0 && !ranges.some(([lo, hi]) => minY >= lo && minY <= hi)) {
-      return { ok: false, reason: `ad asks for ${minY} years experience; you allow ${(seeker.apply_experience_ranges || []).join(', ')} years` };
+      return { ok: false, reason: `asks for ${minY}+ years of experience, which is above your experience level input (${(seeker.apply_experience_ranges || []).map(r => r.replace('-', '–')).join(', ')} years)` };
     }
     // Licence / registration / mandatory technical skills (AI, fails open)
     if (verdict.fits === false) {
-      return { ok: false, reason: String(verdict.reason || 'ad requires a licence or skills not on the profile').slice(0, 200) };
+      return { ok: false, reason: 'needs a licence, registration or skills that are not on your profile' + (verdict.reason ? ` (${String(verdict.reason).replace(/[.\s]+$/, '').slice(0, 160)})` : '') };
     }
     return { ok: true };
   }
@@ -245,17 +245,31 @@ function evaluateVerdict(verdict, seeker) {
   const seekerRank = qualificationRank(seeker.highest_qualification);
   const need = MIN_QUAL_RANK[String(verdict.min_qualification || '').toLowerCase()] || null;
   if (need && seekerRank && need > seekerRank) {
-    return { ok: false, reason: `ad requires at least a ${RANK_LABEL[need]}; profile has ${RANK_LABEL[seekerRank]}` };
+    return { ok: false, reason: `requires at least a ${RANK_LABEL[need]}, but your profile has ${RANK_LABEL[seekerRank]}` };
   }
   const minYears = Number(verdict.min_years);
   const haveYears = seeker.years_experience;
   if (Number.isFinite(minYears) && minYears > 0 && haveYears != null && minYears - Number(haveYears) >= 2) {
-    return { ok: false, reason: `ad asks for ${minYears}+ years experience; profile has ${haveYears}` };
+    return { ok: false, reason: `asks for ${minYears}+ years of experience, but your profile has ${haveYears}` };
   }
   if (verdict.fits === false) {
-    return { ok: false, reason: String(verdict.reason || 'ad requirements above the profile').slice(0, 200) };
+    return { ok: false, reason: 'has requirements above your profile' + (verdict.reason ? ` (${String(verdict.reason).replace(/[.\s]+$/, '').slice(0, 160)})` : '') };
   }
   return { ok: true };
+}
+
+// ---------- Skipped-job messages (shown on the Matches card) ----------
+/** Full user-facing sentence. `reason` is a clause that follows "This job". */
+function skipMessage(reason) {
+  return `This job ${String(reason).replace(/[.\s]+$/, '')}, so the agent skipped the application. You can still decide if you want to apply.`;
+}
+/** Title-level skip: returns a clause (or null) explaining why a title is above the user's level. */
+function titleSkipReason(title, seeker) {
+  if (!tooSenior(title, seeker)) return null;
+  const levels = scopeQuals(seeker);
+  return levels.length
+    ? `looks like a more senior or technical role than the qualification levels you selected (${levels.join(', ')})`
+    : `looks like a more senior or technical role than your qualification (${seeker.highest_qualification})`;
 }
 
 /**
@@ -277,4 +291,4 @@ async function checkRequirements({ seeker, title, adText, complete }) {
   }
 }
 
-module.exports = { hasApplyScope, locationInScope, scoreTitle, tooSenior, titleFitsSeeker, isSubDegree, norm, qualificationRank, evaluateVerdict, parseVerdict, checkRequirements, buildRequirementsPrompt };
+module.exports = { skipMessage, titleSkipReason, hasApplyScope, locationInScope, scoreTitle, tooSenior, titleFitsSeeker, isSubDegree, norm, qualificationRank, evaluateVerdict, parseVerdict, checkRequirements, buildRequirementsPrompt };
