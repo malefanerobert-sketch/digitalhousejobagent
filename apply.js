@@ -1023,6 +1023,31 @@ async function run() {
         await page.goto(match.job_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await humanDelay();
 
+        // REQUIREMENTS CHECK: read the ad and skip it if it clearly asks for
+        // more than the seeker has (qualification level, years of experience,
+        // mandatory technical skills). Fails open — an unreadable page or an
+        // unavailable AI never blocks an application. A rejected match is NOT
+        // a "needs your input" case (nothing a human could do), so it is
+        // marked 'rejected' and simply drops out of Matches and Applications.
+        if (seeker.api_provider !== 'none' && (aiMatch.isEnabled() || aiMatch.resolveSeekerOverride(seeker))) {
+          const adText = await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
+          const override = aiMatch.resolveSeekerOverride(seeker);
+          const fit = await jobFit.checkRequirements({
+            seeker, title: match.job_title, adText,
+            complete: (prompt) => aiMatch.completeWithAI(prompt, override)
+          });
+          if (!fit.ok) {
+            console.log(`[apply]  ⏭ skipping "${match.job_title}" — ${fit.reason}`);
+            await supabase.from('job_matches').update({
+              status: 'rejected',
+              match_reason: `Skipped: ${fit.reason}`,
+              decided_at: new Date().toISOString()
+            }).eq('id', match.id);
+            attempted = true;
+            break;
+          }
+        }
+
         let result;
         if (source?.source_type === 'greenhouse') {
           result = await applyOnGreenhouse(page, seeker);
