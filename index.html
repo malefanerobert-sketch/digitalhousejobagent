@@ -258,10 +258,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 .mcard .queued-note{background:rgba(var(--accent2-rgb),.08);border:1px solid rgba(var(--accent2-rgb),.3);color:var(--accent2);
   border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.5}
 .mcard .skip-note,.mcard .queued-note{display:flex;gap:10px;align-items:flex-end;justify-content:space-between}
-.mcard .note-ico{flex:none;width:28px;height:28px;padding:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
-  font-size:12px;line-height:1;cursor:pointer;border:1px solid var(--accent);background:rgba(var(--accent-rgb),.18);color:var(--accent-tint);transition:.15s}
-.mcard .note-ico:hover{background:var(--accent);color:var(--btn-text)}
-.mcard .note-ico:disabled{opacity:.5;cursor:default}
 .pill.skip{background:rgba(255,184,77,.16);color:#ffc266}
 .empty{border:1px dashed #2c3b6e;border-radius:var(--radius);padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:10px}
@@ -1879,9 +1875,9 @@ function renderMatches(){
       '<div><h4>'+esc(m.job_title)+'</h4>'+(coLabel(m.company_name)?'<div class="co">'+esc(coLabel(m.company_name))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? '<div class="skip-note"><span>⚠️ '+esc(m.skip_reason)+'</span>'+
-        '<button type="button" class="note-ico" data-action="apply" data-id="'+m.id+'" title="Apply anyway — queue this job for the agent" aria-label="Apply anyway">▶</button></div>' : '')+
+        '<button class="btn btn-primary btn-sm" style="white-space:nowrap;flex:none" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button></div>' : '')+
       (m.status==='approved' ? '<div class="queued-note"><span>You chose to apply — the agent will submit this application on its next run.</span>'+
-        '<button type="button" class="note-ico" data-action="unqueue" data-id="'+m.id+'" title="Cancel — take this job out of the agent queue" aria-label="Cancel">✕</button></div>' : '')+
+        '<button class="btn btn-ghost btn-sm" style="white-space:nowrap;flex:none" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button></div>' : '')+
       (m.match_reason && !/^matched from/i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
