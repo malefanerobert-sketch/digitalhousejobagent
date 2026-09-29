@@ -261,7 +261,7 @@ function evaluateVerdict(verdict, seeker) {
 // ---------- Skipped-job messages (shown on the Matches card) ----------
 /** Full user-facing sentence. `reason` is a clause that follows "This job". */
 function skipMessage(reason) {
-  return `This job ${String(reason).replace(/[.\s]+$/, '')}, so the agent skipped the application. You can still decide if you want to apply.`;
+  return `This job ${String(reason).replace(/[.\s]+$/, '')}, so the agent skipped the application. You can still open it with View and apply yourself.`;
 }
 /** Title-level skip: returns a clause (or null) explaining why a title is above the user's level. */
 function titleSkipReason(title, seeker) {

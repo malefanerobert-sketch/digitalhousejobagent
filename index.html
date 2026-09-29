@@ -1652,8 +1652,8 @@ function renderDashboard(){
 
   // Derived activity feed — merges recent matches + applications, no separate activity table exists
   const feed=[];
-  matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+m.job_title+' at '+(m.company_name||'?')}));
-  applications.slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:(a.result==='success'?'📮 Applied':'⚠ Application '+a.result)+': '+(a.job_matches?.job_title||'a role')+(a.job_matches?.company_name?' at '+a.job_matches.company_name:'')}));
+  matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+m.job_title+(coLabel(m.company_name)?' at '+coLabel(m.company_name):'')}));
+  applications.slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:(a.result==='success'?'📮 Applied':'⚠ Application '+a.result)+': '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
   feed.sort((a,b)=>new Date(b.t)-new Date(a.t));
   const actEl=$('#actList');
   actEl.innerHTML = feed.length
@@ -1727,6 +1727,12 @@ function classifyLocationCountry(loc){
 // since assuming SA for their blank-location postings would risk false positives.
 const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices144','ista-2',
   'ikhokha','jobjack','sparkschools','kontakrecruitment','ozow','offerzen']);
+
+// Job-board / aggregator names (CareerJunction, Pnet, Job Mail, "Via Jobmail"…) are the
+// company's sourcing — never shown to users. A real employer name is shown as normal.
+const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
+function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
+function coLabel(n){ return isSourceName(n) ? '' : (n||''); }
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
@@ -1808,10 +1814,10 @@ async function loadMatches(){
   // needs_manual_action is deliberately EXCLUDED — those jobs need a human,
   // so they live only in the Applications tab (Application report), never here.
   // 'skipped' = discovered but the agent held it back (above the user's level input) — still
-  // shown, with the reason, and the user can press Apply. 'approved' = queued for the agent.
+  // shown with the reason.
   const {data, error} = await sb.from('job_matches').select('*')
     .eq('job_seeker_id', currentSeeker.id)
-    .in('status', ['pending','applied','skipped','approved'])
+    .in('status', ['pending','applied','skipped'])
     .order('discovered_at', {ascending:false});
   // v1 scope: South Africa only. The classifyLocationCountry() function above
   // supports the full country list already — when international expansion
@@ -1834,7 +1840,7 @@ function renderMatches(){
   let list = matches.filter(m=>{
     if(isBlocked('companies',m.company_name) || isBlocked('locations',m.location)) return false;
     if(state.mLoc!=='all' && m.location!==state.mLoc) return false;
-    if(q && !((m.job_title||'')+' '+(m.company_name||'')+' '+(m.location||'')).toLowerCase().includes(q)) return false;
+    if(q && !((m.job_title||'')+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
     return true;
   });
   list.sort((a,b)=>new Date(b.discovered_at)-new Date(a.discovered_at));
@@ -1852,7 +1858,6 @@ function renderMatches(){
   const statusPill = (s) => {
     if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
     if (s === 'skipped') return '<span class="pill skip">⏭ Skipped by agent</span>';
-    if (s === 'approved') return '<span class="pill green">⏳ Queued for agent</span>';
     return '<span class="pill gray">🔍 Discovered</span>'; // pending
   };
   g.innerHTML = list.map(m=>{
@@ -1865,21 +1870,14 @@ function renderMatches(){
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
-      '<div><h4>'+esc(m.job_title)+'</h4><div class="co">'+esc(m.company_name||'')+'</div></div>'+
+      '<div><h4>'+esc(m.job_title)+'</h4>'+(coLabel(m.company_name)?'<div class="co">'+esc(coLabel(m.company_name))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? '<div class="skip-note">⚠️ '+esc(m.skip_reason)+'</div>' : '')+
-      (m.status==='approved' ? '<div class="queued-note">You chose to apply — the agent will submit this application on its next run.</div>' : '')+
-      (m.match_reason ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
+      (m.match_reason && !/^matched from/i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
-      (m.status==='applied'
-        ? '<button class="btn btn-ghost btn-sm" disabled style="opacity:.6">✔ Applied</button>'
-        : m.status==='approved'
-          ? '<button class="btn btn-ghost btn-sm" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>'
-          : '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<a class="btn btn-ghost btn-sm" href="'+esc(m.job_url)+'" target="_blank" rel="noopener">View ↗</a>'+
-      (m.status!=='applied' ? '<button class="btn btn-ghost btn-sm" data-action="manual" data-id="'+m.id+'" title="I applied on the employer site myself">✔ I applied myself</button>' : '')+
-      '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>'+
+      (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
       '<span class="found">'+verb+' '+timeAgo(m.discovered_at)+'</span></div></div>';
   }).join('');
   updateBulkBar();
@@ -1930,34 +1928,6 @@ $('#matchGrid').addEventListener('click', async (e)=>{
   const btn=e.target.closest('button[data-action]');
   if(!btn) return;
   const id=btn.dataset.id, action=btn.dataset.action;
-  const mm = matches.find(x=>x.id===id);
-  if(action==='apply'){
-    // Queue for the agent: 'approved' rows are processed on the next apply run and
-    // bypass the level / requirement / location guards (the user decided).
-    btn.disabled=true;
-    const {error} = await sb.from('job_matches').update({status:'approved', decided_at:new Date().toISOString()}).eq('id', id);
-    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
-    if(mm) mm.status='approved';
-    toast('Queued ✓ The agent will apply on its next run','ok'); renderMatches(); renderDashboard();
-    return;
-  }
-  if(action==='unqueue'){
-    btn.disabled=true;
-    const back = mm && mm.skip_reason ? 'skipped' : 'pending';
-    const {error} = await sb.from('job_matches').update({status:back}).eq('id', id);
-    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
-    if(mm) mm.status=back;
-    toast('Removed from the agent queue'); renderMatches(); renderDashboard();
-    return;
-  }
-  if(action==='manual'){
-    btn.disabled=true;
-    const {error} = await sb.from('job_matches').update({status:'applied', user_marked_applied:true, decided_at:new Date().toISOString()}).eq('id', id);
-    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
-    if(mm){ mm.status='applied'; mm.user_marked_applied=true; }
-    toast('Marked as applied ✓','ok'); renderMatches(); renderDashboard();
-    return;
-  }
   if(action==='delete'){
     if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
     btn.disabled=true;
@@ -2016,10 +1986,10 @@ function renderApplications(){
         const a=g.latest;
         const meta = ATTENTION_META[a.result] || {icon:'⚠️', label:'Could not apply'};
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(a.job_matches?.company_name||'')+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
           '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div></div>'+
           '<button class="btn btn-primary btn-xs" data-mark-applied="'+g.ids.join(',')+'" title="I applied to this one myself — move it to Applied jobs">✓ Applied</button>'+
-          '<button class="btn btn-ghost btn-xs" data-quickblock-co="'+esc(a.job_matches?.company_name||'')+'" title="Block this company — stop the agent trying it again">Block company</button>'+
+          (coLabel(a.job_matches?.company_name)?'<button class="btn btn-ghost btn-xs" data-quickblock-co="'+esc(a.job_matches?.company_name||'')+'" title="Block this company — stop the agent trying it again">Block company</button>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-attn="'+g.ids.join(',')+'" title="'+(g.count>1?'Delete all '+g.count+' records':'Delete this record')+'">'+TRASH_ICON+'</button>'+
           '<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+new Date(a.attempted_at).toLocaleDateString()+'</span>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
@@ -2032,7 +2002,7 @@ function renderApplications(){
     : applied.map(a=>{
         const pillClass = a.result==='success' ? 'green' : 'amber';
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(a.job_matches?.company_name||'')+'</div></div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div></div>'+
           '<span class="pill '+pillClass+'">'+esc((a.result||'').replace('_',' '))+'</span>'+
           '<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+new Date(a.attempted_at).toLocaleDateString()+'</span>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
