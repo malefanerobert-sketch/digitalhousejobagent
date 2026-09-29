@@ -131,8 +131,17 @@ function hasApplyScope(seeker) {
 
 /** Does the title look like a role above the seeker's qualification level? */
 function tooSenior(title, seeker) {
-  if (hasApplyScope(seeker)) return false; // user's own ticks override the level guard
-  if (!isSubDegree(seeker && seeker.highest_qualification)) return false;
+  if (hasApplyScope(seeker)) {
+    // The user's own ticks decide, not their "Highest qualification". If they
+    // ticked degree level or higher (or only custom levels we can't rank), no
+    // title guard. If everything they ticked is below degree (Matric /
+    // Certificates / Diploma…), senior & technical titles (engineer, analyst,
+    // scientist, manager…) are still blocked unless in their own target roles.
+    const ranks = scopeQuals(seeker).map(qualificationRank).filter(Boolean);
+    if (!ranks.length || Math.max(...ranks) >= 4) return false;
+  } else if (!isSubDegree(seeker && seeker.highest_qualification)) {
+    return false;
+  }
   const t = norm(title);
   const own = (seeker.job_title_keywords || []).map(norm).join(' ');
   return HIGHER_ROLE_WORDS.some(w => containsPhrase(t, w) && !containsPhrase(own, w));
