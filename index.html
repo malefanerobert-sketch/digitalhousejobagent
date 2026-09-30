@@ -941,6 +941,29 @@ function timeAgo(iso){
   if(s<86400) return Math.floor(s/3600)+'h ago';
   return Math.floor(s/86400)+'d ago';
 }
+// Full "DD Mon YYYY, HH:MM" stamp used in the Application report.
+function fmtStamp(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d)) return '';
+  const day = String(d.getDate()).padStart(2,'0');
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  const yr = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return day+' '+mon+' '+yr+', '+hh+':'+mm;
+}
+// For an applied Matches card, use the real submission time from application_log
+// when available; otherwise fall back to when the job was discovered.
+function matchDisplayTime(m){
+  if(m.status==='applied' && Array.isArray(applications)){
+    const rows = applications
+      .filter(a => a.job_match_id === m.id && !ATTENTION_RESULTS.includes(a.result))
+      .sort((x,y)=> new Date(y.attempted_at) - new Date(x.attempted_at));
+    if(rows.length && rows[0].attempted_at) return rows[0].attempted_at;
+  }
+  return m.discovered_at;
+}
 function toast(msg,type){const t=document.createElement('div');t.className='toast'+(type?' '+type:'');
   t.textContent=msg;$('#toasts').appendChild(t);
   setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),400)},3400)}
@@ -1919,7 +1942,7 @@ function renderMatches(){
       '<a class="btn btn-ghost btn-sm" href="'+esc(m.job_url)+'" target="_blank" rel="noopener">View ↗</a>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
       '</div>'+
-      '<span class="found">'+verb+' '+timeAgo(m.discovered_at)+'</span></div></div>';
+      '<span class="found">'+verb+' '+timeAgo(matchDisplayTime(m))+'</span></div></div>';
   }).join('');
   updateBulkBar();
 }
@@ -2055,12 +2078,10 @@ function renderApplications(){
         const meta = ATTENTION_META[a.result] || {icon:'⚠️', label:'Could not apply'};
         return '<div class="lrow">'+
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
-          '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div></div>'+
-          '<button class="btn btn-ghost btn-xs" data-view-application="'+a.id+'">Details</button>'+
+          '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div>'+
+          '<div class="sub2" style="margin-top:4px">Attempted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<button class="btn btn-primary btn-xs" data-mark-applied="'+g.ids.join(',')+'" title="I applied to this one myself — move it to Applied jobs">✓ Applied</button>'+
-          (coLabel(a.job_matches?.company_name)?'<button class="btn btn-ghost btn-xs" data-quickblock-co="'+esc(a.job_matches?.company_name||'')+'" title="Block this company — stop the agent trying it again">Block company</button>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-attn="'+g.ids.join(',')+'" title="'+(g.count>1?'Delete all '+g.count+' records':'Delete this record')+'">'+TRASH_ICON+'</button>'+
-          '<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+new Date(a.attempted_at).toLocaleDateString()+'</span>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
           '</div>';
       }).join('');
@@ -2074,10 +2095,9 @@ function renderApplications(){
         const pillClass = (confirmed || manual) ? 'green' : 'amber';
         const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Historical record');
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div></div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div>'+
+          '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
-          '<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+new Date(a.attempted_at).toLocaleDateString()+'</span>'+
-          '<button class="btn btn-ghost btn-xs" data-view-application="'+a.id+'">Details</button>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-app="'+a.id+'" title="Delete this record">'+TRASH_ICON+'</button>'+
           '</div>';
