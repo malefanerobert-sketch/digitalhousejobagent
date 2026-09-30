@@ -257,7 +257,21 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   padding:9px 11px;font-size:12.5px;line-height:1.5}
 .mcard .queued-note{background:rgba(var(--accent2-rgb),.08);border:1px solid rgba(var(--accent2-rgb),.3);color:var(--accent2);
   border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.5}
-.mcard .skip-note,.mcard .queued-note{display:flex;gap:10px;align-items:flex-end;justify-content:space-between}
+.mcard .sn-box{cursor:pointer;user-select:none}
+.mcard .sn-closed{padding:3px 9px;font-size:11px;border-radius:8px}
+.mcard .sn-head{display:flex;align-items:center;gap:6px;height:15px;line-height:15px}
+.mcard .sn-view{flex:1;min-width:0;overflow:hidden;white-space:nowrap;position:relative}
+.mcard .sn-track{display:inline-block;padding-left:100%;animation:sn-scroll 16s linear infinite;will-change:transform}
+.mcard .sn-box:hover .sn-track{animation-play-state:paused}
+@keyframes sn-scroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+.mcard .sn-caret{flex:none;font-size:10px;opacity:.8}
+.mcard .sn-full{position:relative;padding-right:14px}
+.mcard .sn-full .sn-caret{position:absolute;top:1px;right:0}
+.mcard .note-btn{display:inline-block;vertical-align:baseline;margin-left:6px;padding:1px 6px;font-size:9.5px;font-weight:700;line-height:1.35;
+  border-radius:5px;cursor:pointer;font-family:inherit;white-space:nowrap;background:rgba(255,120,120,.16);color:#ffa8a8;
+  border:1px solid rgba(255,120,120,.45);transition:.15s}
+.mcard .note-btn:hover{background:rgba(255,120,120,.32);color:#fff}
+.mcard .note-btn:disabled{opacity:.5;cursor:default}
 .pill.skip{background:rgba(255,184,77,.16);color:#ffc266}
 .empty{border:1px dashed #2c3b6e;border-radius:var(--radius);padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:10px}
@@ -1834,6 +1848,15 @@ async function loadMatches(){
   matches = error ? [] : (data||[]).filter(isSouthAfricanMatch);
 }
 
+var openNotes = new Set();   // ids of Matches cards whose skipped/queued note is expanded
+function noteBox(cls, id, text, btnHtml){
+  // Collapsed = one fixed-height line with the message scrolling like a ticker (keeps every
+  // card the same size). Click to open the full message; click again to close.
+  const open = openNotes.has(id);
+  if(open) return '<div class="'+cls+' sn-box" data-note="'+id+'" title="Click to close"><div class="sn-full">'+esc(text)+btnHtml+'<span class="sn-caret">▴</span></div></div>';
+  const dur = Math.max(12, Math.round(text.length*0.16));
+  return '<div class="'+cls+' sn-box sn-closed" data-note="'+id+'" title="Click to read the full message"><div class="sn-head"><span class="sn-view"><span class="sn-track" style="animation-duration:'+dur+'s;animation-delay:-'+Math.round(dur*0.28)+'s">'+esc(text)+'</span></span><span class="sn-caret">▾</span></div></div>';
+}
 function renderMatches(){
   // Location dropdown = a fixed list of major South African metros (always
   // usable, even with zero matches yet) merged with any location that
@@ -1882,10 +1905,10 @@ function renderMatches(){
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
       '<div><h4>'+esc(m.job_title)+'</h4>'+(coLabel(m.company_name)?'<div class="co">'+esc(coLabel(m.company_name))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
-      (m.status==='skipped' && m.skip_reason ? '<div class="skip-note"><span>⚠️ '+esc(m.skip_reason)+'</span>'+
-        '<button class="btn btn-primary btn-sm" style="white-space:nowrap;flex:none" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button></div>' : '')+
-      (m.status==='approved' ? '<div class="queued-note"><span>You chose to apply — the agent will submit this application on its next run.</span>'+
-        '<button class="btn btn-ghost btn-sm" style="white-space:nowrap;flex:none" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button></div>' : '')+
+      (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
+        '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
+      (m.status==='approved' ? noteBox('queued-note', m.id, 'You chose to apply — the agent will submit this application on its next run.',
+        '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
       (m.match_reason && !/^matched from/i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
@@ -1936,6 +1959,12 @@ $('#matchGrid').addEventListener('change', (e)=>{
 });
 
 $('#matchGrid').addEventListener('click', async (e)=>{
+  const nt=e.target.closest('[data-note]');
+  if(nt && !e.target.closest('button')){
+    const nid=nt.getAttribute('data-note');
+    if(openNotes.has(nid)) openNotes.delete(nid); else openNotes.add(nid);
+    renderMatches(); return;
+  }
   const qb=e.target.closest('button[data-quickblock-co]');
   if(qb && qb.dataset.quickblockCo){ await addBlockRaw('companies', qb.dataset.quickblockCo); return; }
   const btn=e.target.closest('button[data-action]');
