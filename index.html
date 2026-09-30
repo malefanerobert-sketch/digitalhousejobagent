@@ -1751,11 +1751,13 @@ function classifyLocationCountry(loc){
 const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices144','ista-2',
   'ikhokha','jobjack','sparkschools','kontakrecruitment','ozow','offerzen']);
 
-// Job-board / aggregator names (CareerJunction, Pnet, Job Mail, "Via Jobmail"…) are the
-// company's sourcing — never shown to users. A real employer name is shown as normal.
+// Job-board / aggregator names (CareerJunction, Pnet, Job Mail, "Via Jobmail"…)
+// are shown on cards as the source of the posting, so the user knows where the
+// agent found the job. Hidden only on the Watched pages view (that list shows
+// the pages the user themselves added).
 const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
 function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
-function coLabel(n){ return isSourceName(n) ? '' : (n||''); }
+function coLabel(n){ return n||''; }
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
@@ -1909,7 +1911,7 @@ function renderMatches(){
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
       (m.status==='approved' ? noteBox('queued-note', m.id, 'You chose to apply — the agent will submit this application on its next run.',
         '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
-      (m.match_reason && !/^matched from/i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
+      (m.match_reason ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<a class="btn btn-ghost btn-sm" href="'+esc(m.job_url)+'" target="_blank" rel="noopener">View ↗</a>'+
