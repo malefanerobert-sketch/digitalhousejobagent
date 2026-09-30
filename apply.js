@@ -60,16 +60,116 @@ function cleanupTemp(tempPath) {
   }
 }
 
-async function logResult(match, result, notes) {
+async function logResult(match, result, notes, evidence = {}) {
   await supabase.from('application_log').insert({
     job_match_id: match.id,
     job_seeker_id: match.job_seeker_id,
     result,
-    notes
+    notes,
+    verification_status: evidence.verification_status || null,
+    submitted_fields: evidence.submitted_fields || [],
+    confirmation_text: evidence.confirmation_text || null,
+    confirmation_reference: evidence.confirmation_reference || null,
+    confirmation_url: evidence.confirmation_url || null,
+    confirmation_screenshot_url: evidence.confirmation_screenshot_url || null
   });
   await supabase.from('job_matches')
     .update({ status: result === 'success' ? 'applied' : result, decided_at: new Date().toISOString() })
     .eq('id', match.id);
+}
+
+// A completed form is not proof of an application. Capture the values that
+// were actually on the form immediately before submit, then only mark the
+// application as successful when the site itself shows a receipt.
+async function snapshotSubmittedFields(page) {
+  return await page.evaluate(() => {
+    const text = el => (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const labelFor = el => {
+      if (el.id) {
+        const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (label) return text(label);
+      }
+      const parent = el.closest('label');
+      if (parent) return text(parent);
+      return el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || el.id || 'Application field';
+    };
+    const sensitive = /password|identity|id number|passport|ssn|social security|tax number|bank|account number|credit.?card|debit.?card/i;
+    return Array.from(document.querySelectorAll('input, select, textarea'))
+      .filter(el => !el.disabled && !['hidden', 'submit', 'button', 'reset', 'image'].includes((el.type || '').toLowerCase()))
+      .map(el => {
+        const type = (el.type || '').toLowerCase();
+        const field = labelFor(el).slice(0, 180);
+        if (type === 'password') return null;
+        if (type === 'file') return el.files && el.files.length ? { field, value: 'Document attached', type: 'file' } : null;
+        if ((type === 'checkbox' || type === 'radio') && !el.checked) return null;
+        let value = type === 'checkbox' || type === 'radio' ? 'Yes' : (el.value || '').trim();
+        if (!value) return null;
+        if (sensitive.test(field) || sensitive.test(el.name || '') || sensitive.test(el.id || '')) value = '[hidden for privacy]';
+        return { field, value: value.slice(0, 1500), type: el.tagName.toLowerCase() };
+      })
+      .filter(Boolean)
+      .slice(0, 60);
+  }).catch(() => []);
+}
+
+function findConfirmationText(bodyText) {
+  const lines = String(bodyText || '').split(/\n+/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return lines.find(line => /thank you|application.{0,80}(submitted|received|complete)|we.{0,12}(received|have received).{0,80}application|submission.{0,40}(complete|successful)/i.test(line)) || null;
+}
+
+async function storeConfirmationScreenshot(page, match, seeker) {
+  try {
+    const image = await page.screenshot({ type: 'png', fullPage: false });
+    const objectPath = `application-proofs/${seeker.id}/${match.id}-${Date.now()}.png`;
+    const { error: uploadError } = await supabase.storage.from('documents').upload(objectPath, image, {
+      contentType: 'image/png',
+      upsert: false
+    });
+    if (uploadError) throw uploadError;
+    const { data, error: signError } = await supabase.storage.from('documents').createSignedUrl(objectPath, 315360000);
+    if (signError) throw signError;
+    return data?.signedUrl || null;
+  } catch (err) {
+    // Receipt text and the source URL remain useful proof if the optional
+    // screenshot upload fails; never call an unverified submission confirmed.
+    console.warn('[apply] could not save confirmation screenshot:', err.message);
+    return null;
+  }
+}
+
+async function verifySubmission(page, match, seeker, submittedFields) {
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(1200).catch(() => {});
+  const bodyText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 12000)).catch(() => '');
+  const confirmationText = findConfirmationText(bodyText);
+  const confirmationReference = bodyText.match(/(?:application|reference|submission)\s*(?:number|no\.?|id|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i)?.[1] || null;
+  const evidence = {
+    submitted_fields: submittedFields || [],
+    confirmation_text: confirmationText,
+    confirmation_reference: confirmationReference,
+    confirmation_url: page.url()
+  };
+
+  if (!confirmationText) {
+    return {
+      ok: false,
+      unverified: true,
+      reason: 'The agent clicked Submit, but this site did not show a confirmation receipt. It is not marked as applied.',
+      evidence: { ...evidence, verification_status: 'unverified' }
+    };
+  }
+
+  evidence.confirmation_screenshot_url = await storeConfirmationScreenshot(page, match, seeker);
+  evidence.verification_status = 'confirmed';
+  return { ok: true, evidence };
+}
+
+async function submitAndVerify(page, submitBtn, missingFields, match, seeker, earlierFields = []) {
+  const submittedFields = [...earlierFields, ...(await snapshotSubmittedFields(page))];
+  await humanDelay();
+  await submitBtn.click();
+  const verification = await verifySubmission(page, match, seeker, submittedFields);
+  return { ...verification, missingFields };
 }
 
 async function detectCaptcha(page) {
@@ -312,7 +412,7 @@ async function attemptAdminLogin(page, watched) {
   return { ok: true };
 }
 
-async function applyOnGreenhouse(page, seeker) {
+async function applyOnGreenhouse(page, seeker, match) {
   await page.waitForLoadState('networkidle');
 
   const firstName = await page.$('#first_name, input[name="job_application[first_name]"]');
@@ -347,16 +447,12 @@ async function applyOnGreenhouse(page, seeker) {
 
   const missingFields = await findMissingRequiredFields(page, [firstName, lastName, email, resumeInput]);
 
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle');
-
-  return { ok: true, missingFields };
+  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // Lever's hosted application forms: name="name", name="email", name="phone",
 // and a resume dropzone with an underlying file input.
-async function applyOnLever(page, seeker) {
+async function applyOnLever(page, seeker, match) {
   await page.waitForLoadState('networkidle');
 
   const nameField = await page.$('input[name="name"]');
@@ -391,16 +487,12 @@ async function applyOnLever(page, seeker) {
 
   const missingFields = await findMissingRequiredFields(page, [nameField, emailField, phoneField, resumeInput]);
 
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle');
-
-  return { ok: true, missingFields };
+  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // SmartRecruiters hosted apply pages typically use name="firstName",
 // name="lastName", name="email", and a file input for the resume/CV.
-async function applyOnSmartRecruiters(page, seeker) {
+async function applyOnSmartRecruiters(page, seeker, match) {
   await page.waitForLoadState('networkidle');
 
   const firstName = await page.$('input[name="firstName"], #firstName');
@@ -441,16 +533,12 @@ async function applyOnSmartRecruiters(page, seeker) {
 
   const missingFields = await findMissingRequiredFields(page, [firstName, lastName, email, phoneField, resumeInput]);
 
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle');
-
-  return { ok: true, missingFields };
+  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // Ashby's hosted job application forms are React-driven; fields are usually
 // exposed with name/id attributes containing "name" and "email".
-async function applyOnAshby(page, seeker) {
+async function applyOnAshby(page, seeker, match) {
   await page.waitForLoadState('networkidle');
 
   const nameField = await page.$('input[name*="name" i], input[id*="name" i]');
@@ -479,16 +567,12 @@ async function applyOnAshby(page, seeker) {
 
   const missingFields = await findMissingRequiredFields(page, [nameField, emailField, resumeInput]);
 
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle');
-
-  return { ok: true, missingFields };
+  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // Workable's hosted apply forms typically use name="candidate[name]" or
 // separate first/last name fields, plus name="candidate[email]".
-async function applyOnWorkable(page, seeker) {
+async function applyOnWorkable(page, seeker, match) {
   await page.waitForLoadState('networkidle');
 
   const fullNameField = await page.$('input[name="candidate[name]"]');
@@ -529,11 +613,7 @@ async function applyOnWorkable(page, seeker) {
 
   const missingFields = await findMissingRequiredFields(page, [fullNameField, firstName, lastName, emailField, resumeInput]);
 
-  await humanDelay();
-  await submitBtn.click();
-  await page.waitForLoadState('networkidle');
-
-  return { ok: true, missingFields };
+  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // Reads EVERY input/select/textarea actually present on the page — not a
@@ -781,8 +861,9 @@ async function fillGenericStep(page, seeker) {
   return { ok: true, filledEls };
 }
 
-async function applyAI(page, seeker) {
+async function applyAI(page, seeker, match) {
   let lastMissingFields = [];
+  const earlierFields = [];
   const documentsByType = await loadSeekerDocuments(seeker);
 
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
@@ -864,13 +945,13 @@ async function applyAI(page, seeker) {
       return { ok: false, reason: `Got ${step + 1} step(s) into this application but couldn't find a Next or Submit button to continue — needs a human to finish.` };
     }
 
+    if (stepBtn.isFinal) {
+      return submitAndVerify(page, stepBtn.el, lastMissingFields, match, seeker, earlierFields);
+    }
+    earlierFields.push(...(await snapshotSubmittedFields(page)));
     await humanDelay();
     await stepBtn.el.click().catch(() => {});
     await page.waitForLoadState('networkidle').catch(() => {});
-
-    if (stepBtn.isFinal) {
-      return { ok: true, missingFields: lastMissingFields };
-    }
     // else: a Next/Continue step — loop back around and handle whatever it reveals
   }
 
@@ -1064,15 +1145,15 @@ async function run() {
 
         let result;
         if (source?.source_type === 'greenhouse') {
-          result = await applyOnGreenhouse(page, seeker);
+          result = await applyOnGreenhouse(page, seeker, match);
         } else if (source?.source_type === 'lever') {
-          result = await applyOnLever(page, seeker);
+          result = await applyOnLever(page, seeker, match);
         } else if (source?.source_type === 'smartrecruiters') {
-          result = await applyOnSmartRecruiters(page, seeker);
+          result = await applyOnSmartRecruiters(page, seeker, match);
         } else if (source?.source_type === 'ashby') {
-          result = await applyOnAshby(page, seeker);
+          result = await applyOnAshby(page, seeker, match);
         } else if (source?.source_type === 'workable') {
-          result = await applyOnWorkable(page, seeker);
+          result = await applyOnWorkable(page, seeker, match);
         } else {
           // Everything else — watched pages AND autonomous-search postings
           // (Adzuna/RemoteOK/Jobmail, which have no job_sources row and
@@ -1082,7 +1163,7 @@ async function run() {
           // be applied to and always landed in needs_manual_action. applyAI()
           // was built to handle "any layout it's never seen before", which is
           // exactly what an arbitrary job-board posting is.
-          result = await applyAI(page, seeker);
+          result = await applyAI(page, seeker, match);
         }
 
         const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'job-board');
@@ -1090,7 +1171,10 @@ async function run() {
         if (result.ok) {
           const note = missingFieldsNote(result.missingFields);
           console.log(`[apply]  ✔ submitted${note ? ' (some info still needed)' : ''}`);
-          await logResult(match, 'success', `Submitted via ${formLabel} form automation.${note}`);
+          await logResult(match, 'success', `Confirmed by the job site via ${formLabel} form automation.${note}`, result.evidence);
+        } else if (result.unverified) {
+          console.log(`[apply]  ⚠ submit was not verified by the site`);
+          await logResult(match, 'submission_unverified', result.reason, result.evidence);
         } else if (result.captcha) {
           console.log(`[apply]  ⚠ captcha — needs manual action`);
           await logResult(match, 'captcha_blocked', result.reason);

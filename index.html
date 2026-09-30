@@ -858,6 +858,14 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   </div>
 </div>
 
+<!-- read-only proof captured after a website confirms a submission -->
+<div class="modal hidden" id="applicationModal">
+  <div class="modal-card" style="max-width:720px">
+    <div class="modal-head"><h3 id="amTitle">Application details</h3><button class="x-btn" onclick="closeModal('applicationModal')">✕</button></div>
+    <div id="amBody"></div>
+  </div>
+</div>
+
 <!-- confirm modal -->
 <div class="modal hidden" id="confirmModal">
   <div class="modal-card" style="max-width:440px">
@@ -1973,11 +1981,12 @@ async function loadApplications(){
   applications = error ? [] : (data||[]);
 }
 
-const ATTENTION_RESULTS = ['failed','captcha_blocked','needs_manual_action'];
+const ATTENTION_RESULTS = ['failed','captcha_blocked','needs_manual_action','submission_unverified'];
 const ATTENTION_META = {
   failed: {icon:'⚠️', label:'Application failed'},
   captcha_blocked: {icon:'🔒', label:'Blocked by a CAPTCHA'},
-  needs_manual_action: {icon:'✋', label:'Needs manual action'}
+  needs_manual_action: {icon:'✋', label:'Needs manual action'},
+  submission_unverified: {icon:'❔', label:'Submission not verified'}
 };
 // A real SVG instead of an emoji — the 🗑 emoji renders as a blank box on some
 // Windows/Chrome font setups (same class of bug as the earlier 🪪 ID icon).
@@ -2013,6 +2022,7 @@ function renderApplications(){
         return '<div class="lrow">'+
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
           '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div></div>'+
+          '<button class="btn btn-ghost btn-xs" data-view-application="'+a.id+'">Details</button>'+
           '<button class="btn btn-primary btn-xs" data-mark-applied="'+g.ids.join(',')+'" title="I applied to this one myself — move it to Applied jobs">✓ Applied</button>'+
           (coLabel(a.job_matches?.company_name)?'<button class="btn btn-ghost btn-xs" data-quickblock-co="'+esc(a.job_matches?.company_name||'')+'" title="Block this company — stop the agent trying it again">Block company</button>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-attn="'+g.ids.join(',')+'" title="'+(g.count>1?'Delete all '+g.count+' records':'Delete this record')+'">'+TRASH_ICON+'</button>'+
@@ -2025,18 +2035,82 @@ function renderApplications(){
   el.innerHTML = !applied.length
     ? '<div class="empty"><div class="big">📮</div>No applications yet. Approve a match and your agent will send it off.</div>'
     : applied.map(a=>{
-        const pillClass = a.result==='success' ? 'green' : 'amber';
+        const confirmed = a.verification_status === 'confirmed';
+        const manual = a.verification_status === 'user_confirmed';
+        const pillClass = (confirmed || manual) ? 'green' : 'amber';
+        const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Historical record');
         return '<div class="lrow">'+
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div></div>'+
-          '<span class="pill '+pillClass+'">'+esc((a.result||'').replace('_',' '))+'</span>'+
+          '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
           '<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+new Date(a.attempted_at).toLocaleDateString()+'</span>'+
+          '<button class="btn btn-ghost btn-xs" data-view-application="'+a.id+'">Details</button>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-app="'+a.id+'" title="Delete this record">'+TRASH_ICON+'</button>'+
           '</div>';
       }).join('');
 }
 
+function applicationDetails(id){
+  const a = applications.find(x=>x.id===id);
+  if(!a) return;
+  const confirmed = a.verification_status === 'confirmed';
+  const manual = a.verification_status === 'user_confirmed';
+  const fields = Array.isArray(a.submitted_fields) ? a.submitted_fields : [];
+  const receipt = a.confirmation_text || '';
+  const hasProof = confirmed && (receipt || a.confirmation_reference || a.confirmation_screenshot_url);
+  $('#amTitle').textContent = a.job_matches?.job_title || 'Application details';
+
+  let proofBlock;
+  if(confirmed){
+    proofBlock =
+      '<div style="border:1px solid rgba(49,208,170,.35);background:rgba(49,208,170,.07);border-radius:12px;padding:14px;margin-bottom:16px">'+
+        '<b style="color:var(--ok)">✓ Confirmed by the job website</b>'+
+        '<div class="sub2" style="margin-top:6px">The agent found a submission receipt after sending the form.</div>'+
+      '</div>';
+  } else if(manual){
+    proofBlock =
+      '<div style="border:1px solid rgba(125,211,252,.35);background:rgba(125,211,252,.07);border-radius:12px;padding:14px;margin-bottom:16px">'+
+        '<b>✓ Marked applied by you</b><div class="sub2" style="margin-top:6px">This was confirmed by you, not verified by the agent.</div>'+
+      '</div>';
+  } else if(a.result==='submission_unverified'){
+    proofBlock =
+      '<div class="danger-box" style="margin-bottom:16px"><b>❔ Submission not verified</b><div class="sub2" style="margin-top:6px">The agent clicked Submit, but the website did not show a receipt. This job is not marked Applied.</div></div>';
+  } else {
+    proofBlock =
+      '<div style="border:1px solid var(--line);background:var(--input-bg);border-radius:12px;padding:14px;margin-bottom:16px">'+
+        '<b>Historical record — proof unavailable</b><div class="sub2" style="margin-top:6px">This application was recorded before submission proof was introduced, so we do not claim it was confirmed by the website.</div>'+
+      '</div>';
+  }
+
+  const receiptBlock = (receipt || a.confirmation_reference || a.confirmation_url)
+    ? '<div style="margin:18px 0"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Website receipt</b>'+
+      (receipt ? '<p style="margin:8px 0 0;line-height:1.55">'+esc(receipt)+'</p>' : '')+
+      (a.confirmation_reference ? '<div class="sub2" style="margin-top:8px">Reference: <b>'+esc(a.confirmation_reference)+'</b></div>' : '')+
+      (a.confirmation_url ? '<div style="margin-top:8px"><a class="btn btn-ghost btn-xs" href="'+esc(a.confirmation_url)+'" target="_blank" rel="noopener">Open confirmation page ↗</a></div>' : '')+
+      '</div>'
+    : '';
+
+  const fieldsBlock = fields.length
+    ? '<div style="margin-top:18px"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Answers sent</b>'+
+      '<div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">'+
+      fields.map(f=>'<div style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px"><b>'+esc(f.field||'Application field')+'</b><div class="sub2" style="margin-top:3px;white-space:pre-wrap">'+esc(f.value||'')+'</div></div>').join('')+
+      '</div></div>'
+    : '<div class="sub2" style="margin-top:18px">No form answers were captured for this record.</div>';
+
+  const screenshot = a.confirmation_screenshot_url
+    ? '<div style="margin-top:18px"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Confirmation screenshot</b><img src="'+esc(a.confirmation_screenshot_url)+'" alt="Job website submission confirmation" style="display:block;width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line)"></div>'
+    : (hasProof ? '<div class="sub2" style="margin-top:18px">A website receipt was captured. Screenshot storage was unavailable for this submission.</div>' : '');
+
+  $('#amBody').innerHTML =
+    proofBlock+
+    '<div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+' · '+new Date(a.attempted_at).toLocaleString()+'</div>'+
+    receiptBlock+fieldsBlock+screenshot;
+  $('#applicationModal').classList.remove('hidden');
+}
+
 $('#attnList').addEventListener('click', async (e)=>{
+  const detail=e.target.closest('button[data-view-application]');
+  if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
   const qb=e.target.closest('button[data-quickblock-co]');
   if(qb && qb.dataset.quickblockCo){ await addBlockRaw('companies', qb.dataset.quickblockCo); return; }
   const mb=e.target.closest('button[data-mark-applied]');
@@ -2079,9 +2153,9 @@ async function markApplied(logIds){
     const {error: mErr} = await sb.from('job_matches').update({status:'applied'}).in('id', matchIds);
     if(mErr){ toast('⚠ '+mErr.message,'err'); return false; }
   }
-  const {error: lErr} = await sb.from('application_log').update({result:'success'}).in('id', logIds);
+  const {error: lErr} = await sb.from('application_log').update({result:'user_applied',verification_status:'user_confirmed'}).in('id', logIds);
   if(lErr){ toast('⚠ '+lErr.message,'err'); return false; }
-  applications.forEach(a=>{ if(logIds.includes(a.id)) a.result='success'; });
+  applications.forEach(a=>{ if(logIds.includes(a.id)){ a.result='user_applied'; a.verification_status='user_confirmed'; } });
   await loadMatches();
   if(state.view==='matches') renderMatches();
   renderDashboard();
@@ -2089,6 +2163,8 @@ async function markApplied(logIds){
 }
 
 $('#appList').addEventListener('click', (e)=>{
+  const detail=e.target.closest('button[data-view-application]');
+  if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
   const btn=e.target.closest('button[data-del-app]');
   if(!btn) return;
   const id=btn.dataset.delApp;
