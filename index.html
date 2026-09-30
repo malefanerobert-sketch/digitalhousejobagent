@@ -251,8 +251,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 .chip{background:#182347;border:1px solid var(--line);color:#aeb9dd;font-size:11.5px;font-weight:600;
   border-radius:99px;padding:3px 10px}
 .mcard .blurb{color:#aeb9dd;font-size:13px;line-height:1.55;flex:1}
-.mcard .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.mcard .found{color:var(--muted);font-size:11.5px;margin-left:auto}
+.mcard .acts{margin-top:auto;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.mcard .acts-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0}
+.mcard .found{color:var(--muted);font-size:11.5px;margin-left:auto;white-space:nowrap;flex:none}
 .mcard .skip-note{background:rgba(255,184,77,.10);border:1px solid rgba(255,184,77,.35);color:#ffd08a;border-radius:10px;
   padding:9px 11px;font-size:12.5px;line-height:1.5}
 .mcard .queued-note{background:rgba(var(--accent2-rgb),.08);border:1px solid rgba(var(--accent2-rgb),.3);color:var(--accent2);
@@ -1913,9 +1914,11 @@ function renderMatches(){
         '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
       (m.match_reason ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
+      '<div class="acts-btns">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<a class="btn btn-ghost btn-sm" href="'+esc(m.job_url)+'" target="_blank" rel="noopener">View ↗</a>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
+      '</div>'+
       '<span class="found">'+verb+' '+timeAgo(m.discovered_at)+'</span></div></div>';
   }).join('');
   updateBulkBar();
