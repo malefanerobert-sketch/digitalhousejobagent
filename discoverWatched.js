@@ -137,6 +137,41 @@ function scoreMatch(text, keywords) {
   return best;
 }
 
+// Title used for the "this watched page could not be read" notice row. It has
+// to live in job_matches because application_log.job_match_id is NOT NULL, but
+// it is a notice, not a job — so label it unmistakably rather than leaving it
+// looking like a real vacancy called "(watched page)" in the user's Matches.
+const PAGE_NOTICE_TITLE = '⚠ Watched page could not be read (not a job)';
+
+// Some watched pages — Pnet above all — sit behind Cloudflare and fail at the
+// connection level on one run, then load perfectly on the next (2 Oct: failed
+// 12:51, returned 4 postings at 14:04). Those are NOT broken-URL problems and
+// must never be surfaced to the user, or every flaky run leaves permanent
+// noise in their Matches. Only durable, actionable faults (dead domain, 404,
+// bad certificate) are worth telling anyone about; transient ones stay in the
+// Railway console where they belong.
+function isTransientPageError(message) {
+  const m = String(message || '');
+  return /ERR_HTTP2_PROTOCOL_ERROR|ERR_CONNECTION_(RESET|CLOSED|REFUSED|ABORTED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_SOCKET_NOT_CONNECTED|ERR_EMPTY_RESPONSE|ERR_TIMED_OUT|ERR_ADDRESS_UNREACHABLE|ERR_TOO_MANY_REDIRECTS|ERR_SSL_PROTOCOL_ERROR|Timeout .* exceeded|timed out|crashed|\b50[234]\b/i.test(m);
+}
+
+// When a previously-failing page starts working again, remove the old notice
+// so a recovered source doesn't leave a phantom row sitting in Matches
+// forever. Children in application_log go first (FK is NOT NULL).
+async function clearStalePageReports(source) {
+  const { data: stale } = await supabase
+    .from('job_matches')
+    .select('id')
+    .eq('job_custom_source_id', source.id)
+    .eq('job_url', source.career_page_url)
+    .in('job_title', [PAGE_NOTICE_TITLE, '(watched page)']);
+  const ids = (stale || []).map(r => r.id);
+  if (!ids.length) return;
+  await supabase.from('application_log').delete().in('job_match_id', ids);
+  await supabase.from('job_matches').delete().in('id', ids);
+  console.log(`[discoverWatched]  ✓ cleared ${ids.length} stale page-notice row(s) for "${source.company_name}" — page is readable again`);
+}
+
 // Have we already reported *something* against this exact URL for this
 // seeker (a real job match, or an earlier "page unreachable" placeholder)?
 // Used to make sure a broken/typo'd watched page gets reported once, not
@@ -159,7 +194,7 @@ async function reportUnreachable(seeker, source, reason) {
     job_seeker_id: seeker.id,
     job_source_id: null,
     job_custom_source_id: source.id,
-    job_title: '(watched page)',
+    job_title: PAGE_NOTICE_TITLE,
     company_name: source.company_name,
     job_url: placeholderUrl,
     status: 'needs_manual_action',
@@ -263,7 +298,15 @@ async function run() {
     
     if (links === null) {
       console.error(`[discoverWatched]  ✖ could not load page "${source.company_name}":`, lastErr?.message);
-      await reportProblemToSeekers(seekers, optedOut, source, `the page could not be loaded (${lastErr?.message || 'unknown error'}) — the site may be down, the URL may be wrong, or the domain may no longer exist`);
+      // Transient connection-level failures are expected on anti-bot sites and
+      // usually fix themselves on the next run, so they are logged only. A
+      // durable fault (dead domain, 404, bad cert) still reaches the user,
+      // because that one genuinely needs a human to fix the URL.
+      if (isTransientPageError(lastErr?.message)) {
+        console.warn(`[discoverWatched]  ↻ treating "${source.company_name}" as a temporary failure — not reporting to users; will retry next run`);
+      } else {
+        await reportProblemToSeekers(seekers, optedOut, source, `the page could not be loaded (${lastErr?.message || 'unknown error'}) — the site may be down, the URL may be wrong, or the domain may no longer exist`);
+      }
       await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
       continue;
     }
@@ -318,6 +361,10 @@ async function run() {
     }
 
     console.log(`[discoverWatched]  ${jobs.length} posting(s) extracted from "${source.company_name}"`);
+
+    // The page is demonstrably readable, so drop any older "could not be read"
+    // notice left behind by a previous failed run.
+    await clearStalePageReports(source);
 
     // 3. Loop through all seekers and match jobs
     for (const seeker of seekers) {
