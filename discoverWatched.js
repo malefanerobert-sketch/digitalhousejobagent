@@ -54,6 +54,52 @@ function parseJobsLoose(raw) {
   return null;
 }
 
+// Ask the AI which of the extracted job titles are a REASONABLE fit for this
+// seeker's target roles — understanding related/synonymous titles instead of
+// matching literal words. This is what makes the agent smart: a seeker who
+// wants "data capture" also gets "Data Capturer", "Data Entry Clerk",
+// "Capturing Clerk", etc., without anyone having to list every synonym — while
+// clearly more senior / more technical / unrelated roles (Data Scientist,
+// Data Engineer, Software Developer) are left out. Returns a prompt whose
+// reply is a JSON array of the 1-based numbers that fit, e.g. [1,4,5].
+function buildRelevancePrompt(titles, seeker) {
+  const roles = (seeker.job_title_keywords || []).join(', ') || 'any';
+  return `A job seeker is looking for roles like: ${roles}.
+Their highest qualification is: ${seeker.highest_qualification || 'not stated'}.
+
+Below is a numbered list of job titles found on a job board. Decide which titles are a REASONABLE match for what this seeker is looking for.
+- INCLUDE closely related or synonymous roles. For example, if they want "data capture", then "Data Capturer", "Data Entry Clerk", "Capturing Clerk", "Admin Clerk (data entry)" all count.
+- EXCLUDE roles that are clearly more senior, more technical, or in a different field. For example "Data Scientist", "Data Engineer", "Senior Data Analyst", "Software Developer" do NOT count for a data-capture seeker.
+- When unsure about a borderline title that is the same kind of work, lean towards INCLUDING it — later checks will still read the full ad.
+
+Reply with ONLY a JSON array of the matching numbers, e.g. [1,4,5]. If none match, reply exactly: []
+
+TITLES:
+${titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
+}
+
+// Resolve which extracted jobs are relevant for a seeker. Prefers AI judgement
+// (semantic, synonym-aware). Falls back to the old literal word-overlap gate
+// ONLY when the AI is unavailable or its reply can't be parsed, so matching
+// never silently stops when the AI is down.
+async function relevantJobIndexes(jobs, seeker, override) {
+  const canAI = aiMatch.isEnabled() || override;
+  if (canAI) {
+    try {
+      const raw = await aiMatch.completeWithAI(buildRelevancePrompt(jobs.map(j => j.title), seeker), override);
+      const arr = parseJobsLoose(raw);
+      if (Array.isArray(arr)) {
+        const set = new Set(arr.map(n => Number(n) - 1).filter(n => Number.isInteger(n) && n >= 0 && n < jobs.length));
+        return { set, usedAI: true };
+      }
+    } catch (_) { /* fall through to literal fallback */ }
+  }
+  // Fallback: literal all-words-of-a-target-role match (>= 0.3).
+  const set = new Set();
+  jobs.forEach((j, i) => { if (jobFit.scoreTitle(`${j.title}`, seeker.job_title_keywords) >= 0.3) set.add(i); });
+  return { set, usedAI: false };
+}
+
 function buildExtractPrompt(links, pageUrl, agentPrompt) {
   const preamble = agentPrompt
     ? `${agentPrompt}\n\n`
@@ -286,24 +332,39 @@ async function run() {
         continue;
       }
 
-      for (const job of jobs) {
+      // Smart relevance: the AI decides which extracted titles actually fit
+      // this seeker's target roles, understanding related/synonymous titles
+      // rather than requiring the seeker's literal words to appear in the
+      // title. (Replaces the old `scoreTitle < 0.3` gate, which dropped
+      // "Data Capturer" for a "data capture" seeker because the words didn't
+      // line up — starving the pipeline even though the right jobs were there.)
+      const { set: relevantIdx, usedAI } = await relevantJobIndexes(jobs, seeker, override);
+      if (relevantIdx.size === 0) continue;
+
+      for (let ji = 0; ji < jobs.length; ji++) {
+        if (!relevantIdx.has(ji)) continue;
+        const job = jobs[ji];
         if (!job.title || !job.url) continue;
 
         let absoluteUrl;
         try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
         catch { continue; }
 
-        // A title must contain ALL words of one of the seeker's target roles
-        // ("data capture" needs "data" AND "capture") — sharing the single word
-        // "data" no longer counts — and must not be a role above their
-        // qualification level (engineer / architect / scientist / senior…).
-        const relevance = jobFit.scoreTitle(`${job.title}`, seeker.job_title_keywords);
-        if (relevance < 0.3) continue;
-        // Above the seeker's level: still saved so it shows in Matches, but as 'skipped'
-        // (with a reason) so the agent doesn't apply unless the user presses Apply.
+        // Seniority guard still applies as a BACKSTOP: a role above the
+        // seeker's level is still saved (so it shows in Matches) but as
+        // 'skipped' with a reason, so the agent won't auto-apply unless the
+        // user presses Apply. This runs whether the match came from the AI or
+        // the literal fallback, so the agent can never drift up into
+        // engineer / scientist / manager roles for a sub-degree seeker.
         const skipWhy = jobFit.titleSkipReason(job.title, seeker);
 
         if (await alreadyKnown(seeker.id, absoluteUrl)) continue;
+
+        // match_score: use the literal word-overlap score when it's positive;
+        // otherwise this was an AI-judged related match, so record a sensible
+        // baseline (75) instead of 0 so it ranks reasonably in Matches.
+        const relevance = jobFit.scoreTitle(`${job.title}`, seeker.job_title_keywords);
+        const score = relevance > 0 ? Math.round(relevance * 100) : (usedAI ? 75 : 0);
 
         const { error: insErr } = await supabase.from('job_matches').insert({
           job_seeker_id: seeker.id,
@@ -313,7 +374,7 @@ async function run() {
           company_name: source.company_name,
           job_url: absoluteUrl,
           location: job.location || null,
-          match_score: Math.round(relevance * 100), // stored as integer 0..100 like every other source
+          match_score: score, // stored as integer 0..100 like every other source
           status: skipWhy ? 'skipped' : 'pending',
           skip_reason: skipWhy ? jobFit.skipMessage(skipWhy) : null,
           is_custom_source: true
