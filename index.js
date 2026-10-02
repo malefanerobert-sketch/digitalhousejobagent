@@ -11,7 +11,7 @@ const discoverAuto = require('./discoverAuto');
 const apply = require('./apply');
 
 const WATCH_CRON = process.env.WATCH_CRON || '0 */3 * * *';     // watched pages — every 3 hours by default
-const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 */4 * * *'; // autonomous Adzuna/RemoteOK/Jobmail search — every 4 hours by default
+const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 */3 * * *'; // autonomous Adzuna/RemoteOK/Jobmail search — every 3 hours by default
 const APPLY_CRON = process.env.APPLY_CRON || '*/20 * * * *';    // every 20 min by default
 
 console.log('=================================================');
