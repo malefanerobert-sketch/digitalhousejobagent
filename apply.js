@@ -241,21 +241,147 @@ function missingFieldsNote(missingFields) {
   return ` This site also asked for: ${missingFields.join(', ')} — not covered by the CV/profile on file, so those were left blank. Please add them for this application if needed.`;
 }
 
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Build a clean, professional HTML CV from the fields the seeker filled in on
+// their profile. This is used ONLY when the seeker has not uploaded their own
+// CV file: the profile was deliberately strengthened to hold everything a
+// basic CV needs, so a form that demands a document upload no longer has to
+// block the whole application. Any field left blank on the profile is simply
+// omitted — nothing is invented.
+function buildCvHtml(seeker) {
+  const S = v => (v == null ? '' : String(v).trim());
+  const listOf = a => Array.isArray(a) ? a.filter(Boolean).join(', ') : S(a);
+  const line = (label, val) => val ? `<tr><td class="k">${escHtml(label)}</td><td>${escHtml(val)}</td></tr>` : '';
+
+  const name = S(seeker.full_name) || 'Candidate';
+  const contact = [S(seeker.dedicated_email), S(seeker.phone), S(seeker.phone_alt)].filter(Boolean).join('&nbsp;&nbsp;•&nbsp;&nbsp;');
+  const where = [S(seeker.city), S(seeker.province)].filter(Boolean).join(', ');
+
+  const summary = S(seeker.bio) || [
+    S(seeker.current_position) ? `${S(seeker.current_position)}` : '',
+    (seeker.years_experience != null && seeker.years_experience !== '') ? `${seeker.years_experience} year(s) of experience` : '',
+    S(seeker.highest_qualification) ? `${S(seeker.highest_qualification)}` : ''
+  ].filter(Boolean).join('. ');
+
+  const personal = [
+    line('ID number', S(seeker.id_number)),
+    line('Date of birth', S(seeker.date_of_birth)),
+    line('Nationality', S(seeker.nationality)),
+    line('Gender', S(seeker.gender)),
+    line('Address', [S(seeker.physical_address), where, S(seeker.postal_code)].filter(Boolean).join(', ')),
+    line("Driver's licence", listOf(seeker.drivers_license)),
+    line('Own transport', seeker.own_transport === true ? 'Yes' : (seeker.own_transport === false ? 'No' : '')),
+    line('Notice period', seeker.notice_period_days != null ? `${seeker.notice_period_days} day(s)` : ''),
+    line('Available from', S(seeker.available_from))
+  ].join('');
+
+  const education = [
+    line('Highest qualification', S(seeker.highest_qualification)),
+    line('Field of study', S(seeker.field_of_study))
+  ].join('');
+
+  const experience = [
+    line('Current / last position', S(seeker.current_position)),
+    line('Employer', S(seeker.current_employer)),
+    line('Years of experience', (seeker.years_experience != null && seeker.years_experience !== '') ? String(seeker.years_experience) : '')
+  ].join('');
+
+  const skills = listOf(seeker.skills);
+  const languages = listOf(seeker.languages);
+  const hobbies = S(seeker.hobbies);
+
+  const section = (title, body) => body ? `<h2>${escHtml(title)}</h2>${body}` : '';
+  const table = rows => rows ? `<table>${rows}</table>` : '';
+  const para = txt => txt ? `<p>${escHtml(txt)}</p>` : '';
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Liberation Sans', Arial, sans-serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; margin: 0; }
+    .hdr { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 16px; }
+    .hdr h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: .3px; }
+    .hdr .contact { color: #333; font-size: 12px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: #111;
+         border-bottom: 1px solid #ccc; padding-bottom: 3px; margin: 18px 0 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 3px 0; vertical-align: top; }
+    td.k { width: 190px; color: #555; font-weight: 600; padding-right: 12px; }
+    p { margin: 0 0 6px; }
+    .foot { margin-top: 22px; color: #888; font-size: 10px; border-top: 1px solid #eee; padding-top: 6px; }
+  </style></head><body>
+    <div class="hdr">
+      <h1>${escHtml(name)}</h1>
+      ${contact ? `<div class="contact">${contact}</div>` : ''}
+    </div>
+    ${section('Profile', para(summary))}
+    ${section('Experience', table(experience))}
+    ${section('Education', table(education))}
+    ${section('Skills', para(skills))}
+    ${section('Languages', para(languages))}
+    ${section('Personal details', table(personal))}
+    ${section('Interests', para(hobbies))}
+    <div class="foot">Curriculum vitae generated from the candidate's JobAgent profile.</div>
+  </body></html>`;
+}
+
+// Render the profile CV to a temporary PDF using the worker's existing headless
+// Chromium (no extra dependency). A fresh page is opened in the same context so
+// the live application form is never disturbed, and it is closed afterwards.
+async function generateProfileCv(context, seeker) {
+  const tempPath = path.join(os.tmpdir(), `resume-generated-${seeker.id}.pdf`);
+  const pg = await context.newPage();
+  try {
+    await pg.setContent(buildCvHtml(seeker), { waitUntil: 'load' });
+    await pg.pdf({
+      path: tempPath,
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '18mm', bottom: '18mm', left: '16mm', right: '16mm' }
+    });
+    return tempPath;
+  } finally {
+    await pg.close().catch(() => {});
+  }
+}
+
 async function attachResume(resumeInput, seeker) {
   if (!resumeInput) return { attached: false };
-  if (!seeker.resume_url) {
-    return { attached: false, error: 'This form requires a resume file, but this seeker has no resume_url on record.' };
+
+  // Preferred path: the seeker's own uploaded CV always wins.
+  if (seeker.resume_url) {
+    let tempResumePath = null;
+    try {
+      tempResumePath = await downloadResumeToTemp(seeker.resume_url, seeker.id);
+      await resumeInput.setInputFiles(tempResumePath);
+      await humanDelay();
+      return { attached: true };
+    } catch (err) {
+      return { attached: false, error: `Resume attach failed: ${err.message}` };
+    } finally {
+      cleanupTemp(tempResumePath);
+    }
   }
-  let tempResumePath = null;
+
+  // Fallback: no uploaded CV, so build one from the profile fields and attach
+  // that instead of aborting the application. (Uploading a personal CV is still
+  // encouraged in the app for a stronger result — this is the safety net.)
+  let generatedPath = null;
   try {
-    tempResumePath = await downloadResumeToTemp(seeker.resume_url, seeker.id);
-    await resumeInput.setInputFiles(tempResumePath);
+    const frame = await resumeInput.ownerFrame();
+    const context = frame && frame.page() ? frame.page().context() : null;
+    if (!context) throw new Error('no browser context available to render the CV');
+    console.log(`[apply]  ⓘ no uploaded CV for ${seeker.full_name || seeker.id} — attaching a CV generated from their profile`);
+    generatedPath = await generateProfileCv(context, seeker);
+    await resumeInput.setInputFiles(generatedPath);
     await humanDelay();
-    return { attached: true };
+    return { attached: true, generated: true };
   } catch (err) {
-    return { attached: false, error: `Resume attach failed: ${err.message}` };
+    return { attached: false, error: `This form needs a CV file. No CV is uploaded and auto-generating one from the profile failed: ${err.message}` };
   } finally {
-    cleanupTemp(tempResumePath);
+    cleanupTemp(generatedPath);
   }
 }
 
