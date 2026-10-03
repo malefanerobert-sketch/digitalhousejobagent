@@ -498,6 +498,9 @@ async function saveMatches(userId, matches) {
     job_source_id: job.job_source_id || null,
     job_title: job.title,
     company_name: job.company,
+    // Feeds (Adzuna/RemoteOK) already carry the real employer; store it in
+    // employer_name too so the UI has one consistent field to display.
+    employer_name: (job.company && String(job.company).trim()) ? String(job.company).trim() : null,
     location: job.location,
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,

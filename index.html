@@ -480,7 +480,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         <button class="nav-btn" data-view="matches" onclick="setView('matches')"><span class="ico">🎯</span>Matches <span class="nav-badge hidden nav-badge-sync" id="navMatchCount">0</span></button>
         <button class="nav-btn" data-view="applications" onclick="setView('applications')"><span class="ico">📮</span>Applications</button>
         <button class="nav-btn" data-view="docs" onclick="setView('docs')"><span class="ico">🗂️</span>Documents</button>
-        <button class="nav-btn" data-view="watch" onclick="setView('watch')"><span class="ico">👀</span>Watched pages</button>
         <button class="nav-btn" data-view="blocked" onclick="setView('blocked')"><span class="ico">🚫</span>Block list</button>
         <button class="nav-btn" data-view="profile" onclick="setView('profile')"><span class="ico">⚙️</span>Profile</button>
       </nav>
@@ -504,9 +503,8 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         </div>
         <div class="stats">
           <div class="stat" style="cursor:pointer" onclick="setView('matches')" title="View matched jobs"><div class="num" id="stNew">0</div><div class="lbl">Matches found</div></div>
-          <div class="stat teal" style="cursor:pointer" onclick="setView('applications')" title="View application report"><div class="num" id="stApps">0</div><div class="lbl">Needs your input</div></div>
+          <div class="stat teal" style="cursor:pointer" onclick="setView('applications')" title="View applied jobs"><div class="num" id="stApps">0</div><div class="lbl">Applications sent</div></div>
           <div class="stat red" style="cursor:pointer" onclick="setView('blocked')" title="View block list"><div class="num" id="stBlocked">0</div><div class="lbl">Blocked filters</div></div>
-          <div class="stat green" style="cursor:pointer" onclick="setView('watch')" title="View watched pages"><div class="num" id="stWatch">0</div><div class="lbl">Watched pages</div></div>
         </div>
         <div class="grid2">
           <div class="card">
@@ -542,10 +540,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 
       <!-- APPLICATIONS -->
       <section id="view-applications" class="hidden">
-        <div class="card" style="margin-bottom:18px">
-          <h3>Application report</h3>
-          <div id="attnList"></div>
-        </div>
         <div class="card"><h3>Applied jobs</h3><div id="appList"></div></div>
       </section>
 
@@ -563,22 +557,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <button class="btn btn-primary" id="docUploadBtn" onclick="addDoc()">⬆ Upload</button>
           <div class="divider"></div>
           <div id="docList"></div>
-        </div>
-      </section>
-
-      <!-- WATCHED PAGES -->
-      <section id="view-watch" class="hidden">
-        <div class="card">
-          <h3>Company career pages you want watched</h3>
-          <p class="section-note">Add any company's careers page directly. Your agent reads it, matches roles, and applies automatically just like your other sources —
-          if a page's layout is too different for it to submit safely, that attempt shows up in your Application report instead.</p>
-          <div class="row2">
-            <div class="field"><label>Company name</label><input id="wName" placeholder="e.g. Meridian Bank"></div>
-            <div class="field"><label>Careers page URL</label><input id="wUrl" placeholder="https://careers.company.com"></div>
-          </div>
-          <button class="btn btn-primary" id="watchAddBtn" onclick="addWatch()">➕ Add company</button>
-          <div class="divider"></div>
-          <div id="watchList"></div>
         </div>
       </section>
 
@@ -927,7 +905,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 let currentUser=null, currentSeeker=null;
-let matches=[], applications=[], customSources=[], customSourceOptOuts=[], documents=[];
+let matches=[], applications=[], documents=[];
 let state={mQ:'',mLoc:'all',view:'dashboard',selected:new Set()};
 
 function $(s){return document.querySelector(s)}
@@ -1141,7 +1119,6 @@ async function refreshAll(){
   $('#agentDot').className='dot busy';
   $('#agentText').textContent='checking…';
   await loadProfile();
-  await loadCustomSources();
   await loadMatches();
   await loadApplications();
   await loadDocuments();
@@ -1153,8 +1130,8 @@ async function refreshAll(){
 
 /* ================= VIEWS / NAV ================= */
 const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Matched jobs','Jobs your agent has discovered for you'],
-  applications:['Application report','Jobs that need your input, or ran into a problem'],
-  docs:['Documents','ID, certificates, qualifications — optional'],watch:['Watched pages','Company career pages your agent monitors and applies from'],
+  applications:['Applied jobs','Jobs your agent has applied to for you'],
+  docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour']};
 
 function setView(v){
@@ -1166,7 +1143,6 @@ function setView(v){
   if(v==='matches') renderMatches();
   if(v==='applications') renderApplications();
   if(v==='blocked') renderBlocked();
-  if(v==='watch') renderWatch();
   if(v==='docs') renderDocuments();
   if(v==='profile') loadProfile();
   window.scrollTo(0,0);
@@ -1660,23 +1636,14 @@ function isBlocked(kind,val){
 }
 
 function renderDashboard(){
-  // "Matches" only holds the agent's own pipeline — discovered, queued and
-  // applied jobs (loadMatches excludes needs_manual_action), so this card is a
-  // simple count. "Needs your input" mirrors the exact rows renderApplications()
-  // groups into the Application report's red section — same filters, so
-  // the number on the card always matches what's actually in that list.
-  const blockedCos = (currentSeeker?.blocked_companies||[]).map(c=>c.toLowerCase());
-  const needsInput = new Set(
-    applications
-      .filter(a=>ATTENTION_RESULTS.includes(a.result) && !blockedCos.includes((a.job_matches?.company_name||'').toLowerCase()))
-      .map(a=>(a.job_matches?.company_name||'').toLowerCase()+'|'+(a.job_matches?.job_title||'').toLowerCase())
-  ).size;
-  $$('.nav-badge-sync').forEach(b=>{ b.textContent=needsInput; b.classList.toggle('hidden',needsInput===0); });
+  // "Matches" is the agent's own pipeline (discovered, queued, applied).
+  // "Applications sent" counts the jobs the agent has actually applied to.
+  const appliedCount = applications.filter(a=>!ATTENTION_RESULTS.includes(a.result)).length;
+  $$('.nav-badge-sync').forEach(b=>{ b.textContent=matches.length; b.classList.toggle('hidden',matches.length===0); });
   $('#stNew').textContent=matches.length;
-  $('#stApps').textContent=needsInput;
+  $('#stApps').textContent=appliedCount;
   const blockedCount=(currentSeeker?.blocked_companies?.length||0)+(currentSeeker?.blocked_locations?.length||0);
   $('#stBlocked').textContent=blockedCount;
-  $('#stWatch').textContent=customSources.length;
 
   // Top-right "Last …" label removed — per-card timestamps carry the truth.
   // Profile is "complete" when the strengthened required fields are filled — CV upload is now optional.
@@ -1693,7 +1660,7 @@ function renderDashboard(){
     && currentSeeker.apply_experience_ranges?.length);
   $('#setupBanner').classList.toggle('hidden', done);
   if(done){
-    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Your agent checks your watched pages every few hours and applies automatically.';
+    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Your agent checks for new jobs every few hours and applies automatically.';
   } else {
     $('#agentSummary').textContent='Set up your profile to activate the agent.';
   }
@@ -1783,6 +1750,24 @@ const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices14
 const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
 function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
 function coLabel(n){ return n||''; }
+// The REAL hiring company for a match. Watched-page discovery stores the job
+// board / recruitment site in company_name (kept for block-lists, filtering and
+// SA-scope logic) and the actual employer in employer_name; feeds already store
+// the employer. Prefer the real employer for display, and fall back to the
+// source name only when the employer wasn't captured (e.g. older rows).
+function employerLabel(m){
+  const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
+  return emp || coLabel(m && m.company_name);
+}
+// True when we have a real employer that differs from the source it was found
+// on, so the card can add a quiet "via <source>" line without ever hiding where
+// the job actually came from.
+function showsVia(m){
+  if(!m || !m.employer_name) return false;
+  const emp = String(m.employer_name).trim().toLowerCase();
+  const src = String(m.company_name||'').trim().toLowerCase();
+  return !!src && emp && emp !== src;
+}
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
@@ -1899,7 +1884,7 @@ function renderMatches(){
   let list = matches.filter(m=>{
     if(isBlocked('companies',m.company_name) || isBlocked('locations',m.location)) return false;
     if(state.mLoc!=='all' && m.location!==state.mLoc) return false;
-    if(q && !((m.job_title||'')+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
+    if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
     return true;
   });
   list.sort((a,b)=>new Date(b.discovered_at)-new Date(a.discovered_at));
@@ -1924,13 +1909,13 @@ function renderMatches(){
     // match_score is stored as an integer 0..100, not a fraction.
     const scoreHtml = m.match_score!=null
       ? '<span class="score">'+Math.round(m.match_score)+'% match</span>'
-      : '<span class="score gray">from your watched pages</span>';
+      : '<span class="score gray">found by your agent</span>';
     const verb = m.status === 'applied' ? 'applied' : 'found';
     return '<div class="mcard">'+
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
-      '<div><h4>'+esc(m.job_title)+'</h4>'+(coLabel(m.company_name)?'<div class="co">'+esc(coLabel(m.company_name))+'</div>':'')+'</div>'+
+      '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+(showsVia(m)?' <span style="color:var(--muted);font-weight:500">via '+esc(m.company_name)+'</span>':'')+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
@@ -2033,7 +2018,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
 async function loadApplications(){
   if(!currentSeeker){ applications=[]; return; }
   const {data, error} = await sb.from('application_log')
-    .select('*, job_matches(job_title, company_name, job_url)')
+    .select('*, job_matches(job_title, company_name, employer_name, job_url)')
     .eq('job_seeker_id', currentSeeker.id)
     .order('attempted_at',{ascending:false});
   applications = error ? [] : (data||[]);
@@ -2051,41 +2036,7 @@ const ATTENTION_META = {
 const TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
 
 function renderApplications(){
-  const blockedCos = (currentSeeker?.blocked_companies||[]).map(c=>c.toLowerCase());
-  // A blocked company should disappear from the report immediately and stay
-  // gone — filter it out here (not just at the moment it's blocked) so a
-  // reload or any other path to blocking it never leaves stale rows behind.
-  const rawAttn = applications.filter(a=>ATTENTION_RESULTS.includes(a.result) && !blockedCos.includes((a.job_matches?.company_name||'').toLowerCase()));
   const applied = applications.filter(a=>!ATTENTION_RESULTS.includes(a.result));
-
-  // Collapse repeat attempts at the same posting (same company + title) into
-  // one row instead of piling up an identical entry every time the agent
-  // retries and hits the same wall — this is what was turning into a huge list.
-  const groups = {};
-  rawAttn.forEach(a=>{
-    const key = (a.job_matches?.company_name||'').toLowerCase()+'|'+(a.job_matches?.job_title||'').toLowerCase();
-    (groups[key] = groups[key]||[]).push(a);
-  });
-  const attn = Object.values(groups).map(group=>{
-    group.sort((x,y)=> new Date(y.attempted_at) - new Date(x.attempted_at));
-    return {latest: group[0], count: group.length, ids: group.map(g=>g.id)};
-  }).sort((x,y)=> new Date(y.latest.attempted_at) - new Date(x.latest.attempted_at));
-
-  const attnEl=$('#attnList');
-  attnEl.innerHTML = !attn.length
-    ? '<div class="empty"><div class="big">✅</div>Nothing needs your attention — every attempt has gone through cleanly.</div>'
-    : attn.map(g=>{
-        const a=g.latest;
-        const meta = ATTENTION_META[a.result] || {icon:'⚠️', label:'Could not apply'};
-        return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
-          '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div>'+
-          '<div class="sub2" style="margin-top:4px">Attempted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
-          '<button class="btn btn-primary btn-xs" data-mark-applied="'+g.ids.join(',')+'" title="I applied to this one myself — move it to Applied jobs">✓ Applied</button>'+
-          '<button class="btn btn-ghost btn-xs" data-del-attn="'+g.ids.join(',')+'" title="'+(g.count>1?'Delete all '+g.count+' records':'Delete this record')+'">'+TRASH_ICON+'</button>'+
-          (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
-          '</div>';
-      }).join('');
 
   const el=$('#appList');
   el.innerHTML = !applied.length
@@ -2096,7 +2047,7 @@ function renderApplications(){
         const pillClass = 'green';
         const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Success');
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div>'+
           '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
@@ -2163,60 +2114,6 @@ function applicationDetails(id){
   $('#applicationModal').classList.remove('hidden');
 }
 
-$('#attnList').addEventListener('click', async (e)=>{
-  const detail=e.target.closest('button[data-view-application]');
-  if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
-  const qb=e.target.closest('button[data-quickblock-co]');
-  if(qb && qb.dataset.quickblockCo){ await addBlockRaw('companies', qb.dataset.quickblockCo); return; }
-  const mb=e.target.closest('button[data-mark-applied]');
-  if(mb){
-    const ids=mb.dataset.markApplied.split(',');
-    mb.disabled=true;
-    const ok = await markApplied(ids);
-    if(!ok){ mb.disabled=false; return; }
-    toast('Moved to Applied jobs ✔','ok');
-    renderApplications();
-    return;
-  }
-  const btn=e.target.closest('button[data-del-attn]');
-  if(!btn) return;
-  const ids=btn.dataset.delAttn.split(',');
-  const msg = ids.length>1
-    ? 'Delete these '+ids.length+' records? Your agent may try this job again if it comes across it later.'
-    : 'Delete this record? Your agent may try this job again if it comes across it later.';
-  askConfirm(msg, async ()=>{
-    btn.disabled=true;
-    const {error} = await sb.from('application_log').delete().in('id', ids);
-    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
-    applications = applications.filter(a=>!ids.includes(a.id));
-    toast('Deleted');
-    renderApplications();
-  });
-});
-
-// Used when the user manually applies to a job the agent flagged in the
-// Application report (missing data, captcha, broken link, etc). Marks the
-// underlying match as applied — so it also shows up in "Matched jobs" — and
-// flips the log entries' result to success, which moves them out of the
-// report and into the "Applied" list here.
-async function markApplied(logIds){
-  const matchIds = [...new Set(logIds.map(id=>{
-    const a = applications.find(x=>x.id===id);
-    return a ? a.job_match_id : null;
-  }).filter(Boolean))];
-  if(matchIds.length){
-    const {error: mErr} = await sb.from('job_matches').update({status:'applied'}).in('id', matchIds);
-    if(mErr){ toast('⚠ '+mErr.message,'err'); return false; }
-  }
-  const {error: lErr} = await sb.from('application_log').update({result:'user_applied',verification_status:'user_confirmed'}).in('id', logIds);
-  if(lErr){ toast('⚠ '+lErr.message,'err'); return false; }
-  applications.forEach(a=>{ if(logIds.includes(a.id)){ a.result='user_applied'; a.verification_status='user_confirmed'; } });
-  await loadMatches();
-  if(state.view==='matches') renderMatches();
-  renderDashboard();
-  return true;
-}
-
 $('#appList').addEventListener('click', (e)=>{
   const detail=e.target.closest('button[data-view-application]');
   if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
@@ -2279,84 +2176,6 @@ $('#docList').addEventListener('click', async (e)=>{
   if(!btn) return;
   await sb.from('job_seeker_documents').delete().eq('id', btn.dataset.removeDocId);
   await loadDocuments(); renderDocuments();
-});
-
-/* ================= WATCHED PAGES (job_custom_sources) ================= */
-// Watched pages are a single GLOBAL pool: anything added here immediately
-// feeds the whole pipeline for every job seeker. A user, however, only ever
-// sees the pages THEY added (RLS enforces this too), and "Remove" is a
-// per-user opt-out rather than a delete — the source keeps running for
-// everyone else and only a dispatch admin can remove it system-wide.
-async function loadCustomSources(){
-  if(!currentSeeker){ customSources=[]; customSourceOptOuts=[]; return; }
-
-  // The watched list is driven by MEMBERSHIP, not ownership: adding a page
-  // someone else already added joins you to that single shared row, so it
-  // appears here and you can remove it again like any other.
-  const {data, error} = await sb
-    .from('job_custom_source_members')
-    .select('created_at, job_custom_sources(*)')
-    .eq('job_seeker_id', currentSeeker.id)
-    .order('created_at',{ascending:false});
-
-  customSources = error ? [] : (data||[]).map(m=>m.job_custom_sources).filter(Boolean);
-  customSourceOptOuts = [];
-}
-function renderWatch(){
-  const el=$('#watchList');
-  if(!customSources.length){ el.innerHTML='<div class="empty"><div class="big">👀</div>No career pages watched yet. Add one above.</div>'; return; }
-  el.innerHTML = customSources.map(w=>'<div class="lrow">'+
-    '<div class="grow"><b>'+esc(w.company_name)+'</b><div class="sub2"><a href="'+esc(w.career_page_url)+'" target="_blank" rel="noopener">'+esc(w.career_page_url)+'</a></div></div>'+
-    '<span class="pill teal">Search &amp; apply</span>'+
-    '<button class="btn btn-ghost btn-xs" data-remove-watch-id="'+w.id+'" title="Remove from your account only — this page keeps running for other users">Remove</button></div>'
-  ).join('');
-}
-async function addWatch(){
-  if(!currentSeeker){ toast('⚠ Save your profile first','warn'); return; }
-  const name=$('#wName').value.trim(), url=$('#wUrl').value.trim();
-  if(!name || !url){ toast('Add both a company name and a URL','warn'); return; }
-  if(!/^https?:\/\//i.test(url)){ toast('URL must start with http:// or https://','warn'); return; }
-  const btn=$('#watchAddBtn'); btn.disabled=true;
-  // Goes through add_watched_company() rather than a plain insert: a careers
-  // page exists ONCE for the whole system, so the function either creates it,
-  // or - if it's already in the pool - clears this seeker's opt-out so adding
-  // it back restores it instead of creating a duplicate company.
-  const {data, error} = await sb.rpc('add_watched_company', {p_name: name, p_url: url});
-  btn.disabled=false;
-  if(error){ toast('⚠ '+error.message,'err'); return; }
-
-  const msg = {
-    created:          'Watching '+name+'\u2019s careers page 👀',
-    joined:           'Added to your watched pages',
-    restored:         'Added back — the Agent will search this page for you again',
-    already_watching: 'You\u2019re already watching this page',
-    paused:           'Added, but an administrator has paused this page so it isn\u2019t being searched right now'
-  }[data] || 'Saved';
-  toast(msg, data === 'paused' ? 'warn' : 'ok');
-
-  $('#wName').value=''; $('#wUrl').value='';
-  await loadCustomSources(); renderWatch(); renderDashboard();
-}
-$('#watchList').addEventListener('click', async (e)=>{
-  const btn=e.target.closest('button[data-remove-watch-id]');
-  if(!btn) return;
-  const id = btn.dataset.removeWatchId;
-  btn.disabled = true;
-  // Opt-out, not delete — the page stays active for every other job seeker.
-  // The membership row goes too, which is what takes it out of this list;
-  // adding the URL again re-joins and clears the opt-out.
-  const {error} = await sb.from('job_custom_source_optouts')
-    .upsert({job_seeker_id: currentSeeker.id, job_custom_source_id: id},
-            {onConflict: 'job_seeker_id,job_custom_source_id'});
-  if(!error){
-    await sb.from('job_custom_source_members').delete()
-      .eq('job_seeker_id', currentSeeker.id)
-      .eq('job_custom_source_id', id);
-  }
-  btn.disabled = false;
-  if(error){ toast('⚠ '+error.message,'err'); return; }
-  toast('Removed from your account — still active for other users','ok');
-  await loadCustomSources(); renderWatch(); renderDashboard();
 });
 
 /* ================= BLOCK LIST ================= */
