@@ -1783,6 +1783,24 @@ const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices14
 const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
 function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
 function coLabel(n){ return n||''; }
+// The REAL hiring company for a match. Watched-page discovery stores the job
+// board / recruitment site in company_name (kept for block-lists, filtering and
+// SA-scope logic) and the actual employer in employer_name; feeds already store
+// the employer. Prefer the real employer for display, and fall back to the
+// source name only when the employer wasn't captured (e.g. older rows).
+function employerLabel(m){
+  const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
+  return emp || coLabel(m && m.company_name);
+}
+// True when we have a real employer that differs from the source it was found
+// on, so the card can add a quiet "via <source>" line without ever hiding where
+// the job actually came from.
+function showsVia(m){
+  if(!m || !m.employer_name) return false;
+  const emp = String(m.employer_name).trim().toLowerCase();
+  const src = String(m.company_name||'').trim().toLowerCase();
+  return !!src && emp && emp !== src;
+}
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
@@ -1899,7 +1917,7 @@ function renderMatches(){
   let list = matches.filter(m=>{
     if(isBlocked('companies',m.company_name) || isBlocked('locations',m.location)) return false;
     if(state.mLoc!=='all' && m.location!==state.mLoc) return false;
-    if(q && !((m.job_title||'')+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
+    if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
     return true;
   });
   list.sort((a,b)=>new Date(b.discovered_at)-new Date(a.discovered_at));
@@ -1930,7 +1948,7 @@ function renderMatches(){
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
-      '<div><h4>'+esc(m.job_title)+'</h4>'+(coLabel(m.company_name)?'<div class="co">'+esc(coLabel(m.company_name))+'</div>':'')+'</div>'+
+      '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+(showsVia(m)?' <span style="color:var(--muted);font-weight:500">via '+esc(m.company_name)+'</span>':'')+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
@@ -2033,7 +2051,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
 async function loadApplications(){
   if(!currentSeeker){ applications=[]; return; }
   const {data, error} = await sb.from('application_log')
-    .select('*, job_matches(job_title, company_name, job_url)')
+    .select('*, job_matches(job_title, company_name, employer_name, job_url)')
     .eq('job_seeker_id', currentSeeker.id)
     .order('attempted_at',{ascending:false});
   applications = error ? [] : (data||[]);
@@ -2078,7 +2096,7 @@ function renderApplications(){
         const a=g.latest;
         const meta = ATTENTION_META[a.result] || {icon:'⚠️', label:'Could not apply'};
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+(g.count>1 ? ' · tried '+g.count+' times' : '')+'</div>'+
           '<div class="sub2" style="margin-top:4px">'+meta.icon+' '+esc(meta.label)+(a.notes ? ' — '+esc(a.notes) : ' — no further detail was recorded')+'</div>'+
           '<div class="sub2" style="margin-top:4px">Attempted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<button class="btn btn-primary btn-xs" data-mark-applied="'+g.ids.join(',')+'" title="I applied to this one myself — move it to Applied jobs">✓ Applied</button>'+
@@ -2096,7 +2114,7 @@ function renderApplications(){
         const pillClass = 'green';
         const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Success');
         return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div>'+
+          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div>'+
           '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
           (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+

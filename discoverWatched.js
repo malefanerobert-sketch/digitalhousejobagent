@@ -104,10 +104,12 @@ function buildExtractPrompt(links, pageUrl, agentPrompt) {
   const preamble = agentPrompt
     ? `${agentPrompt}\n\n`
     : '';
-  return `${preamble}Below is a list of links found on a company/job-board page (${pageUrl}), as {"text","href"} pairs. Identify which ones are actual job postings (ignore navigation, login, footer, social, pagination, and "about us"-type links).
+  return `${preamble}Below is a list of links found on a company/job-board page (${pageUrl}), as {"text","href","context"} pairs. "context" is nearby text taken from the posting's card. Identify which ones are actual job postings (ignore navigation, login, footer, social, pagination, and "about us"-type links).
+
+For each real job posting, also identify the actual HIRING COMPANY / employer for THAT job when it appears in the text or context (for example "Imerys Refractory Minerals (Pty) Ltd"). This is the company the job is FOR — NOT the job board or recruitment site the link was found on (${pageUrl}), and NOT a generic label like "Apply now". If the posting only shows a recruitment agency acting for a client, use the name shown on the posting. If you cannot find a clear company name, use null — never guess, and never fall back to the job board's own name.
 
 Reply with ONLY a JSON array, no other text, in this exact shape:
-[{"title": "...", "url": "...", "location": "... or null"}]
+[{"title": "...", "url": "...", "location": "... or null", "company": "... or null"}]
 
 If none of the links look like job postings, reply with exactly: []
 
@@ -282,7 +284,19 @@ async function run() {
         await page.goto(source.career_page_url, { waitUntil: 'domcontentloaded', timeout: 25000 });
         await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
         links = await page.$$eval('a[href]', els => els
-          .map(e => ({ text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href }))
+          .map(e => {
+            // Capture the text of the posting "card" around the link so the AI
+            // can read the employer/company that usually sits next to the title
+            // (the anchor text itself is almost always just the job title). We
+            // walk up a few levels and cap the length so the AI payload stays
+            // small. This is ADDITIVE context only — it does not change which
+            // links are considered or how relevance is decided.
+            let ctx = '';
+            let node = e;
+            for (let up = 0; up < 3 && node; up++) node = node.parentElement;
+            if (node) ctx = (node.innerText || node.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 300);
+            return { text: (e.innerText || e.textContent || '').trim().replace(/\s+/g, ' '), href: e.href, context: ctx };
+          })
           .filter(l => l.text && l.text.length > 2 && l.text.length < 200)
         );
       } catch (err) {
@@ -419,6 +433,10 @@ async function run() {
           job_custom_source_id: source.id,
           job_title: job.title,
           company_name: source.company_name,
+          // The real hiring company extracted from the posting (kept separate
+          // from company_name so block-lists/routing on the source still work).
+          // Null when the AI couldn't find one — the UI falls back to the source.
+          employer_name: (job.company && String(job.company).trim()) ? String(job.company).trim() : null,
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source
