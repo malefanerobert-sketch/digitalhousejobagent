@@ -2093,7 +2093,7 @@ function renderApplications(){
     : applied.map(a=>{
         const confirmed = a.verification_status === 'confirmed';
         const manual = a.verification_status === 'user_confirmed';
-        const pillClass = (confirmed || manual) ? 'green' : 'amber';
+        const pillClass = 'green';
         const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Success');
         return '<div class="lrow">'+
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div>'+
