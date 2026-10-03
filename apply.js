@@ -117,6 +117,29 @@ function findConfirmationText(bodyText) {
   return lines.find(line => /thank you|application.{0,80}(submitted|received|complete)|we.{0,12}(received|have received).{0,80}application|submission.{0,40}(complete|successful)/i.test(line)) || null;
 }
 
+// Pull a reference / tracking number out of a confirmation page. Finds a
+// keyword (application / reference / submission / tracking), then returns the
+// first code-like token near it that actually contains a digit — so filler
+// words ("reference", "number") are never mistaken for the code, and a
+// hyphenated code like REF-2024-0098 is captured whole. Returns null when no
+// real reference is shown. (The previous inline regex captured the literal
+// word "reference" because its case-insensitive [A-Z0-9] also matched letters.)
+function extractReference(bodyText) {
+  const text = String(bodyText || '');
+  const re = /(?:application|reference|submission|tracking)[^\n]{0,40}/ig;
+  let m;
+  // Scan EVERY keyword occurrence, not just the first — on a real confirmation
+  // page the word "application" usually appears earlier (e.g. "your application
+  // has been received") than the line that actually carries the reference code.
+  while ((m = re.exec(text))) {
+    const codes = m[0].match(/[A-Z0-9][A-Z0-9-]{3,}/gi) || [];
+    for (const c of codes) {
+      if (/\d/.test(c) && !/^(number|reference|application|submission|tracking)$/i.test(c)) return c;
+    }
+  }
+  return null;
+}
+
 async function storeConfirmationScreenshot(page, match, seeker) {
   try {
     const image = await page.screenshot({ type: 'png', fullPage: false });
@@ -142,7 +165,7 @@ async function verifySubmission(page, match, seeker, submittedFields) {
   await page.waitForTimeout(1200).catch(() => {});
   const bodyText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 12000)).catch(() => '');
   const confirmationText = findConfirmationText(bodyText);
-  const confirmationReference = bodyText.match(/(?:application|reference|submission)\s*(?:number|no\.?|id|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i)?.[1] || null;
+  const confirmationReference = extractReference(bodyText);
   const evidence = {
     submitted_fields: submittedFields || [],
     confirmation_text: confirmationText,
