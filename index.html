@@ -546,7 +546,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <h3>Application report</h3>
           <div id="attnList"></div>
         </div>
-        <div class="card"><h3>Applied</h3><div id="appList"></div></div>
+        <div class="card"><h3>Applied jobs</h3><div id="appList"></div></div>
       </section>
 
       <!-- DOCUMENTS -->
@@ -2094,7 +2094,7 @@ function renderApplications(){
         const confirmed = a.verification_status === 'confirmed';
         const manual = a.verification_status === 'user_confirmed';
         const pillClass = (confirmed || manual) ? 'green' : 'amber';
-        const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Historical record');
+        const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Success');
         return '<div class="lrow">'+
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+'</div>'+
           '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
