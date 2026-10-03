@@ -403,6 +403,55 @@ async function callScoringAI(prompt, override) {
   return null; // unknown provider — treated the same as "not configured"
 }
 
+// Source labels that are NOT a real employer (Jobmail's scrape can't read the
+// hiring company off the search listing, so it stores "Via Jobmail"). These
+// must never be shown as the company name, so we treat them as "no company".
+const PLACEHOLDER_COMPANY_RE = /^(via\s+.+|n\/?a|unknown|not\s+specified|not\s+stated|confidential|company|private)$/i;
+function isPlaceholderCompany(n) {
+  const s = String(n || '').trim();
+  return !s || PLACEHOLDER_COMPANY_RE.test(s);
+}
+
+function buildEmployerPrompt(text, url) {
+  return `Below is the visible text of a single job posting (${url}). Identify the actual HIRING COMPANY / employer for this job — the company the job is FOR, NOT the job board or recruitment website, and NOT a generic label, button, or section heading. If the posting only names a recruitment agency acting for a client, use that agency name. If there is no clear company name, use null — never guess, and never fall back to the job board's own name.
+
+Reply with ONLY a JSON object, no other text, in this exact shape:
+{"company": "... or null"}
+
+PAGE TEXT:
+${String(text || '').slice(0, 4000)}`;
+}
+
+// Reads the real employer off a posting's own detail page. Used when the feed
+// listing only gave a placeholder (e.g. Jobmail). Plain fetch + tag strip (no
+// browser), AI-extracted, and never throws: any failure yields null.
+async function resolveEmployerFromPostingUrl(url, override) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobDiscoveryBot/1.0)', 'Accept': 'text/html' }
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+    const raw = await callScoringAI(buildEmployerPrompt(text, url), override);
+    if (!raw) return null;
+    const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+    let obj = null;
+    try { obj = JSON.parse(cleaned); }
+    catch { const m = cleaned.match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } } }
+    const name = (obj && obj.company != null) ? String(obj.company).trim() : '';
+    return (name && !isPlaceholderCompany(name)) ? name : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Score jobs using the configured AI provider (shared key or seeker override)
  */
@@ -487,10 +536,22 @@ No explanation, no markdown, just the array.`;
  * Save matched jobs to database
  * Note: Uses job_seeker_id to match actual schema
  */
-async function saveMatches(userId, matches) {
+async function saveMatches(userId, matches, override) {
   if (matches.length === 0) {
     console.log(`  No matches to save for user ${userId}`);
     return 0;
+  }
+
+  // Resolve the REAL employer for each match. Adzuna/RemoteOK already carry it
+  // in job.company; Jobmail only has the "Via Jobmail" placeholder, so for those
+  // we read the hiring company off the posting's detail page. A placeholder
+  // never becomes the stored employer (it would show as the company name).
+  for (const job of matches) {
+    if (isPlaceholderCompany(job.company)) {
+      job._employer = await resolveEmployerFromPostingUrl(job.url, override);
+    } else {
+      job._employer = String(job.company).trim();
+    }
   }
 
   const rows = matches.map(job => ({
@@ -498,9 +559,9 @@ async function saveMatches(userId, matches) {
     job_source_id: job.job_source_id || null,
     job_title: job.title,
     company_name: job.company,
-    // Feeds (Adzuna/RemoteOK) already carry the real employer; store it in
-    // employer_name too so the UI has one consistent field to display.
-    employer_name: (job.company && String(job.company).trim()) ? String(job.company).trim() : null,
+    // The real hiring company for the UI to display. Null when neither the feed
+    // nor the posting page named a real company (UI then falls back gracefully).
+    employer_name: job._employer || null,
     location: job.location,
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,
@@ -648,6 +709,7 @@ async function run() {
     // skips scoreJobsWithClaude altogether rather than passing it a null
     // override (which would fall through to the shared client internally).
     let scored;
+    let userOverride = null;
     if (user.api_provider === 'none') {
       console.log(`  🚫 ${user.full_name} has AI access turned off — saving ${allJobs.length} job(s) unscored (score=0)`);
       scored = allJobs.map(j => ({ ...j, match_score: 0 }));
@@ -659,7 +721,6 @@ async function run() {
       // to only build a client for 'anthropic' and silently fall back to the
       // shared key/provider for 'openai', which meant a seeker's own OpenAI
       // key was never actually used here despite the admin panel offering it.
-      let userOverride = null;
       if (user.api_provider === 'user' && user.ai_provider && user.ai_provider !== 'none' && user.ai_api_key) {
         userOverride = { provider: user.ai_provider, apiKey: user.ai_api_key, model: null };
       }
@@ -670,7 +731,7 @@ async function run() {
     }
 
     // Save matches
-    const saved = await saveMatches(user.id, scored);
+    const saved = await saveMatches(user.id, scored, userOverride);
     totalMatches += saved;
   }
 

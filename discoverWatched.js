@@ -117,6 +117,50 @@ LINKS:
 ${JSON.stringify(links)}`;
 }
 
+// Some job boards (e.g. Careers24, CareerJunction) don't print the hiring
+// company on their LISTING cards, so best-effort listing extraction returns
+// null for them. When that happens we open the posting's OWN detail page and
+// read the employer from there, so the real company name shows for every board
+// — never the board's own name. This is heavier (one extra page load + AI call
+// per NEW posting), so it runs ONLY as a fallback (when the listing didn't give
+// a company) and never throws: any failure just yields null.
+function buildEmployerPrompt(text, url) {
+  return `Below is the visible text of a single job posting's detail page (${url}). Identify the actual HIRING COMPANY / employer for this job — the company the job is FOR, NOT the job board or recruitment website, and NOT a generic label, button, menu item, or section heading. If the posting only names a recruitment agency acting for a client, use that agency name. If there is no clear company name anywhere, use null — never guess, and never fall back to the job board's own name.
+
+Reply with ONLY a JSON object, no other text, in this exact shape:
+{"company": "... or null"}
+
+PAGE TEXT:
+${String(text || '').slice(0, 4000)}`;
+}
+
+async function fetchEmployerFromDetail(browser, url) {
+  let page = null;
+  try {
+    page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    const text = await page
+      .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').replace(/\s+/g, ' ').trim())
+      .catch(() => '');
+    if (!text) return null;
+    const raw = await aiMatch.completeWithAI(buildEmployerPrompt(text, url), null);
+    if (!raw) return null;
+    let obj = null;
+    try { obj = JSON.parse(raw); }
+    catch {
+      const m = String(raw).match(/\{[\s\S]*\}/);
+      if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } }
+    }
+    const name = (obj && obj.company != null) ? String(obj.company).trim() : '';
+    return name || null;
+  } catch {
+    return null;
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+}
+
 // A user can list several target roles (e.g. "Data Analyst, Data Processor,
 // Data Capture"). Each keyword is an INDEPENDENT thing they'd take a job for,
 // so a posting qualifies if it matches ANY one of them well — we return the
@@ -271,6 +315,9 @@ async function run() {
   const optedOut = new Set((optOuts || []).map(o => `${o.job_seeker_id}|${o.job_custom_source_id}`));
 
   const browser = await chromium.launch({ headless: true });
+  // Caches the real employer per posting URL for this run, so a detail-page
+  // lookup happens at most once per URL even if several seekers match it.
+  const employerCache = new Map();
 
   for (const source of sources) {
     console.log(`[discoverWatched] scanning global company: "${source.company_name}" (${source.career_page_url})`);
@@ -427,16 +474,31 @@ async function run() {
         const relevance = jobFit.scoreTitle(`${job.title}`, seeker.job_title_keywords);
         const score = relevance > 0 ? Math.round(relevance * 100) : (usedAI ? 75 : 0);
 
+        // Resolve the REAL hiring company. Prefer what the listing gave us; when
+        // the board hides it there (Careers24, CareerJunction, …), fall back to
+        // reading the posting's own detail page. Cached per URL for this run so
+        // we open each detail page at most once.
+        let employer = (job.company && String(job.company).trim()) ? String(job.company).trim() : null;
+        if (!employer) {
+          if (employerCache.has(absoluteUrl)) {
+            employer = employerCache.get(absoluteUrl);
+          } else {
+            employer = await fetchEmployerFromDetail(browser, absoluteUrl);
+            employerCache.set(absoluteUrl, employer);
+          }
+        }
+
         const { error: insErr } = await supabase.from('job_matches').insert({
           job_seeker_id: seeker.id,
           job_source_id: null,
           job_custom_source_id: source.id,
           job_title: job.title,
           company_name: source.company_name,
-          // The real hiring company extracted from the posting (kept separate
-          // from company_name so block-lists/routing on the source still work).
-          // Null when the AI couldn't find one — the UI falls back to the source.
-          employer_name: (job.company && String(job.company).trim()) ? String(job.company).trim() : null,
+          // The real hiring company for this posting (kept separate from
+          // company_name so block-lists/routing on the source still work).
+          // Taken from the listing when present, otherwise from the posting's
+          // detail page. Null only when neither shows a company.
+          employer_name: employer,
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source

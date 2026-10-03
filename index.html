@@ -1747,7 +1747,7 @@ const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices14
 // are shown on cards as the source of the posting, so the user knows where the
 // agent found the job. Hidden only on the Watched pages view (that list shows
 // the pages the user themselves added).
-const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
+const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
 function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
 function coLabel(n){ return n||''; }
 // The REAL hiring company for a match. Watched-page discovery stores the job
@@ -1757,16 +1757,13 @@ function coLabel(n){ return n||''; }
 // source name only when the employer wasn't captured (e.g. older rows).
 function employerLabel(m){
   const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
-  return emp || coLabel(m && m.company_name);
-}
-// True when we have a real employer that differs from the source it was found
-// on, so the card can add a quiet "via <source>" line without ever hiding where
-// the job actually came from.
-function showsVia(m){
-  if(!m || !m.employer_name) return false;
-  const emp = String(m.employer_name).trim().toLowerCase();
-  const src = String(m.company_name||'').trim().toLowerCase();
-  return !!src && emp && emp !== src;
+  if(emp) return emp;
+  // No real employer captured. Never show the job board's own name as the
+  // company (Pnet, CareerJunction, Careers24, "Via Jobmail", …) — fall back to
+  // a neutral label instead. A legacy non-source company_name is still shown.
+  const src = String((m && m.company_name) || '').trim();
+  if(!src || isSourceName(src)) return 'Company not listed';
+  return src;
 }
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
@@ -1915,7 +1912,7 @@ function renderMatches(){
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
-      '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+(showsVia(m)?' <span style="color:var(--muted);font-weight:500">via '+esc(m.company_name)+'</span>':'')+'</div>':'')+'</div>'+
+      '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
