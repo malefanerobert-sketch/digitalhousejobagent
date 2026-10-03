@@ -406,7 +406,10 @@ async function callScoringAI(prompt, override) {
 // Source labels that are NOT a real employer (Jobmail's scrape can't read the
 // hiring company off the search listing, so it stores "Via Jobmail"). These
 // must never be shown as the company name, so we treat them as "no company".
-const PLACEHOLDER_COMPANY_RE = /^(via\s+.+|job\s?mail|jobmail|n\/?a|unknown|not\s+specified|not\s+stated|confidential|undisclosed|company|private|pvt|recruiter|employer)\.?$/i;
+// Reject only the board's own name, bare field labels, and site-navigation text
+// — NOT values the board genuinely lists as the employer (e.g. "Pvt", used by
+// advertisers who stay private), which are shown as-is.
+const PLACEHOLDER_COMPANY_RE = /^(via\s+.+|job\s?mail|jobmail|n\/?a|unknown|not\s+specified|not\s+stated|company|recruiter|employer|sign\s?up|log\s?in|login|register(?:ation)?|apply(?:\s?now)?|view|menu|search|home)\.?$/i;
 function isPlaceholderCompany(n) {
   const s = String(n || '').trim();
   return !s || PLACEHOLDER_COMPANY_RE.test(s);
@@ -469,8 +472,19 @@ async function resolveEmployerFromPostingUrl(url, override) {
       .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
       .replace(/\s+/g, ' ').trim();
     if ((!cand || isPlaceholderCompany(cand)) && text) {
-      const m = text.match(/Employer:\s*([^|]+?)(?:\s{2,}|$)/i);
-      if (m) cand = decodeEntities(m[1]);
+      const patterns = [
+        /\bEmployer\b[:\s]+([^|]{2,60}?)(?:\s{2,}|$)/gi,
+        /\bRecruiter\b[:\s]+([^|]{2,60}?)(?:\s{2,}|$)/gi,
+        /Posted[^|]*?\bby\s+([^|]{2,60}?)(?:\s{2,}|$)/gi
+      ];
+      for (const re of patterns) {
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          const c = decodeEntities(m[1]);
+          if (c && !isPlaceholderCompany(c)) { cand = c; break; }
+        }
+        if (cand && !isPlaceholderCompany(cand)) break;
+      }
     }
 
     // 3. AI last resort.

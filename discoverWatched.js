@@ -139,7 +139,10 @@ ${String(text || '').slice(0, 4000)}`;
 function isUnusableEmployer(n) {
   const s = String(n || '').trim();
   if (!s) return true;
-  return /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|jobmail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter|pvt|private|confidential|undisclosed|not specified|not stated|n\/?a|unknown|company|recruiter|employer)\.?$/i.test(s);
+  // Reject only the job board's own name, bare field labels, and site navigation
+  // text — NOT values the board genuinely lists as the employer (e.g. "Pvt",
+  // which some advertisers use to stay private). Those are shown as-is.
+  return /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|jobmail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter|company|recruiter|employer|sign\s?up|log\s?in|login|register(?:ation)?|apply(?:\s?now)?|view|menu|search|home)\.?$/i.test(s);
 }
 function decodeEntities(s) {
   return String(s || '').replace(/&amp;/g, '&').replace(/&#x26;/gi, '&').replace(/&#38;/g, '&')
@@ -166,12 +169,23 @@ function employerFromJsonLd(html) {
   }
   return null;
 }
-// Labelled markers shown on the rendered page ("Employer: X", "Posted … by X").
+// Labelled markers shown on the rendered page ("Employer X", "Recruiter X",
+// "Posted … by X"). Scans every match and returns the first that is a usable
+// name, so leading site-navigation hits (e.g. "Employer Sign Up") are skipped.
 function employerFromText(text) {
-  let m = String(text || '').match(/Employer:\s*([^\n]+)/i);
-  if (m) return decodeEntities(m[1]);
-  m = String(text || '').match(/Posted[^\n]*?\bby\s+([^\n|]+)/i);
-  if (m) return decodeEntities(m[1]);
+  const s = String(text || '');
+  const patterns = [
+    /\bEmployer\b[:\s]*\n?\s*([^\n]{2,60})/gi,
+    /\bRecruiter\b[:\s]*\n?\s*([^\n]{2,60})/gi,
+    /Posted[^\n]*?\bby\s+([^\n|]{2,60})/gi
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const c = decodeEntities(m[1]);
+      if (c && !isUnusableEmployer(c)) return c;
+    }
+  }
   return null;
 }
 
