@@ -1756,14 +1756,15 @@ function coLabel(n){ return n||''; }
 // the employer. Prefer the real employer for display, and fall back to the
 // source name only when the employer wasn't captured (e.g. older rows).
 function employerLabel(m){
+  // Never show a job board's own name as the company (Pnet, CareerJunction,
+  // Careers24, "Via Jobmail", …). Older rows stored that source label in
+  // employer_name, so it is screened too — not just company_name. Falls back to
+  // a neutral label only when nothing real is known.
   const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
-  if(emp) return emp;
-  // No real employer captured. Never show the job board's own name as the
-  // company (Pnet, CareerJunction, Careers24, "Via Jobmail", …) — fall back to
-  // a neutral label instead. A legacy non-source company_name is still shown.
+  if(emp && !isSourceName(emp)) return emp;
   const src = String((m && m.company_name) || '').trim();
-  if(!src || isSourceName(src)) return 'Company not listed';
-  return src;
+  if(src && !isSourceName(src)) return src;
+  return 'Company not listed';
 }
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;

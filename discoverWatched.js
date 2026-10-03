@@ -134,26 +134,91 @@ PAGE TEXT:
 ${String(text || '').slice(0, 4000)}`;
 }
 
+// A value that is a job board, a generic label, or "confidential" — never a
+// usable employer name. Used to reject bad extractions from every method below.
+function isUnusableEmployer(n) {
+  const s = String(n || '').trim();
+  if (!s) return true;
+  return /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|jobmail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter|pvt|private|confidential|undisclosed|not specified|not stated|n\/?a|unknown|company|recruiter|employer)\.?$/i.test(s);
+}
+function decodeEntities(s) {
+  return String(s || '').replace(/&amp;/g, '&').replace(/&#x26;/gi, '&').replace(/&#38;/g, '&')
+    .replace(/&#x2013;/gi, '–').replace(/&#8211;/g, '–').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ').trim();
+}
+// Most SA job boards embed a schema.org JobPosting with the real employer in
+// hiringOrganization — the most reliable, zero-cost source. Parse that first.
+function employerFromJsonLd(html) {
+  const blocks = [...String(html || '').matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of blocks) {
+    let d; try { d = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(d) ? d : [d];
+    for (const x of arr) {
+      const items = (x && x['@graph']) ? x['@graph'] : [x];
+      for (const it of items) {
+        if (it && it.hiringOrganization) {
+          const h = it.hiringOrganization;
+          const n = typeof h === 'string' ? h : (h && h.name);
+          if (n) return decodeEntities(n);
+        }
+      }
+    }
+  }
+  return null;
+}
+// Labelled markers shown on the rendered page ("Employer: X", "Posted … by X").
+function employerFromText(text) {
+  let m = String(text || '').match(/Employer:\s*([^\n]+)/i);
+  if (m) return decodeEntities(m[1]);
+  m = String(text || '').match(/Posted[^\n]*?\bby\s+([^\n|]+)/i);
+  if (m) return decodeEntities(m[1]);
+  return null;
+}
+
 async function fetchEmployerFromDetail(browser, url) {
   let page = null;
   try {
     page = await browser.newPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-    const text = await page
-      .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').replace(/\s+/g, ' ').trim())
-      .catch(() => '');
-    if (!text) return null;
-    const raw = await aiMatch.completeWithAI(buildEmployerPrompt(text, url), null);
-    if (!raw) return null;
-    let obj = null;
-    try { obj = JSON.parse(raw); }
-    catch {
-      const m = String(raw).match(/\{[\s\S]*\}/);
-      if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } }
+    // Best-effort consent dismissal so the real content (and its JSON-LD) loads.
+    for (const t of ['I accept', 'Accept all', 'Accept', 'Agree']) {
+      const el = await page.$(`button:has-text("${t}")`).catch(() => null);
+      if (el) { await el.click().catch(() => {}); await page.waitForTimeout(800).catch(() => {}); break; }
     }
-    const name = (obj && obj.company != null) ? String(obj.company).trim() : '';
-    return name || null;
+
+    // 1. schema.org JobPosting hiringOrganization — reliable and free.
+    const html = await page.content().catch(() => '');
+    let cand = employerFromJsonLd(html);
+
+    // 2. Labelled markers on the rendered page.
+    let text = '';
+    if (!cand || isUnusableEmployer(cand)) {
+      text = await page
+        .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').trim())
+        .catch(() => '');
+      cand = employerFromText(text);
+    }
+
+    // 3. AI as a last resort, reading the visible text.
+    if (!cand || isUnusableEmployer(cand)) {
+      if (!text) {
+        text = await page
+          .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').trim())
+          .catch(() => '');
+      }
+      if (text) {
+        const raw = await aiMatch.completeWithAI(buildEmployerPrompt(text.replace(/\s+/g, ' ').trim(), url), null);
+        if (raw) {
+          let obj = null;
+          try { obj = JSON.parse(raw); }
+          catch { const m = String(raw).match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } } }
+          cand = (obj && obj.company != null) ? decodeEntities(String(obj.company)) : null;
+        }
+      }
+    }
+
+    return (cand && !isUnusableEmployer(cand)) ? cand : null;
   } catch {
     return null;
   } finally {

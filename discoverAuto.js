@@ -406,10 +406,35 @@ async function callScoringAI(prompt, override) {
 // Source labels that are NOT a real employer (Jobmail's scrape can't read the
 // hiring company off the search listing, so it stores "Via Jobmail"). These
 // must never be shown as the company name, so we treat them as "no company".
-const PLACEHOLDER_COMPANY_RE = /^(via\s+.+|n\/?a|unknown|not\s+specified|not\s+stated|confidential|company|private)$/i;
+const PLACEHOLDER_COMPANY_RE = /^(via\s+.+|job\s?mail|jobmail|n\/?a|unknown|not\s+specified|not\s+stated|confidential|undisclosed|company|private|pvt|recruiter|employer)\.?$/i;
 function isPlaceholderCompany(n) {
   const s = String(n || '').trim();
   return !s || PLACEHOLDER_COMPANY_RE.test(s);
+}
+function decodeEntities(s) {
+  return String(s || '').replace(/&amp;/g, '&').replace(/&#x26;/gi, '&').replace(/&#38;/g, '&')
+    .replace(/&#x2013;/gi, '–').replace(/&#8211;/g, '–').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// Most SA job boards embed a schema.org JobPosting whose hiringOrganization is
+// the real employer — the most reliable, zero-cost source. Parse it first.
+function employerFromJsonLd(html) {
+  const blocks = [...String(html || '').matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of blocks) {
+    let d; try { d = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(d) ? d : [d];
+    for (const x of arr) {
+      const items = (x && x['@graph']) ? x['@graph'] : [x];
+      for (const it of items) {
+        if (it && it.hiringOrganization) {
+          const h = it.hiringOrganization;
+          const n = typeof h === 'string' ? h : (h && h.name);
+          if (n) return decodeEntities(n);
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function buildEmployerPrompt(text, url) {
@@ -432,21 +457,35 @@ async function resolveEmployerFromPostingUrl(url, override) {
     });
     if (!res.ok) return null;
     const html = await res.text();
+
+    // 1. schema.org JobPosting hiringOrganization — reliable and free.
+    let cand = employerFromJsonLd(html);
+
+    // 2. Labelled "Employer:" marker in the visible text.
     const text = html
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
       .replace(/\s+/g, ' ').trim();
-    if (!text) return null;
-    const raw = await callScoringAI(buildEmployerPrompt(text, url), override);
-    if (!raw) return null;
-    const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-    let obj = null;
-    try { obj = JSON.parse(cleaned); }
-    catch { const m = cleaned.match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } } }
-    const name = (obj && obj.company != null) ? String(obj.company).trim() : '';
-    return (name && !isPlaceholderCompany(name)) ? name : null;
+    if ((!cand || isPlaceholderCompany(cand)) && text) {
+      const m = text.match(/Employer:\s*([^|]+?)(?:\s{2,}|$)/i);
+      if (m) cand = decodeEntities(m[1]);
+    }
+
+    // 3. AI last resort.
+    if ((!cand || isPlaceholderCompany(cand)) && text) {
+      const raw = await callScoringAI(buildEmployerPrompt(text, url), override);
+      if (raw) {
+        const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+        let obj = null;
+        try { obj = JSON.parse(cleaned); }
+        catch { const m = cleaned.match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]); } catch { /* ignore */ } } }
+        cand = (obj && obj.company != null) ? decodeEntities(String(obj.company)) : null;
+      }
+    }
+
+    return (cand && !isPlaceholderCompany(cand)) ? cand : null;
   } catch {
     return null;
   }
