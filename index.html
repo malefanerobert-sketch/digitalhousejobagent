@@ -1708,7 +1708,11 @@ function renderDashboard(){
   // Derived activity feed — merges recent matches + applications, no separate activity table exists
   const feed=[];
   matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+m.job_title+(coLabel(m.company_name)?' at '+coLabel(m.company_name):'')}));
-  applications.slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:(a.result==='success'?'📮 Applied':'⚠ Application '+a.result)+': '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
+  // Only show successful applications in the user's activity feed. Problem
+  // results (needs_manual_action, failed, captcha_blocked, submission_unverified)
+  // are an admin responsibility and live in the admin Application Report — users
+  // never need to see "Application needs_manual_action" style noise on their dashboard.
+  applications.filter(a=>a.result==='success').slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
   feed.sort((a,b)=>new Date(b.t)-new Date(a.t));
   const actEl=$('#actList');
   actEl.innerHTML = feed.length
