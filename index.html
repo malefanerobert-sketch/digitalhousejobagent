@@ -1959,7 +1959,7 @@ function renderMatches(){
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
       (m.status==='approved' ? noteBox('queued-note', m.id, 'You chose to apply — the agent will submit this application on its next run.',
         '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
-      (m.match_reason ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
+      (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
@@ -2428,7 +2428,7 @@ function openJobView(j){
   const company = (typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||'');
   const loc     = j.location || '';
   const salary  = j.salary_text ? String(j.salary_text).trim() : '';
-  const reason  = j.match_reason ? String(j.match_reason).trim() : '';
+  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? String(j.match_reason).trim() : '';
   const score   = (j.match_score!=null && !isNaN(j.match_score)) ? Math.round(j.match_score)+'% match' : '';
   const found   = j.discovered_at ? ('Found '+timeAgo(j.discovered_at)) : '';
   const desc    = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
@@ -2494,3 +2494,4 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
 </script>
 </body>
 </html>
+
