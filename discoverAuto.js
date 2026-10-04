@@ -611,7 +611,7 @@ function scoreJobsByTitle(jobs, userProfile) {
       ...job,
       match_score: Math.round(jobFit.scoreTitle(job.title, userProfile.job_title_keywords) * 100)
     }))
-    .filter(job => job.match_score >= 50);
+    .filter(job => job.match_score > 30);
 }
 
 /**
@@ -693,9 +693,9 @@ No explanation, no markdown, just the array.`;
     }
   }
 
-  // A score below 50 is not a match. In particular, never save 0% rows when
-  // a provider returns all zeroes or every scoring batch fails.
-  return scored.filter(j => Number(j.match_score) >= 50);
+  // Scores of 30% or below are not matches. Keep 31% and above, while still
+  // preventing provider failures from creating 0% rows.
+  return scored.filter(j => Number(j.match_score) > 30);
 }
 
 /**
