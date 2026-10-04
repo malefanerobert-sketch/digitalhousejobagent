@@ -2245,16 +2245,28 @@ function openJobView(j){
   const company = (typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||'');
   const loc = j.location || '';
   const desc = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
+  const url = j.job_url || '';
+  // Capitec's careers site often serves a filled/bounce page with no real job
+  // content; in that case fall through to the original external link rather
+  // than show a wall of nav text in-app.
+  const isCapitec = /\bcareers\.capitecbank\.co\.za\b/i.test(url);
   $('#jmTitle').textContent = title;
-  $('#jmBody').innerHTML =
+  const header =
     '<div class="sub2" style="margin-bottom:14px">'+
       (company ? '<span>🏢 '+esc(company)+'</span>' : '')+
       (company && loc ? ' · ' : '')+
       (loc ? '<span>📍 '+esc(loc)+'</span>' : '')+
-    '</div>'+
-    (desc
-      ? '<div style="white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>'
-      : '<div class="sub2">The full description for this role isn’t available yet — your agent will capture it on its next scan.</div>');
+    '</div>';
+  let body;
+  if (desc) {
+    body = '<div style="white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>';
+  } else if (isCapitec && url) {
+    body = '<div class="sub2" style="margin-bottom:12px">This posting is hosted on the employer’s own careers site. Open it there to see the full details.</div>'+
+      '<a class="btn btn-sm" href="'+esc(url)+'" target="_blank" rel="noopener">Open posting ↗</a>';
+  } else {
+    body = '<div class="sub2">The full description for this role isn’t available yet — your agent will capture it on its next scan.</div>';
+  }
+  $('#jmBody').innerHTML = header + body;
   $('#jobModal').classList.remove('hidden');
 }
 $$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
