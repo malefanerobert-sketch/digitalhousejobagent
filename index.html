@@ -2327,6 +2327,7 @@ async function loadHelpThread(){
   const {data, error} = await sb.from('support_messages')
     .select('*')
     .eq('job_seeker_id', currentSeeker.id)
+    .eq('hidden_by_user', false)
     .order('created_at', {ascending:true});
   if(error){ if(el) el.innerHTML = '<div class="sub2">⚠ '+esc(error.message)+'</div>'; return; }
   helpMessages = data || [];
@@ -2367,8 +2368,10 @@ function renderHelpThread(){
 
 async function deleteHelpMessage(id){
   if(!id) return;
-  if(!confirm('Delete this message? This can\u2019t be undone.')) return;
-  const {error} = await sb.from('support_messages').delete().eq('id', id);
+  if(!confirm('Remove this message from your view? The support team keeps their own copy.')) return;
+  // Soft-delete: only hides from this seeker's own thread. The admin's view
+  // is driven by hidden_by_admin, so the message stays visible to them.
+  const {error} = await sb.from('support_messages').update({hidden_by_user:true}).eq('id', id);
   if(error){ alert('⚠ '+error.message); return; }
   helpMessages = helpMessages.filter(m => m.id !== id);
   renderHelpThread();
