@@ -134,6 +134,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
       <div class="tabs">
         <button class="tab active" data-tab="accounts" onclick="setTab('accounts')">Accounts</button>
         <button class="tab" data-tab="companies" onclick="setTab('companies')">Companies</button>
+        <button class="tab" data-tab="health" onclick="setTab('health')">Health</button>
         <button class="tab" data-tab="report" onclick="setTab('report')">Application Report</button>
         <button class="tab" data-tab="sources" onclick="setTab('sources')">Job Sources</button>
         <button class="tab" data-tab="settings" onclick="setTab('settings')">AI &amp; Agent settings</button>
@@ -165,6 +166,29 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             Deactivating stops the Agent scanning a company without losing its history. Deleting removes it permanently for everyone.</p>
           <input class="search" id="coSearch" placeholder="🔍 Search company or URL…" oninput="renderCompanies()">
           <div id="coList"></div>
+        </div>
+      </section>
+
+      <!-- HEALTH (per-seeker risk list — find struggling users fast) -->
+      <section id="tab-health" class="hidden">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+            <div>
+              <h3 style="margin-bottom:4px;font-size:15px">🩺 User health — who's struggling right now</h3>
+              <div style="font-size:12.5px;color:var(--muted)">Lower score = agent isn't flowing for them. Click a row for detail. Signals from the last 7 days.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input class="search" id="hSearch" placeholder="🔍 Name or email" oninput="renderHealth()" style="min-width:200px">
+              <select id="hFilter" onchange="renderHealth()" style="padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
+                <option value="all">All users</option>
+                <option value="risk">🔴 At risk only</option>
+                <option value="warn">🟡 Warning+ </option>
+              </select>
+              <button class="btn" onclick="loadHealth()">🔄 Refresh</button>
+            </div>
+          </div>
+          <div id="hAlerts" style="margin:10px 0 14px"></div>
+          <div id="hList"></div>
         </div>
       </section>
 
@@ -514,13 +538,14 @@ async function enterApp(){
 }
 
 function setTab(name){
-  ['accounts','companies','report','sources','settings'].forEach(t=>{
+  ['accounts','companies','health','report','sources','settings'].forEach(t=>{
     document.querySelector('.tab[data-tab="'+t+'"]').classList.toggle('active', t===name);
     $('#tab-'+t).classList.toggle('hidden', t!==name);
   });
   if(name==='sources'){ loadSources(); }
   if(name==='companies'){ loadCompanies(); }
   if(name==='report'){ loadReport(); }
+  if(name==='health'){ loadHealth(); }
 }
 
 /* ================= COMPANIES (job_custom_sources) =================
@@ -746,6 +771,127 @@ document.addEventListener('click', async (e)=>{
   toast('Deleted for the entire system','ok');
   loadCompanies();
 });
+
+/* ================= USER HEALTH (admin at-a-glance screening) =================
+   One row per seeker, scored 0-100 against simple signals pulled from the
+   last 7 days. Sorted worst-first so struggling users surface immediately
+   without the admin reading 2000 names. Everything comes from tables that
+   already exist — no new schema, no new workers. */
+let healthRows = [];
+
+async function loadHealth(){
+  const el = $('#hList');
+  if(el) el.innerHTML = '<div class="empty">Scoring users…</div>';
+  const since = new Date(Date.now() - 7*86400e3).toISOString();
+  // Three parallel reads: seekers, recent matches, recent application attempts.
+  // Narrow select on the two large tables keeps payload small at ~2000 users.
+  const [seekersRes, matchesRes, logsRes] = await Promise.all([
+    sb.from('job_seekers').select('id, full_name, dedicated_email, status, resume_url, phone, id_number, physical_address, city, highest_qualification, skills, preferred_locations, job_title_keywords'),
+    sb.from('job_matches').select('job_seeker_id, status, discovered_at').gte('discovered_at', since),
+    sb.from('application_log').select('job_seeker_id, result, verification_status, attempted_at').gte('attempted_at', since)
+  ]);
+  if(seekersRes.error){ el.innerHTML = '<div class="empty">⚠ '+esc(seekersRes.error.message)+'</div>'; return; }
+  const seekers = seekersRes.data || [];
+  const matches = matchesRes.data || [];
+  const logs = logsRes.data || [];
+
+  // Pre-index by seeker id for O(1) lookup during scoring.
+  const mBy = {}, lBy = {};
+  for(const m of matches){ (mBy[m.job_seeker_id] ||= []).push(m); }
+  for(const l of logs){ (lBy[l.job_seeker_id] ||= []).push(l); }
+
+  // --- Scoring: start at 100, subtract for each red flag. Clamp 0..100. ---
+  // Profile completeness check — the fields the agent most needs to fill forms.
+  const PROFILE_FIELDS = ['full_name','dedicated_email','phone','id_number','physical_address','city','highest_qualification'];
+  const KEYWORD_FIELDS = ['skills','preferred_locations','job_title_keywords']; // arrays
+
+  healthRows = seekers.map(s => {
+    const ms = mBy[s.id] || [];
+    const ls = lBy[s.id] || [];
+    const applied = ls.filter(l => l.result === 'success' || l.verification_status === 'confirmed' || l.verification_status === 'user_confirmed').length;
+    const problems = ls.filter(l => ['failed','captcha_blocked','needs_manual_action','submission_unverified'].includes(l.result)).length;
+    const openIssues = ms.filter(m => ['failed','needs_manual_action','captcha_blocked'].includes(m.status)).length;
+    const matched = ms.length;
+
+    const profileFilled = PROFILE_FIELDS.filter(f => s[f] && String(s[f]).trim()).length;
+    const kwFilled = KEYWORD_FIELDS.filter(f => Array.isArray(s[f]) && s[f].length).length;
+    const profilePct = Math.round(((profileFilled/PROFILE_FIELDS.length) + (kwFilled/KEYWORD_FIELDS.length))/2 * 100);
+
+    let score = 100;
+    const flags = [];
+    if(s.status !== 'active'){ score -= 40; flags.push('⏸ Account paused'); }
+    if(!s.resume_url){ score -= 10; flags.push('📄 No CV uploaded'); }
+    if(profilePct < 60){ score -= 20; flags.push('👤 Profile '+profilePct+'% complete'); }
+    if(matched === 0){ score -= 25; flags.push('🔍 0 matches in 7d'); }
+    else if(applied === 0 && problems === 0){ score -= 10; flags.push('📮 0 applies in 7d'); }
+    if(problems >= 3){ score -= 15; flags.push('⚠ '+problems+' failed attempts (7d)'); }
+    if(openIssues >= 5){ score -= 10; flags.push('🧯 '+openIssues+' open issues'); }
+    score = Math.max(0, Math.min(100, score));
+
+    return {
+      id: s.id,
+      name: s.full_name || '(no name)',
+      email: s.dedicated_email || '',
+      status: s.status,
+      score,
+      matched, applied, problems, openIssues, profilePct,
+      flags,
+      summary: matched+' matches · '+applied+' applied · '+problems+' problems'
+    };
+  }).sort((a,b) => a.score - b.score);
+
+  renderHealth();
+}
+
+function healthPill(score){
+  if(score >= 70) return '<span class="pill green">🟢 '+score+'</span>';
+  if(score >= 40) return '<span class="pill amber">🟡 '+score+'</span>';
+  return '<span class="pill red">🔴 '+score+'</span>';
+}
+
+function renderHealth(){
+  const el = $('#hList');
+  const alerts = $('#hAlerts');
+  if(!el) return;
+  const q = ($('#hSearch')?.value || '').trim().toLowerCase();
+  const filter = $('#hFilter')?.value || 'all';
+
+  let rows = healthRows;
+  if(filter === 'risk') rows = rows.filter(r => r.score < 40);
+  else if(filter === 'warn') rows = rows.filter(r => r.score < 70);
+  if(q) rows = rows.filter(r => r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q));
+
+  // Top-of-tab alerts: aggregate counts so admin sees the shape at a glance.
+  const total = healthRows.length;
+  const risk = healthRows.filter(r => r.score < 40).length;
+  const warn = healthRows.filter(r => r.score < 70 && r.score >= 40).length;
+  if(alerts) alerts.innerHTML =
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12.5px">'+
+      '<span class="pill gray">'+total+' total</span>'+
+      (risk ? '<span class="pill red">'+risk+' at risk</span>' : '<span class="pill green">0 at risk</span>')+
+      (warn ? '<span class="pill amber">'+warn+' warning</span>' : '')+
+      '<span class="pill green">'+(total-risk-warn)+' healthy</span>'+
+    '</div>';
+
+  if(!rows.length){
+    el.innerHTML = '<div class="empty">'+(healthRows.length ? 'Nothing matches that filter.' : 'No seekers in the system yet.')+'</div>';
+    return;
+  }
+
+  el.innerHTML = rows.map(r => {
+    const flagHtml = r.flags.length
+      ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">'+r.flags.map(f=>'<span style="font-size:11.5px;background:var(--panel2);border:1px solid var(--line);padding:2px 7px;border-radius:5px;color:var(--muted)">'+esc(f)+'</span>').join('')+'</div>'
+      : '<div class="sub" style="margin-top:4px;color:var(--ok);font-size:12.5px">All signals green.</div>';
+    return '<div style="padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:12px;align-items:flex-start">'+
+      '<div style="min-width:60px;text-align:center">'+healthPill(r.score)+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>'+esc(r.name)+'</b><span class="sub" style="font-size:12.5px">'+esc(r.email)+'</span></div>'+
+        '<div class="sub" style="font-size:12.5px;margin-top:2px">7d: '+esc(r.summary)+(r.openIssues?' · <b style="color:#ff8f8f">'+r.openIssues+' open</b>':'')+'</div>'+
+        flagHtml+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
 
 /* ================= APPLICATION REPORT (admin-wide troubleshooting view) =================
    Users see their own failed/manual/blocked applications in their own account
