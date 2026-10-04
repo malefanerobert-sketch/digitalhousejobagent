@@ -440,6 +440,47 @@ function employerFromJsonLd(html) {
   return null;
 }
 
+// Pull the full job description for the in-app viewer. schema.org JobPosting
+// embeds it in `description` (HTML) — the most reliable, zero-cost source.
+// NOTE: do not route this through decodeEntities() — that helper collapses all
+// whitespace (incl. newlines), which would destroy the description's layout.
+function tidyPlain(s) {
+  return String(s || '').replace(/\r/g, '')
+    .replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n').trim();
+}
+function cleanHtml(s) {
+  let t = String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, ' ');
+  t = t.replace(/&amp;/g, '&').replace(/&#x26;/gi, '&').replace(/&#38;/g, '&')
+    .replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
+    .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#x2013;/gi, '–').replace(/&#8211;/g, '–')
+    .replace(/&#x2019;/gi, '’').replace(/&#8217;/g, '’');
+  return tidyPlain(t);
+}
+function descriptionFromJsonLd(html) {
+  const blocks = [...String(html || '').matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of blocks) {
+    let d; try { d = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(d) ? d : [d];
+    for (const x of arr) {
+      const items = (x && x['@graph']) ? x['@graph'] : [x];
+      for (const it of items) {
+        if (it && it.description && (it.hiringOrganization || /JobPosting/i.test(JSON.stringify(it['@type'] || '')))) {
+          const txt = cleanHtml(it.description);
+          if (txt) return txt.slice(0, 8000);
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function buildEmployerPrompt(text, url) {
   return `Below is the visible text of a single job posting (${url}). Identify the actual HIRING COMPANY / employer for this job — the company the job is FOR, NOT the job board or recruitment website, and NOT a generic label, button, or section heading. If the posting only names a recruitment agency acting for a client, use that agency name. If there is no clear company name, use null — never guess, and never fall back to the job board's own name.
 
@@ -453,7 +494,7 @@ ${String(text || '').slice(0, 4000)}`;
 // Reads the real employer off a posting's own detail page. Used when the feed
 // listing only gave a placeholder (e.g. Jobmail). Plain fetch + tag strip (no
 // browser), AI-extracted, and never throws: any failure yields null.
-async function resolveEmployerFromPostingUrl(url, override) {
+async function resolveDetailFromPostingUrl(url, override) {
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobDiscoveryBot/1.0)', 'Accept': 'text/html' }
@@ -463,6 +504,7 @@ async function resolveEmployerFromPostingUrl(url, override) {
 
     // 1. schema.org JobPosting hiringOrganization — reliable and free.
     let cand = employerFromJsonLd(html);
+    let description = descriptionFromJsonLd(html);
 
     // 2. Labelled "Employer:" marker in the visible text.
     const text = html
@@ -499,9 +541,16 @@ async function resolveEmployerFromPostingUrl(url, override) {
       }
     }
 
-    return (cand && !isPlaceholderCompany(cand)) ? cand : null;
+    // Fall back to the posting's visible text when there's no structured
+    // (JSON-LD) description, so the in-app viewer still has something to show.
+    if (!description && text) description = tidyPlain(text).slice(0, 8000) || null;
+
+    return {
+      employer: (cand && !isPlaceholderCompany(cand)) ? cand : null,
+      description: description || null
+    };
   } catch {
-    return null;
+    return { employer: null, description: null };
   }
 }
 
@@ -600,10 +649,20 @@ async function saveMatches(userId, matches, override) {
   // we read the hiring company off the posting's detail page. A placeholder
   // never becomes the stored employer (it would show as the company name).
   for (const job of matches) {
-    if (isPlaceholderCompany(job.company)) {
-      job._employer = await resolveEmployerFromPostingUrl(job.url, override);
+    // Prefer a substantial feed-provided description; otherwise read the
+    // posting's own page (which also yields the real employer when the feed
+    // only gave a placeholder like "Via Jobmail").
+    const feedDesc = cleanHtml(job.description);
+    const feedGood = feedDesc && feedDesc.length > 300 &&
+      feedDesc.toLowerCase() !== String(job.title || '').toLowerCase();
+    const needEmployer = isPlaceholderCompany(job.company);
+    if (needEmployer || !feedGood) {
+      const detail = await resolveDetailFromPostingUrl(job.url, override);
+      job._employer = needEmployer ? (detail.employer || null) : String(job.company).trim();
+      job._description = feedGood ? feedDesc : (detail.description || feedDesc || null);
     } else {
       job._employer = String(job.company).trim();
+      job._description = feedDesc || null;
     }
   }
 
@@ -615,6 +674,7 @@ async function saveMatches(userId, matches, override) {
     // The real hiring company for the UI to display. Null when neither the feed
     // nor the posting page named a real company (UI then falls back gracefully).
     employer_name: job._employer || null,
+    job_description: job._description || null,
     location: job.location,
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,

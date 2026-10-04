@@ -1923,7 +1923,7 @@ function renderMatches(){
       '<div class="acts">'+
       '<div class="acts-btns">'+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
-      '<a class="btn btn-ghost btn-sm" href="'+esc(m.job_url)+'" target="_blank" rel="noopener">View ↗</a>'+
+      '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
       '</div>'+
       '<span class="found">'+verb+' '+timeAgo(matchDisplayTime(m))+'</span></div></div>';
@@ -1983,6 +1983,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
   if(!btn) return;
   const id=btn.dataset.id, action=btn.dataset.action;
   const mm = matches.find(x=>x.id===id);
+  if(action==='view'){ if(mm) openJobView(mm); return; }
   if(action==='apply'){
     // Queue for the agent: 'approved' rows are processed on the next apply run and
     // bypass the level / requirement / location guards (the user decided).
@@ -2016,7 +2017,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
 async function loadApplications(){
   if(!currentSeeker){ applications=[]; return; }
   const {data, error} = await sb.from('application_log')
-    .select('*, job_matches(job_title, company_name, employer_name, job_url)')
+    .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description)')
     .eq('job_seeker_id', currentSeeker.id)
     .order('attempted_at',{ascending:false});
   applications = error ? [] : (data||[]);
@@ -2048,7 +2049,7 @@ function renderApplications(){
           '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div>'+
           '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
           '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
-          (a.job_matches?.job_url ? '<a class="btn btn-ghost btn-xs" href="'+esc(a.job_matches.job_url)+'" target="_blank" rel="noopener">View posting ↗</a>' : '')+
+          (a.job_matches ? '<button class="btn btn-ghost btn-xs" data-view-job="'+a.id+'">View</button>' : '')+
           '<button class="btn btn-ghost btn-xs" data-del-app="'+a.id+'" title="Delete this record">'+TRASH_ICON+'</button>'+
           '</div>';
       }).join('');
@@ -2115,6 +2116,8 @@ function applicationDetails(id){
 $('#appList').addEventListener('click', (e)=>{
   const detail=e.target.closest('button[data-view-application]');
   if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
+  const vj=e.target.closest('button[data-view-job]');
+  if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap&&ap.job_matches) openJobView(ap.job_matches); return; }
   const btn=e.target.closest('button[data-del-app]');
   if(!btn) return;
   const id=btn.dataset.delApp;
@@ -2234,6 +2237,26 @@ $('#blList').addEventListener('click', e=>{ const b=e.target.closest('button[dat
 
 /* ================= MODALS ================= */
 function closeModal(id){ $('#'+id).classList.add('hidden'); }
+/* In-app job viewer: shows the posting's details (title, real company, location,
+   full description) inside the app instead of navigating out to the source site. */
+function openJobView(j){
+  j = j || {};
+  const title = j.job_title || 'Job details';
+  const company = (typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||'');
+  const loc = j.location || '';
+  const desc = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
+  $('#jmTitle').textContent = title;
+  $('#jmBody').innerHTML =
+    '<div class="sub2" style="margin-bottom:14px">'+
+      (company ? '<span>🏢 '+esc(company)+'</span>' : '')+
+      (company && loc ? ' · ' : '')+
+      (loc ? '<span>📍 '+esc(loc)+'</span>' : '')+
+    '</div>'+
+    (desc
+      ? '<div style="white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>'
+      : '<div class="sub2">The full description for this role isn’t available yet — your agent will capture it on its next scan.</div>');
+  $('#jobModal').classList.remove('hidden');
+}
 $$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
 let cfCb=null;
 function askConfirm(msg, cb){ $('#cfMsg').textContent=msg; cfCb=cb; $('#confirmModal').classList.remove('hidden'); }

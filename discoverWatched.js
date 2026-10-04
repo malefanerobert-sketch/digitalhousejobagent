@@ -169,6 +169,46 @@ function employerFromJsonLd(html) {
   }
   return null;
 }
+// Pull the full job description for the in-app viewer. schema.org JobPosting
+// embeds it in `description` (HTML) — the most reliable, zero-cost source.
+// NOTE: do not route this through decodeEntities() — that helper collapses all
+// whitespace (incl. newlines), which would destroy the description's layout.
+function tidyPlain(s) {
+  return String(s || '').replace(/\r/g, '')
+    .replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n').trim();
+}
+function cleanHtml(s) {
+  let t = String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, ' ');
+  t = t.replace(/&amp;/g, '&').replace(/&#x26;/gi, '&').replace(/&#38;/g, '&')
+    .replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
+    .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#x2013;/gi, '–').replace(/&#8211;/g, '–')
+    .replace(/&#x2019;/gi, '’').replace(/&#8217;/g, '’');
+  return tidyPlain(t);
+}
+function descriptionFromJsonLd(html) {
+  const blocks = [...String(html || '').matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of blocks) {
+    let d; try { d = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(d) ? d : [d];
+    for (const x of arr) {
+      const items = (x && x['@graph']) ? x['@graph'] : [x];
+      for (const it of items) {
+        if (it && it.description && (it.hiringOrganization || /JobPosting/i.test(JSON.stringify(it['@type'] || '')))) {
+          const txt = cleanHtml(it.description);
+          if (txt) return txt.slice(0, 8000);
+        }
+      }
+    }
+  }
+  return null;
+}
 // Labelled markers shown on the rendered page ("Employer X", "Recruiter X",
 // "Posted … by X"). Scans every match and returns the first that is a usable
 // name, so leading site-navigation hits (e.g. "Employer Sign Up") are skipped.
@@ -189,7 +229,7 @@ function employerFromText(text) {
   return null;
 }
 
-async function fetchEmployerFromDetail(browser, url) {
+async function fetchJobDetail(browser, url) {
   let page = null;
   try {
     page = await browser.newPage();
@@ -204,6 +244,7 @@ async function fetchEmployerFromDetail(browser, url) {
     // 1. schema.org JobPosting hiringOrganization — reliable and free.
     const html = await page.content().catch(() => '');
     let cand = employerFromJsonLd(html);
+    let description = descriptionFromJsonLd(html);
 
     // 2. Labelled markers on the rendered page.
     let text = '';
@@ -232,9 +273,23 @@ async function fetchEmployerFromDetail(browser, url) {
       }
     }
 
-    return (cand && !isUnusableEmployer(cand)) ? cand : null;
+    // Fall back to the page's visible text when the posting has no structured
+    // (JSON-LD) description, so the in-app viewer still has something to show.
+    if (!description) {
+      if (!text) {
+        text = await page
+          .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').trim())
+          .catch(() => '');
+      }
+      if (text) description = tidyPlain(text).slice(0, 8000) || null;
+    }
+
+    return {
+      employer: (cand && !isUnusableEmployer(cand)) ? cand : null,
+      description: description || null
+    };
   } catch {
-    return null;
+    return { employer: null, description: null };
   } finally {
     if (page) await page.close().catch(() => {});
   }
@@ -557,15 +612,19 @@ async function run() {
         // the board hides it there (Careers24, CareerJunction, …), fall back to
         // reading the posting's own detail page. Cached per URL for this run so
         // we open each detail page at most once.
-        let employer = (job.company && String(job.company).trim()) ? String(job.company).trim() : null;
-        if (!employer) {
-          if (employerCache.has(absoluteUrl)) {
-            employer = employerCache.get(absoluteUrl);
-          } else {
-            employer = await fetchEmployerFromDetail(browser, absoluteUrl);
-            employerCache.set(absoluteUrl, employer);
-          }
+        // Open the posting's own page once per URL to capture BOTH the real
+        // hiring company AND the full job description (for the in-app viewer).
+        let detail;
+        if (employerCache.has(absoluteUrl)) {
+          detail = employerCache.get(absoluteUrl);
+        } else {
+          detail = await fetchJobDetail(browser, absoluteUrl);
+          employerCache.set(absoluteUrl, detail);
         }
+        let employer = (job.company && String(job.company).trim())
+          ? String(job.company).trim()
+          : (detail && detail.employer) || null;
+        const description = (detail && detail.description) || null;
 
         const { error: insErr } = await supabase.from('job_matches').insert({
           job_seeker_id: seeker.id,
@@ -578,6 +637,7 @@ async function run() {
           // Taken from the listing when present, otherwise from the posting's
           // detail page. Null only when neither shows a company.
           employer_name: employer,
+          job_description: description,
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source
