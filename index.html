@@ -2017,7 +2017,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
 async function loadApplications(){
   if(!currentSeeker){ applications=[]; return; }
   const {data, error} = await sb.from('application_log')
-    .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description)')
+    .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, salary_text, match_reason, match_score, discovered_at, status)')
     .eq('job_seeker_id', currentSeeker.id)
     .order('attempted_at',{ascending:false});
   applications = error ? [] : (data||[]);
@@ -2058,6 +2058,10 @@ function renderApplications(){
 function applicationDetails(id){
   const a = applications.find(x=>x.id===id);
   if(!a) return;
+  // The user-facing "View" now shows job information only (no proof block,
+  // no "historical record — proof unavailable" fallback). Route any legacy
+  // caller to the same in-app job viewer the Matches tab uses.
+  if (a.job_matches) { openJobView(a.job_matches); return; }
   const confirmed = a.verification_status === 'confirmed';
   const manual = a.verification_status === 'user_confirmed';
   const fields = Array.isArray(a.submitted_fields) ? a.submitted_fields : [];
@@ -2238,35 +2242,55 @@ $('#blList').addEventListener('click', e=>{ const b=e.target.closest('button[dat
 /* ================= MODALS ================= */
 function closeModal(id){ $('#'+id).classList.add('hidden'); }
 /* In-app job viewer: shows the posting's details (title, real company, location,
-   full description) inside the app instead of navigating out to the source site. */
+   salary, description, match reason) inside the app. Never links out — if a
+   field is missing we simply omit it, and we always render whatever job info
+   we do have instead of hiding it behind an "unavailable" fallback. */
 function openJobView(j){
   j = j || {};
-  const title = j.job_title || 'Job details';
+  const title   = j.job_title || 'Job details';
   const company = (typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||'');
-  const loc = j.location || '';
-  const desc = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
-  const url = j.job_url || '';
-  // Capitec's careers site often serves a filled/bounce page with no real job
-  // content; in that case fall through to the original external link rather
-  // than show a wall of nav text in-app.
-  const isCapitec = /\bcareers\.capitecbank\.co\.za\b/i.test(url);
+  const loc     = j.location || '';
+  const salary  = j.salary_text ? String(j.salary_text).trim() : '';
+  const reason  = j.match_reason ? String(j.match_reason).trim() : '';
+  const score   = (j.match_score!=null && !isNaN(j.match_score)) ? Math.round(j.match_score)+'% match' : '';
+  const found   = j.discovered_at ? ('Found '+timeAgo(j.discovered_at)) : '';
+  const desc    = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
+
   $('#jmTitle').textContent = title;
-  const header =
-    '<div class="sub2" style="margin-bottom:14px">'+
-      (company ? '<span>🏢 '+esc(company)+'</span>' : '')+
-      (company && loc ? ' · ' : '')+
-      (loc ? '<span>📍 '+esc(loc)+'</span>' : '')+
-    '</div>';
-  let body;
-  if (desc) {
-    body = '<div style="white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>';
-  } else if (isCapitec && url) {
-    body = '<div class="sub2" style="margin-bottom:12px">This posting is hosted on the employer’s own careers site. Open it there to see the full details.</div>'+
-      '<a class="btn btn-sm" href="'+esc(url)+'" target="_blank" rel="noopener">Open posting ↗</a>';
-  } else {
-    body = '<div class="sub2">The full description for this role isn’t available yet — your agent will capture it on its next scan.</div>';
-  }
-  $('#jmBody').innerHTML = header + body;
+
+  // Top line: company · location
+  const headerBits = [];
+  if (company) headerBits.push('<span>🏢 '+esc(company)+'</span>');
+  if (loc)     headerBits.push('<span>📍 '+esc(loc)+'</span>');
+  const header = headerBits.length
+    ? '<div class="sub2" style="margin-bottom:12px">'+headerBits.join(' · ')+'</div>'
+    : '';
+
+  // Chip strip: salary, match %, discovery age — only when the value exists
+  const chips = [];
+  if (salary) chips.push('<span class="pill gray">💰 '+esc(salary)+'</span>');
+  if (score)  chips.push('<span class="pill green">'+esc(score)+'</span>');
+  if (found)  chips.push('<span class="pill gray">🕒 '+esc(found)+'</span>');
+  const chipRow = chips.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">'+chips.join('')+'</div>'
+    : '';
+
+  // Why your agent picked this
+  const reasonBlock = reason
+    ? '<div style="border:1px solid var(--line);background:var(--input-bg);border-radius:12px;padding:12px 14px;margin-bottom:14px">'+
+        '<b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Why your agent picked this</b>'+
+        '<div style="margin-top:6px;line-height:1.55;font-size:14px">'+esc(reason)+'</div>'+
+      '</div>'
+    : '';
+
+  // Full job description — the primary content when we have it
+  const descBlock = desc
+    ? '<div><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Job description</b>'+
+        '<div style="margin-top:8px;white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>'+
+      '</div>'
+    : '<div class="sub2" style="font-size:13px">The full description for this role hasn’t been captured yet — your agent will add it on its next scan.</div>';
+
+  $('#jmBody').innerHTML = header + chipRow + reasonBlock + descBlock;
   $('#jobModal').classList.remove('hidden');
 }
 $$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
