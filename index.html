@@ -329,6 +329,19 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   animation:pop .22s ease;transition:.3s}
 @keyframes pop{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
 .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+/* Keep job details scrolling inside the popup, but make the scrollbar handle
+   wider, clearer and easier to grab than the default app scrollbar. */
+#jobModal .modal-card{
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;
+  scrollbar-width:auto;scrollbar-color:#4f68aa rgba(9,14,30,.5);
+  -webkit-overflow-scrolling:touch
+}
+#jobModal .modal-card::-webkit-scrollbar{width:16px}
+#jobModal .modal-card::-webkit-scrollbar-track{background:rgba(9,14,30,.5);border-radius:12px}
+#jobModal .modal-card::-webkit-scrollbar-thumb{
+  background:#4f68aa;border:3px solid transparent;background-clip:padding-box;border-radius:12px
+}
+#jobModal .modal-card::-webkit-scrollbar-thumb:hover{background:#6682cf;background-clip:padding-box}
 .modal-head h3{font-size:18px;font-weight:800}
 .x-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
 .x-btn:hover{color:#fff}
