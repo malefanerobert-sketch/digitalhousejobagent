@@ -392,6 +392,24 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
   </div>
 </div>
 
+<!-- Support-thread modal: opened from the ✉️ icon on Accounts rows. -->
+<div id="supportModal" class="modal hidden" onclick="if(event.target===this) closeSupportModal()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="supTitle">✉️ Support thread</h3>
+      <button type="button" class="x-btn" onclick="closeSupportModal()" aria-label="Close">✕</button>
+    </div>
+    <div id="supThread" style="max-height:50vh;overflow-y:auto;margin-bottom:12px"></div>
+    <div class="field" style="margin-bottom:8px">
+      <textarea id="supReply" rows="3" maxlength="2000" placeholder="Reply to this user…" style="resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary btn-sm" id="supSendBtn" onclick="sendSupportReply()">Send reply</button>
+      <span class="sub" id="supStatus" style="font-size:12.5px"></span>
+    </div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = 'https://celylskveytdwvuvsuvx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_QBseann9rrODgfZP9V0oXg_u9brFEVh';
@@ -1111,8 +1129,88 @@ function closeApplyModal(){
 // Delegate the Apply button clicks (buttons are re-rendered on every filter/search)
 document.addEventListener('click', (e)=>{
   const btn = e.target.closest('button[data-apply-report]');
-  if(btn){ openApplyOnBehalf(btn.dataset.applyReport); }
+  if(btn){ openApplyOnBehalf(btn.dataset.applyReport); return; }
+  const sup = e.target.closest('button[data-support-thread]');
+  if(sup){ openSupportThread(sup.dataset.supportThread); return; }
 });
+
+/* ================= SUPPORT MESSAGES (admin side) =================
+   Opens the ✉️ envelope on each Accounts row. Shows the full thread with
+   the seeker, lets the admin reply, and marks all unread user messages as
+   read so the badge clears. */
+let currentSupportSeekerId = null;
+let currentSupportThread = [];
+
+async function openSupportThread(seekerId){
+  currentSupportSeekerId = seekerId;
+  const seeker = (accounts||[]).find(a => a.id === seekerId) || {};
+  document.getElementById('supTitle').textContent = '✉️ Support · ' + (seeker.full_name || seeker.dedicated_email || 'User');
+  document.getElementById('supStatus').textContent = '';
+  document.getElementById('supReply').value = '';
+  document.getElementById('supThread').innerHTML = '<div class="sub">Loading…</div>';
+  document.getElementById('supportModal').classList.remove('hidden');
+
+  const {data, error} = await sb.from('support_messages')
+    .select('*').eq('job_seeker_id', seekerId).order('created_at',{ascending:true});
+  if(error){ document.getElementById('supThread').innerHTML = '<div class="sub">⚠ '+esc(error.message)+'</div>'; return; }
+  currentSupportThread = data || [];
+  renderSupportThread();
+
+  // Mark user messages as read, refresh accounts list to drop the badge
+  const unread = currentSupportThread.filter(m => m.sender_type==='user' && !m.read_by_admin).map(m=>m.id);
+  if(unread.length){
+    await sb.from('support_messages').update({read_by_admin:true}).in('id', unread);
+    delete supportUnreadBy[seekerId];
+    renderAccounts();
+  }
+}
+
+function renderSupportThread(){
+  const el = document.getElementById('supThread');
+  if(!el) return;
+  if(!currentSupportThread.length){
+    el.innerHTML = '<div class="sub">No messages yet — write the first reply below.</div>';
+    return;
+  }
+  el.innerHTML = currentSupportThread.map(m => {
+    const fromAdmin = m.sender_type === 'admin';
+    const bg = fromAdmin ? 'rgba(var(--accent-rgb),.08)' : 'rgba(255,255,255,.04)';
+    const border = fromAdmin ? 'rgba(var(--accent-rgb),.3)' : 'var(--line)';
+    const label = fromAdmin ? '🛟 You (admin)' : '👤 User';
+    return '<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:10px 12px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:5px"><b style="font-size:12px">'+esc(label)+'</b><span class="sub" style="font-size:11px">'+esc(new Date(m.created_at).toLocaleString())+'</span></div>'+
+      '<div style="white-space:pre-wrap;line-height:1.5;font-size:13.5px">'+esc(m.body)+'</div>'+
+    '</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendSupportReply(){
+  const ta = document.getElementById('supReply');
+  const status = document.getElementById('supStatus');
+  const btn = document.getElementById('supSendBtn');
+  const body = (ta?.value||'').trim();
+  if(!body){ status.textContent = 'Write something first.'; return; }
+  if(!currentSupportSeekerId){ status.textContent = 'No user selected.'; return; }
+  btn.disabled = true; status.textContent = 'Sending…';
+  const {data, error} = await sb.from('support_messages').insert({
+    job_seeker_id: currentSupportSeekerId,
+    sender_type: 'admin',
+    body,
+    read_by_admin: true // the admin sent it; they've obviously seen it
+  }).select().single();
+  btn.disabled = false;
+  if(error){ status.textContent = '⚠ '+error.message; return; }
+  if(data) currentSupportThread.push(data);
+  ta.value = ''; status.textContent = '✓ Sent';
+  setTimeout(()=>{ status.textContent=''; }, 2000);
+  renderSupportThread();
+}
+
+function closeSupportModal(){
+  document.getElementById('supportModal').classList.add('hidden');
+  currentSupportSeekerId = null;
+}
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
 let appSettings=null;
@@ -1399,9 +1497,17 @@ async function saveSettings(){
 }
 
 /* ================= ACCOUNTS ================= */
+// Per-seeker count of user messages the admin hasn't opened yet.
+let supportUnreadBy = {};
+
 async function loadAccounts(){
-  const {data, error} = await sb.from('job_seekers').select('*').order('created_at',{ascending:false});
-  accounts = error ? [] : (data||[]);
+  const [acctRes, unreadRes] = await Promise.all([
+    sb.from('job_seekers').select('*').order('created_at',{ascending:false}),
+    sb.from('support_messages').select('job_seeker_id').eq('sender_type','user').eq('read_by_admin', false)
+  ]);
+  accounts = acctRes.error ? [] : (acctRes.data||[]);
+  supportUnreadBy = {};
+  for(const m of (unreadRes.data||[])) supportUnreadBy[m.job_seeker_id] = (supportUnreadBy[m.job_seeker_id]||0) + 1;
   renderAccounts();
 }
 
@@ -1414,8 +1520,13 @@ function renderAccounts(){
     const isPaused = a.status === 'paused';
     const apiProvider = a.api_provider || 'company';
     const discoveryMode = a.discovery_mode || 'manual';
+    const unread = supportUnreadBy[a.id] || 0;
+    const envBadge = unread ? '<span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;background:#ff6b6b;color:#fff;font-size:10px;font-weight:800;border-radius:9px;padding:0 4px;margin-left:4px">'+unread+'</span>' : '';
+    const envTitle = unread ? ('Open support thread · '+unread+' unread message'+(unread===1?'':'s')) : 'Open support thread';
     return '<div class="row">'+
-      '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b><div class="sub">'+esc(a.dedicated_email||'')+'</div></div>'+
+      '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
+        '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
+        '<div class="sub">'+esc(a.dedicated_email||'')+'</div></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+(a.application_mode==='automatic'?'amber':'gray')+'">'+esc(a.application_mode||'approval')+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
