@@ -53,6 +53,8 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
 .modal-head h3{font-size:16px;font-weight:800;margin:0}
 .x-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:0;line-height:1}
+.msg-del{background:transparent;border:none;color:var(--muted);cursor:pointer;padding:3px 7px;border-radius:6px;opacity:.6;transition:opacity .15s,background .15s,color .15s;display:inline-flex;align-items:center;justify-content:center}
+.msg-del:hover{opacity:1;background:rgba(255,107,107,.1);color:#ff8f8f}
 .detail{background:#0d1428;border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:10px;display:none}
 .detail.open{display:block}
 .field{margin-bottom:12px}
@@ -1132,6 +1134,8 @@ document.addEventListener('click', (e)=>{
   if(btn){ openApplyOnBehalf(btn.dataset.applyReport); return; }
   const sup = e.target.closest('button[data-support-thread]');
   if(sup){ openSupportThread(sup.dataset.supportThread); return; }
+  const delSup = e.target.closest('button[data-del-sup]');
+  if(delSup){ deleteSupportMessage(delSup.dataset.delSup); return; }
 });
 
 /* ================= SUPPORT MESSAGES (admin side) =================
@@ -1151,7 +1155,7 @@ async function openSupportThread(seekerId){
   document.getElementById('supportModal').classList.remove('hidden');
 
   const {data, error} = await sb.from('support_messages')
-    .select('*').eq('job_seeker_id', seekerId).order('created_at',{ascending:true});
+    .select('*').eq('job_seeker_id', seekerId).eq('hidden_by_admin', false).order('created_at',{ascending:true});
   if(error){ document.getElementById('supThread').innerHTML = '<div class="sub">⚠ '+esc(error.message)+'</div>'; return; }
   currentSupportThread = data || [];
   renderSupportThread();
@@ -1178,12 +1182,37 @@ function renderSupportThread(){
     const border = fromAdmin ? 'rgba(var(--accent-rgb),.3)' : 'var(--line)';
     const label = fromAdmin ? '🛟 You (admin)' : '👤 User';
     return '<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:10px 12px;margin-bottom:8px">'+
-      '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:5px"><b style="font-size:12px">'+esc(label)+'</b><span class="sub" style="font-size:11px">'+esc(new Date(m.created_at).toLocaleString())+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:5px">'+
+        '<b style="font-size:12px">'+esc(label)+'</b>'+
+        '<div style="display:flex;align-items:center;gap:6px">'+
+          '<span class="sub" style="font-size:11px">'+esc(new Date(m.created_at).toLocaleString())+'</span>'+
+          '<button type="button" class="msg-del" data-del-sup="'+esc(m.id)+'" title="Remove from your view">'+SUP_TRASH_ICON+'</button>'+
+        '</div>'+
+      '</div>'+
       '<div style="white-space:pre-wrap;line-height:1.5;font-size:13.5px">'+esc(m.body)+'</div>'+
     '</div>';
   }).join('');
   el.scrollTop = el.scrollHeight;
 }
+
+// Soft-delete: hides from the admin's view only. The user's thread is driven
+// by hidden_by_user, so their copy stays visible to them.
+async function deleteSupportMessage(id){
+  if(!id) return;
+  if(!confirm('Remove this message from your view? The user keeps their own copy.')) return;
+  const {error} = await sb.from('support_messages').update({hidden_by_admin:true}).eq('id', id);
+  if(error){ alert('⚠ '+error.message); return; }
+  currentSupportThread = currentSupportThread.filter(m => m.id !== id);
+  renderSupportThread();
+  // Also decrement unread count if we just hid an unread user message
+  if(currentSupportSeekerId && supportUnreadBy[currentSupportSeekerId]){
+    supportUnreadBy[currentSupportSeekerId]--;
+    if(supportUnreadBy[currentSupportSeekerId] <= 0) delete supportUnreadBy[currentSupportSeekerId];
+    renderAccounts();
+  }
+}
+
+const SUP_TRASH_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
 
 async function sendSupportReply(){
   const ta = document.getElementById('supReply');
@@ -1503,7 +1532,7 @@ let supportUnreadBy = {};
 async function loadAccounts(){
   const [acctRes, unreadRes] = await Promise.all([
     sb.from('job_seekers').select('*').order('created_at',{ascending:false}),
-    sb.from('support_messages').select('job_seeker_id').eq('sender_type','user').eq('read_by_admin', false)
+    sb.from('support_messages').select('job_seeker_id').eq('sender_type','user').eq('read_by_admin', false).eq('hidden_by_admin', false)
   ]);
   accounts = acctRes.error ? [] : (acctRes.data||[]);
   supportUnreadBy = {};
