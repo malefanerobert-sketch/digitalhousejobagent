@@ -27,7 +27,7 @@ const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 // provider it belongs to is decided by dispatch_settings.ai_provider (set
 // in the admin panel). callScoringAI() below picks the right API for
 // whichever provider is actually configured, instead of assuming Anthropic.
-const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash' };
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-2.5-flash' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
@@ -80,7 +80,7 @@ async function loadAdminSettings() {
   }
 
   if (!adminSettings.ai_api_key) {
-    console.warn('⚠ No Agent API key available — scoring will be skipped, jobs will save with score=0');
+    console.warn('⚠ No Agent API key available — AI scoring is unavailable; deterministic title scoring will be used');
   }
 
   return true;
@@ -601,6 +601,19 @@ async function resolveDetailFromPostingUrl(url, override) {
   }
 }
 
+/** Deterministic fallback used whenever AI is unavailable or returns bad data.
+ * It only keeps jobs whose titles match one of the seeker's requested roles,
+ * so a provider outage can never flood the dashboard with 0% records.
+ */
+function scoreJobsByTitle(jobs, userProfile) {
+  return jobs
+    .map(job => ({
+      ...job,
+      match_score: Math.round(jobFit.scoreTitle(job.title, userProfile.job_title_keywords) * 100)
+    }))
+    .filter(job => job.match_score >= 50);
+}
+
 /**
  * Score jobs using the configured AI provider (shared key or seeker override)
  */
@@ -610,10 +623,11 @@ async function scoreJobsWithClaude(jobs, userProfile, override) {
   const provider = override?.provider || adminSettings?.ai_provider;
   const apiKey = override?.apiKey || adminSettings?.ai_api_key;
 
-  // If no usable key/provider, save every job with a placeholder score (unscored)
+  // Never persist fake 0% matches. If AI is unavailable, use the strict
+  // title matcher and discard unrelated jobs.
   if (!provider || provider === 'none' || !apiKey) {
-    console.log(`  ⚠ No Agent API key — saving ${jobs.length} jobs unscored (score=0)`);
-    return jobs.map(j => ({ ...j, match_score: 0 }));
+    console.log(`  ⚠ No Agent API key — using deterministic title scoring`);
+    return scoreJobsByTitle(jobs, userProfile);
   }
 
   const scored = [];
@@ -656,11 +670,16 @@ No explanation, no markdown, just the array.`;
       // handling aiMatch.js already uses for its own AI calls).
       const cleaned = (text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
       const scores = JSON.parse(cleaned);
+      if (!Array.isArray(scores) || scores.length !== batch.length) {
+        throw new Error(`AI returned ${Array.isArray(scores) ? scores.length : 'non-array'} scores for ${batch.length} jobs`);
+      }
 
       batch.forEach((job, idx) => {
+        const value = Number(scores[idx]);
+        const fallback = Math.round(jobFit.scoreTitle(job.title, userProfile.job_title_keywords) * 100);
         scored.push({
           ...job,
-          match_score: scores[idx] || 0
+          match_score: Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : fallback
         });
       });
 
@@ -669,16 +688,14 @@ No explanation, no markdown, just the array.`;
       // Rate limiting
       await new Promise(r => setTimeout(r, 500));
     } catch (err) {
-      console.error(`❌ AI scoring failed for batch:`, err.message);
-      batch.forEach(job => {
-        scored.push({ ...job, match_score: 0 });
-      });
+      console.error(`❌ AI scoring failed for batch; using title fallback:`, err.message);
+      scored.push(...scoreJobsByTitle(batch, userProfile));
     }
   }
 
-  // Only keep matches >= 50 when we actually scored; otherwise keep everything
-  const anyScored = scored.some(j => j.match_score > 0);
-  return anyScored ? scored.filter(j => j.match_score >= 50) : scored;
+  // A score below 50 is not a match. In particular, never save 0% rows when
+  // a provider returns all zeroes or every scoring batch fails.
+  return scored.filter(j => Number(j.match_score) >= 50);
 }
 
 /**
@@ -871,8 +888,8 @@ async function run() {
     let scored;
     let userOverride = null;
     if (user.api_provider === 'none') {
-      console.log(`  🚫 ${user.full_name} has AI access turned off — saving ${allJobs.length} job(s) unscored (score=0)`);
-      scored = allJobs.map(j => ({ ...j, match_score: 0 }));
+      console.log(`  🚫 ${user.full_name} has AI access turned off — using deterministic title scoring`);
+      scored = scoreJobsByTitle(allJobs, user);
     } else {
       // Bring-your-own-key: a seeker who opted into their own key gets scored
       // with it instead of the shared one. callScoringAI() now handles both

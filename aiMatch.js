@@ -47,7 +47,7 @@ function agentPrompt() {
 const DEFAULT_MODEL = {
   anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4o-mini',
-  google: 'gemini-3.8-flash'
+  google: 'gemini-2.5-flash'
 };
 // The model must follow the provider that is ACTUALLY being used. A seeker
 // override can be on a different provider than the shared key (e.g. the
