@@ -27,7 +27,7 @@ const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 // provider it belongs to is decided by dispatch_settings.ai_provider (set
 // in the admin panel). callScoringAI() below picks the right API for
 // whichever provider is actually configured, instead of assuming Anthropic.
-const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini' };
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
@@ -399,6 +399,27 @@ async function callScoringAI(prompt, override) {
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
     const data = await res.json();
     return data.choices?.[0]?.message?.content || '';
+  } else if (provider === 'google') {
+    // Mirror of aiMatch.js callGemini: thinkingBudget=0 so Gemini 2.5+
+    // (incl. 3.8-flash) stops burning the output-token budget on hidden
+    // thoughts and actually returns the JSON reply this scorer parses.
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } }
+        })
+      }
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Google API error: ${res.status}${detail ? ' — ' + detail.slice(0, 200) : ''}`);
+    }
+    const data = await res.json();
+    return (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('') || '';
   }
   return null; // unknown provider — treated the same as "not configured"
 }
