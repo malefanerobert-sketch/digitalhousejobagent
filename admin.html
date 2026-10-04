@@ -47,6 +47,12 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 .pill.gray{background:#1a2444;color:var(--muted)}
 .pill.green{background:rgba(52,211,153,.14);color:var(--ok)}
 .pill.red{background:rgba(255,107,107,.14);color:#ff8f8f}
+.modal{position:fixed;inset:0;background:rgba(5,8,18,.72);backdrop-filter:blur(4px);display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:1000;overflow-y:auto}
+.modal.hidden{display:none!important}
+.modal-card{background:linear-gradient(180deg,#121b38,#0f1730);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:720px;width:100%;max-height:calc(100vh - 80px);overflow-y:auto}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.modal-head h3{font-size:16px;font-weight:800;margin:0}
+.x-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:0;line-height:1}
 .detail{background:#0d1428;border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:10px;display:none}
 .detail.open{display:block}
 .field{margin-bottom:12px}
@@ -349,6 +355,18 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 </div>
 
 <div id="toasts"></div>
+
+<!-- Apply-on-behalf modal: opened from the Application Report. Gives the admin
+     the credentials + seeker details needed to finish a submission manually. -->
+<div id="applyModal" class="modal hidden" onclick="if(event.target===this) closeApplyModal()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>▶ Apply on behalf of seeker</h3>
+      <button type="button" class="x-btn" onclick="closeApplyModal()" aria-label="Close">✕</button>
+    </div>
+    <div id="applyBody"></div>
+  </div>
+</div>
 
 <script>
 const SUPABASE_URL = 'https://celylskveytdwvuvsuvx.supabase.co';
@@ -744,7 +762,7 @@ async function loadReport(){
   // Pull all non-terminal-success matches with joined seeker + application_log for the error text
   const {data, error} = await sb
     .from('job_matches')
-    .select('id, job_title, company_name, job_url, status, decided_at, discovered_at, job_seekers(id, full_name, dedicated_email), application_log(result, notes, attempted_at)')
+    .select('id, job_title, company_name, employer_name, job_url, status, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at)')
     .in('status', ['failed','needs_manual_action','captcha_blocked'])
     .order('decided_at', {ascending:false, nullsFirst:false})
     .limit(500);
@@ -817,11 +835,138 @@ function renderReport(){
             esc(errText)+
           '</div>'+
         '</div>'+
-        '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
+        '<div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
+          '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
+          '<button class="btn btn-primary btn-sm" data-apply-report="'+esc(r.id)+'">▶ Apply</button>'+
+        '</div>'+
       '</div>'+
     '</div>';
   }).join('');
 }
+
+/* ================= APPLY-ON-BEHALF MODAL =================
+   Opens from the Application Report. Gives the admin everything needed to
+   finish an application manually for a seeker: the posting link, the SAME
+   company login credentials the agent uses (from job_custom_sources), and
+   the seeker's profile fields with click-to-copy chips. Nothing is stored
+   or sent — this is a read-only convenience surface. */
+function openApplyOnBehalf(reportId){
+  const r = reportRows.find(x => x.id === reportId);
+  if(!r){ alert('Row not found — try refreshing the report.'); return; }
+  const seeker = r.job_seekers || {};
+  const creds  = r.job_custom_sources || null; // null for feed sources (Adzuna/Jobmail/RemoteOK)
+  const employer = r.employer_name || r.company_name || '';
+
+  // --- Posting / employer header ---
+  const header =
+    '<div style="margin-bottom:14px">'+
+      '<div style="font-weight:700;font-size:16px">'+esc(r.job_title||'(no title)')+'</div>'+
+      '<div style="color:var(--muted);font-size:13px;margin-top:2px">'+esc(employer)+' · applying for <b>'+esc(seeker.full_name||'(unknown)')+'</b></div>'+
+      '<div style="margin-top:10px"><a class="btn btn-primary btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">↗ Open posting</a></div>'+
+    '</div>';
+
+  // --- Login credentials section (only when this job came from a watched company) ---
+  let credsBlock = '';
+  if (creds && (creds.admin_username || creds.admin_password)) {
+    const loginUrl = creds.login_url || r.job_url || '';
+    credsBlock =
+      '<div style="border:1px solid rgba(var(--accent-rgb),.35);background:rgba(var(--accent-rgb),.06);border-radius:12px;padding:14px;margin-bottom:14px">'+
+        '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:8px">🔑 Company login — the exact account the agent uses</div>'+
+        '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Company: <b style="color:var(--text)">'+esc(creds.company_name||'')+'</b></div>'+
+        (loginUrl ? '<div style="margin-bottom:8px"><a class="btn btn-sm" href="'+esc(loginUrl)+'" target="_blank" rel="noopener">↗ Open login page</a></div>' : '')+
+        copyRow('Username', creds.admin_username||'')+
+        copyRow('Password', creds.admin_password||'', true)+
+        (creds.login_notes ? '<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📝 '+esc(creds.login_notes)+'</div>' : '')+
+      '</div>';
+  } else {
+    credsBlock =
+      '<div style="border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--muted)">'+
+        'No stored login for this source — the agent applies without signing in. Fill the form directly on the posting page.'+
+      '</div>';
+  }
+
+  // --- Seeker profile section — the details the admin will type into the form ---
+  const fields = [
+    ['Full name',       seeker.full_name],
+    ['Email',           seeker.dedicated_email],
+    ['Phone',           seeker.phone],
+    ['Alt phone',       seeker.phone_alt],
+    ['ID / passport',   (seeker.id_type ? seeker.id_type+' · ' : '') + (seeker.id_number||'')],
+    ['Nationality',     seeker.nationality],
+    ['Address',         seeker.physical_address],
+    ['City',            seeker.city],
+    ['Province',        seeker.province],
+    ['Postal code',     seeker.postal_code],
+    ['Highest qualification', seeker.highest_qualification],
+    ['Field of study',  seeker.field_of_study],
+    ['Current employer',seeker.current_employer],
+    ['Current position',seeker.current_position],
+    ['Years experience',seeker.years_experience!=null?String(seeker.years_experience):''],
+    ['Skills',          Array.isArray(seeker.skills)?seeker.skills.join(', '):(seeker.skills||'')],
+    ['Languages',       Array.isArray(seeker.languages)?seeker.languages.join(', '):(seeker.languages||'')],
+    ['Driver\u2019s licence', Array.isArray(seeker.drivers_license)?seeker.drivers_license.join(', '):(seeker.drivers_license||'')]
+  ].filter(([,v]) => v && String(v).trim());
+
+  const seekerBlock =
+    '<div style="border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:14px;margin-bottom:14px">'+
+      '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:10px">👤 Seeker details — click any value to copy</div>'+
+      (fields.length ? fields.map(([k,v])=>copyRow(k, String(v))).join('') : '<div class="sub">No profile fields saved for this seeker.</div>')+
+      (seeker.bio ? '<div style="margin-top:10px"><div style="font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:4px">Bio</div><div style="font-size:13px;line-height:1.5;white-space:pre-wrap;background:var(--panel);padding:8px 10px;border-radius:8px;cursor:pointer" title="Click to copy" onclick="copyText(this.textContent)">'+esc(seeker.bio)+'</div></div>' : '')+
+      (seeker.resume_url ? '<div style="margin-top:10px"><a class="btn btn-sm" href="'+esc(seeker.resume_url)+'" target="_blank" rel="noopener">📄 Download CV / resume</a></div>' : '<div style="margin-top:10px;font-size:12.5px;color:var(--muted)">No CV uploaded — the agent generates one from the profile at apply-time.</div>')+
+    '</div>';
+
+  document.getElementById('applyBody').innerHTML = header + credsBlock + seekerBlock;
+  document.getElementById('applyModal').classList.remove('hidden');
+}
+
+// Compact "label : value : copy-button" row used inside the apply modal.
+// When isSecret=true the value is masked but still copyable, and a tiny
+// show/hide toggle flips the display.
+function copyRow(label, value, isSecret){
+  if(!value) value = '';
+  const sid = 'apv_'+Math.random().toString(36).slice(2,9);
+  const shown = isSecret ? value.replace(/./g,'•') : value;
+  return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px">'+
+    '<div style="min-width:140px;color:var(--muted)">'+esc(label)+'</div>'+
+    '<div id="'+sid+'" data-raw="'+esc(value)+'" style="flex:1;padding:5px 9px;background:var(--panel);border-radius:6px;font-family:ui-monospace,monospace;word-break:break-word;cursor:pointer" title="Click to copy" onclick="copyText(this.dataset.raw)">'+esc(shown)+'</div>'+
+    (isSecret ? '<button type="button" class="btn btn-sm" style="padding:4px 8px" title="Show/hide" onclick="togglePeek(\''+sid+'\')">👁</button>' : '')+
+    '<button type="button" class="btn btn-sm" style="padding:4px 8px" title="Copy" onclick="copyText(document.getElementById(\''+sid+'\').dataset.raw)">⧉</button>'+
+  '</div>';
+}
+
+function togglePeek(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const raw = el.dataset.raw || '';
+  const isMasked = el.textContent !== raw;
+  el.textContent = isMasked ? raw : raw.replace(/./g,'•');
+}
+
+async function copyText(txt){
+  if(!txt) return;
+  try{
+    await navigator.clipboard.writeText(txt);
+    // Lightweight toast — admin.html has no toast system, so flash the body briefly
+    const b = document.getElementById('applyBody');
+    if(b){ b.style.transition='background .25s'; const prev=b.style.background; b.style.background='rgba(52,211,153,.08)'; setTimeout(()=>b.style.background=prev, 300); }
+  }catch(e){
+    // Clipboard API blocked (older browser or non-secure context) — fall back
+    const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); }catch{}
+    ta.remove();
+  }
+}
+
+function closeApplyModal(){
+  const m = document.getElementById('applyModal');
+  if(m) m.classList.add('hidden');
+}
+
+// Delegate the Apply button clicks (buttons are re-rendered on every filter/search)
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-apply-report]');
+  if(btn){ openApplyOnBehalf(btn.dataset.applyReport); }
+});
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
 let appSettings=null;
