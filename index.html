@@ -501,12 +501,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
     <main>
       <div class="topbar">
         <div><h2 id="viewTitle">Dashboard</h2><div class="sub" id="viewSub"></div></div>
-        <div class="topbar-right">
-          <button class="btn btn-ghost btn-sm" id="bellBtn" title="Notifications" onclick="setView('help')" style="position:relative;padding:7px 11px">
-            🔔
-            <span id="bellBadge" class="nav-badge hidden" style="position:absolute;top:-4px;right:-4px;margin:0;background:#ff6b6b;color:#fff;min-width:16px;height:16px;border-radius:9px;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;padding:0 4px">0</span>
-          </button>
-        </div>
+        <div class="topbar-right"></div>
       </div>
 
       <!-- DASHBOARD -->
@@ -607,7 +602,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         <div class="card dismissable" data-card-id="help-compose">
           <button class="card-close" title="Hide this card" onclick="dismissCard('help-compose')">✕</button>
           <h3 style="margin-bottom:4px">✉️ Send us a message</h3>
-          <div class="sub2" style="margin-bottom:12px">Any issue, question or feedback — the agent, technical team or admin will reply here. Replies also appear in this thread.</div>
+          <div class="sub2" style="margin-bottom:12px">Any issue, question or feedback — the agent, technical team or admin will respond here when they can. Replies appear in this thread.</div>
           <div class="field" style="margin-bottom:10px">
             <textarea id="helpInput" rows="4" maxlength="2000" placeholder="Describe what's happening — the more detail, the faster we can help." style="resize:vertical"></textarea>
           </div>
@@ -1163,7 +1158,6 @@ async function refreshAll(){
   await loadApplications();
   await loadDocuments();
   updateHelpBadge();
-  updateBellBadge();
   applyDismissedCards();
   renderDashboard();
   if(state.view==='matches') renderMatches();
@@ -1176,7 +1170,7 @@ const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Matched 
   applications:['Applied jobs','Jobs your agent has applied to for you'],
   docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
-  help:['Contact us','Send a message to the JobAgent team — reply usually within a day']};
+  help:['Contact us','Send a message to the JobAgent team']};
 
 function setView(v){
   state.view=v;
@@ -2320,21 +2314,6 @@ function applyDismissedCards(){
   });
 }
 
-/* ================= BELL / NOTIFICATIONS =================
-   Topbar bell shows unread admin replies and jumps straight to Contact us.
-   Shares the same unread-count source as the Contact us nav badge. */
-async function updateBellBadge(){
-  const bell = $('#bellBadge'); if(!bell || !currentSeeker) return;
-  const {count, error} = await sb.from('support_messages')
-    .select('id', {count:'exact', head:true})
-    .eq('job_seeker_id', currentSeeker.id)
-    .eq('sender_type','admin')
-    .eq('read_by_user', false);
-  if(error) return;
-  if(count && count > 0){ bell.textContent = String(count); bell.classList.remove('hidden'); }
-  else bell.classList.add('hidden');
-}
-
 /* ================= CONTACT US (support_messages) =================
    Threaded support conversation between the signed-in seeker and the admin
    team. RLS already scopes rows to this seeker, so the client just selects
@@ -2378,7 +2357,7 @@ function renderHelpThread(){
         '<b style="font-size:12.5px">'+esc(label)+'</b>'+
         '<div style="display:flex;align-items:center;gap:6px">'+
           '<span class="sub2" style="font-size:11.5px">'+esc(fmtStamp(m.created_at))+'</span>'+
-          '<button class="msg-del" data-del-msg="'+esc(m.id)+'" title="Delete this message">🗑</button>'+
+          '<button class="msg-del" data-del-msg="'+esc(m.id)+'" title="Delete this message">'+TRASH_ICON+'</button>'+
         '</div>'+
       '</div>'+
       '<div style="white-space:pre-wrap;line-height:1.5;font-size:14px">'+esc(m.body)+'</div>'+
@@ -2393,7 +2372,7 @@ async function deleteHelpMessage(id){
   if(error){ alert('⚠ '+error.message); return; }
   helpMessages = helpMessages.filter(m => m.id !== id);
   renderHelpThread();
-  updateHelpBadge(); updateBellBadge();
+  updateHelpBadge();
 }
 
 // Delegate delete clicks (buttons are re-rendered on every refresh)
@@ -2432,7 +2411,6 @@ async function updateHelpBadge(){
   if(error) return;
   if(count && count > 0){ badge.textContent = String(count); badge.classList.remove('hidden'); }
   else { badge.classList.add('hidden'); }
-  updateBellBadge();
 }
 
 /* ================= MODALS ================= */
