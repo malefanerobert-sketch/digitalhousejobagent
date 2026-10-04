@@ -346,7 +346,12 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
               <select id="setProvider"><option value="none">None — Agent disabled app-wide</option>
                 <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
                 <option value="google">Google (Gemini)</option></select></div>
-            <div class="field"><label>API key</label><input type="password" id="setKey" placeholder="sk-…"></div>
+            <div class="field"><label>API key</label>
+              <div style="display:flex;gap:6px">
+                <input type="password" id="setKey" placeholder="sk-… / AIza… / AQ…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">
+                <button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'">👁</button>
+              </div>
+            </div>
           </div>
           <div class="field">
             <label>Model (exact API string — leave blank to use a sensible cheap default)</label>
@@ -1522,6 +1527,12 @@ async function saveSettings(){
   }).eq('id', true);
   btns.forEach(b=>{ if(b){ b.disabled=false; b.textContent='💾 Save'; } });
   if(error){ toast('⚠ '+error.message,'err'); return; }
+  if(appSettings){
+    appSettings.ai_provider = provider;
+    appSettings.ai_api_key  = key;
+    appSettings.ai_model    = model;
+    appSettings.agent_prompt= agentPrompt;
+  }
   toast('Saved ✓ — the Railway worker picks this up on its next run','ok');
 }
 
@@ -1579,7 +1590,10 @@ function renderAccounts(){
         '<div id="userKeyField-'+a.id+'" style="display:none">'+
           '<div class="field">'+
             '<label>Job-board API key (Adzuna)</label>'+
-            '<input type="password" data-user-api-key="'+a.id+'" placeholder="their Adzuna key">'+
+            '<div style="display:flex;gap:6px">'+
+              '<input type="password" data-user-api-key="'+a.id+'" placeholder="their Adzuna key" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">'+
+              '<button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type===\'password\'?\'text\':\'password\'">👁</button>'+
+            '</div>'+
           '</div>'+
           // The AI key is a SEPARATE credential from the job-board key above:
           // it drives match scoring, watched-page reading and application
@@ -1596,7 +1610,10 @@ function renderAccounts(){
             '</div>'+
             '<div class="field">'+
               '<label>AI API key (this user)</label>'+
-              '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza…">'+
+              '<div style="display:flex;gap:6px">'+
+                '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza… / AQ…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">'+
+                '<button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type===\'password\'?\'text\':\'password\'">👁</button>'+
+              '</div>'+
             '</div>'+
           '</div>'+
         '</div>'+
@@ -1741,10 +1758,12 @@ function renderAccounts(){
       if(error){ toast('⚠ '+error.message,'err'); return; }
       const acct=accounts.find(a=>a.id===id);
       if(acct){
-        acct.api_provider=apiProvider;
-        acct.api_key=userApiKey;
-        acct.discovery_mode=discoveryMode;
-        acct.remote_only=remoteOnly;
+        acct.api_provider  = apiProvider;
+        acct.api_key       = apiProvider==='user' ? userApiKey : null;
+        acct.ai_provider   = keepAi ? userAiProvider : null;
+        acct.ai_api_key    = keepAi ? userAiKey      : null;
+        acct.discovery_mode= discoveryMode;
+        acct.remote_only   = remoteOnly;
       }
       toast('API settings saved ✓','ok');
       renderAccounts();
