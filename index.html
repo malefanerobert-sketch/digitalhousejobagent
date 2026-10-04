@@ -212,6 +212,14 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 .card{background:var(--card-bg);border:1px solid var(--line);
   border-radius:var(--radius);padding:22px}
 .card h3{font-size:16px;font-weight:800;margin-bottom:14px}
+.card.dismissable{position:relative}
+.card.dismissable.hidden{display:none!important}
+.card-close{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;background:transparent;
+  border:1px solid transparent;color:var(--muted);font-size:14px;cursor:pointer;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;transition:background .15s,color .15s,border-color .15s}
+.card-close:hover{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.35);color:#ff8f8f}
+.msg-del{background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:3px 7px;border-radius:6px;opacity:.6;transition:opacity .15s,background .15s,color .15s}
+.msg-del:hover{opacity:1;background:rgba(255,107,107,.1);color:#ff8f8f}
 .section-note{color:var(--muted);font-size:13.5px;line-height:1.6;margin-bottom:16px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
 .stat{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius);
@@ -493,7 +501,12 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
     <main>
       <div class="topbar">
         <div><h2 id="viewTitle">Dashboard</h2><div class="sub" id="viewSub"></div></div>
-        <div class="topbar-right"></div>
+        <div class="topbar-right">
+          <button class="btn btn-ghost btn-sm" id="bellBtn" title="Notifications" onclick="setView('help')" style="position:relative;padding:7px 11px">
+            🔔
+            <span id="bellBadge" class="nav-badge hidden" style="position:absolute;top:-4px;right:-4px;margin:0;background:#ff6b6b;color:#fff;min-width:16px;height:16px;border-radius:9px;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;padding:0 4px">0</span>
+          </button>
+        </div>
       </div>
 
       <!-- DASHBOARD -->
@@ -507,17 +520,20 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <div class="stat teal" style="cursor:pointer" onclick="setView('applications')" title="View applied jobs"><div class="num" id="stApps">0</div><div class="lbl">Applications sent</div></div>
           <div class="stat red" style="cursor:pointer" onclick="setView('blocked')" title="View block list"><div class="num" id="stBlocked">0</div><div class="lbl">Blocked filters</div></div>
         </div>
-        <div class="grid2">
-          <div class="card">
+        <div class="grid2" id="dashCards">
+          <div class="card dismissable" data-card-id="dash-agent">
+            <button class="card-close" title="Hide this card" onclick="dismissCard('dash-agent')">✕</button>
             <h3>📡 Your agent</h3>
             <p class="section-note" id="agentSummary">Set up your profile to activate the agent.</p>
             <button class="btn btn-primary btn-sm" onclick="refreshAll()">🔄 Refresh now</button>
           </div>
-          <div class="card">
+          <div class="card dismissable" data-card-id="dash-activity">
+            <button class="card-close" title="Hide this card" onclick="dismissCard('dash-activity')">✕</button>
             <h3>🕐 Recent activity</h3>
             <ul class="activity" id="actList"></ul>
           </div>
         </div>
+        <div id="dashRestore" style="margin-top:14px"></div>
       </section>
 
       <!-- MATCHES -->
@@ -588,7 +604,8 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
       <!-- CONTACT US — direct line to the JobAgent team.
            Threaded support messages, scoped to the signed-in seeker by RLS. -->
       <section id="view-help" class="hidden">
-        <div class="card">
+        <div class="card dismissable" data-card-id="help-compose">
+          <button class="card-close" title="Hide this card" onclick="dismissCard('help-compose')">✕</button>
           <h3 style="margin-bottom:4px">✉️ Send us a message</h3>
           <div class="sub2" style="margin-bottom:12px">Any issue, question or feedback — the agent, technical team or admin will reply here. Replies also appear in this thread.</div>
           <div class="field" style="margin-bottom:10px">
@@ -599,10 +616,12 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
             <span class="sub2" id="helpStatus" style="font-size:12.5px"></span>
           </div>
         </div>
-        <div class="card" style="margin-top:16px">
+        <div class="card dismissable" data-card-id="help-thread" style="margin-top:16px">
+          <button class="card-close" title="Hide this card" onclick="dismissCard('help-thread')">✕</button>
           <h3 style="margin-bottom:10px">Your conversation</h3>
           <div id="helpThread"><div class="sub2">Loading…</div></div>
         </div>
+        <div id="helpRestore" style="margin-top:14px"></div>
       </section>
 
       <section id="view-profile" class="hidden">
@@ -1144,6 +1163,8 @@ async function refreshAll(){
   await loadApplications();
   await loadDocuments();
   updateHelpBadge();
+  updateBellBadge();
+  applyDismissedCards();
   renderDashboard();
   if(state.view==='matches') renderMatches();
   updateAgentPill();
@@ -1169,6 +1190,7 @@ function setView(v){
   if(v==='docs') renderDocuments();
   if(v==='profile') loadProfile();
   if(v==='help') loadHelpThread();
+  applyDismissedCards();
   window.scrollTo(0,0);
   closeDrawer();
 }
@@ -2263,6 +2285,56 @@ function renderBlocked(){
 $('#bcList').addEventListener('click', e=>{ const b=e.target.closest('button[data-unblock-co]'); if(b) removeBlock('companies', b.dataset.unblockCo); });
 $('#blList').addEventListener('click', e=>{ const b=e.target.closest('button[data-unblock-loc]'); if(b) removeBlock('locations', b.dataset.unblockLoc); });
 
+/* ================= DISMISSIBLE CARDS =================
+   Any card marked `.dismissable` with a data-card-id can be hidden by the
+   user. Dismissals persist in localStorage per-browser, and a "Show hidden
+   cards" link appears so nothing is ever lost permanently. */
+function dismissedCards(){ try{ return JSON.parse(localStorage.getItem('ja_dismissed_cards')||'[]'); }catch{ return []; } }
+function dismissCard(cardId){
+  const d = new Set(dismissedCards()); d.add(cardId);
+  localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
+  applyDismissedCards();
+}
+function restoreCard(cardId){
+  const d = new Set(dismissedCards()); d.delete(cardId);
+  localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
+  applyDismissedCards();
+}
+function restoreAllCards(){
+  localStorage.setItem('ja_dismissed_cards','[]');
+  applyDismissedCards();
+}
+function applyDismissedCards(){
+  const d = new Set(dismissedCards());
+  document.querySelectorAll('.card.dismissable').forEach(c => {
+    c.classList.toggle('hidden', d.has(c.dataset.cardId));
+  });
+  // Render "Show hidden cards" link in each view's restore slot
+  ['dashRestore','helpRestore'].forEach(slotId => {
+    const slot = document.getElementById(slotId); if(!slot) return;
+    // Only consider cards that live inside this slot's parent view
+    const section = slot.closest('section');
+    const hidden = section ? [...section.querySelectorAll('.card.dismissable')].filter(c=>d.has(c.dataset.cardId)) : [];
+    if(!hidden.length){ slot.innerHTML = ''; return; }
+    slot.innerHTML = '<div class="sub2" style="font-size:12.5px">'+hidden.length+' hidden card'+(hidden.length===1?'':'s')+' · <a href="#" onclick="event.preventDefault();restoreAllCards()" style="color:var(--accent);text-decoration:underline">show again</a></div>';
+  });
+}
+
+/* ================= BELL / NOTIFICATIONS =================
+   Topbar bell shows unread admin replies and jumps straight to Contact us.
+   Shares the same unread-count source as the Contact us nav badge. */
+async function updateBellBadge(){
+  const bell = $('#bellBadge'); if(!bell || !currentSeeker) return;
+  const {count, error} = await sb.from('support_messages')
+    .select('id', {count:'exact', head:true})
+    .eq('job_seeker_id', currentSeeker.id)
+    .eq('sender_type','admin')
+    .eq('read_by_user', false);
+  if(error) return;
+  if(count && count > 0){ bell.textContent = String(count); bell.classList.remove('hidden'); }
+  else bell.classList.add('hidden');
+}
+
 /* ================= CONTACT US (support_messages) =================
    Threaded support conversation between the signed-in seeker and the admin
    team. RLS already scopes rows to this seeker, so the client just selects
@@ -2304,12 +2376,31 @@ function renderHelpThread(){
     return '<div style="border:1px solid '+border+';background:'+bg+';border-radius:12px;padding:12px 14px;margin-bottom:10px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">'+
         '<b style="font-size:12.5px">'+esc(label)+'</b>'+
-        '<span class="sub2" style="font-size:11.5px">'+esc(fmtStamp(m.created_at))+'</span>'+
+        '<div style="display:flex;align-items:center;gap:6px">'+
+          '<span class="sub2" style="font-size:11.5px">'+esc(fmtStamp(m.created_at))+'</span>'+
+          '<button class="msg-del" data-del-msg="'+esc(m.id)+'" title="Delete this message">🗑</button>'+
+        '</div>'+
       '</div>'+
       '<div style="white-space:pre-wrap;line-height:1.5;font-size:14px">'+esc(m.body)+'</div>'+
     '</div>';
   }).join('');
 }
+
+async function deleteHelpMessage(id){
+  if(!id) return;
+  if(!confirm('Delete this message? This can\u2019t be undone.')) return;
+  const {error} = await sb.from('support_messages').delete().eq('id', id);
+  if(error){ alert('⚠ '+error.message); return; }
+  helpMessages = helpMessages.filter(m => m.id !== id);
+  renderHelpThread();
+  updateHelpBadge(); updateBellBadge();
+}
+
+// Delegate delete clicks (buttons are re-rendered on every refresh)
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-del-msg]');
+  if(btn){ deleteHelpMessage(btn.dataset.delMsg); }
+});
 
 async function sendHelpMessage(){
   const ta = $('#helpInput'); const status = $('#helpStatus'); const btn = $('#helpSendBtn');
@@ -2341,6 +2432,7 @@ async function updateHelpBadge(){
   if(error) return;
   if(count && count > 0){ badge.textContent = String(count); badge.classList.remove('hidden'); }
   else { badge.classList.add('hidden'); }
+  updateBellBadge();
 }
 
 /* ================= MODALS ================= */
