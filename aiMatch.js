@@ -143,7 +143,12 @@ async function callGemini(apiKey, model, prompt, maxTokens) {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens }
+        // Gemini 2.5+ runs an internal "thinking" pass by default that eats
+        // the maxOutputTokens budget before the real reply is produced (saw
+        // 190/200 tokens burned on thoughts in practice, leaving the JSON
+        // reply truncated). We never need the thoughts for scoring or page
+        // extraction, so disable the budget outright.
+        generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } }
       })
     }
   );
