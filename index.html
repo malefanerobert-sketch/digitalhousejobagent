@@ -1995,8 +1995,18 @@ async function bulkDelete(){
   const ids=[...state.selected];
   if(!ids.length) return;
   askConfirm('Delete '+ids.length+' selected '+(ids.length===1?'job':'jobs')+' permanently? This can\u2019t be undone.', async ()=>{
-    const {error} = await sb.from('job_matches').delete().in('id', ids);
+    // Remove dependent application history first; otherwise the foreign-key
+    // constraint can prevent a match from being deleted.
+    const {error: logError} = await sb.from('application_log').delete().in('job_match_id', ids);
+    if(logError){ toast('⚠ '+logError.message,'err'); return; }
+    const {data: deleted, error} = await sb.from('job_matches').delete().in('id', ids).select('id');
     if(error){ toast('⚠ '+error.message,'err'); return; }
+    if((deleted||[]).length !== ids.length){
+      toast('⚠ Some jobs could not be deleted. Please refresh and try again.','err');
+      await refreshAll();
+      return;
+    }
+    applications = applications.filter(a=>!ids.includes(a.job_match_id));
     matches = matches.filter(m=>!ids.includes(m.id));
     state.selected.clear();
     toast('Deleted '+ids.length+' '+(ids.length===1?'job':'jobs'));
@@ -2050,8 +2060,12 @@ $('#matchGrid').addEventListener('click', async (e)=>{
   if(action==='delete'){
     if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
     btn.disabled=true;
-    const {error} = await sb.from('job_matches').delete().eq('id', id);
+    const {error: logError} = await sb.from('application_log').delete().eq('job_match_id', id);
+    if(logError){ toast('⚠ '+logError.message,'err'); btn.disabled=false; return; }
+    const {data: deleted, error} = await sb.from('job_matches').delete().eq('id', id).select('id');
     if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
+    if(!deleted?.length){ toast('⚠ Job was not deleted. Please refresh and try again.','err'); btn.disabled=false; return; }
+    applications=applications.filter(a=>a.job_match_id!==id);
     toast('Deleted'); matches=matches.filter(m=>m.id!==id); renderMatches(); renderDashboard();
     return;
   }
@@ -2171,11 +2185,19 @@ $('#appList').addEventListener('click', (e)=>{
   const id=btn.dataset.delApp;
   askConfirm('Delete this application record? This can’t be undone.', async ()=>{
     btn.disabled=true;
-    const {error} = await sb.from('application_log').delete().eq('id', id);
+    // Ask Supabase to return the deleted row. A successful request with zero
+    // rows means RLS blocked it, and must not be presented as a deletion.
+    const {data: deleted, error} = await sb.from('application_log').delete().eq('id', id).select('id');
     if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
+    if(!deleted?.length){
+      toast('⚠ Application was not deleted. Please refresh and try again.','err');
+      btn.disabled=false;
+      return;
+    }
     applications = applications.filter(a=>a.id!==id);
     toast('Deleted');
     renderApplications();
+    renderDashboard();
   });
 });
 
