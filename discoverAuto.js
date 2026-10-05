@@ -380,7 +380,16 @@ async function callScoringAI(prompt, override) {
   const provider = override?.provider || adminSettings?.ai_provider;
   const apiKey = override?.apiKey || adminSettings?.ai_api_key;
   if (!provider || provider === 'none' || !apiKey) return null;
-  const model = override?.model || adminSettings?.ai_model || DEFAULT_MODEL_BY_PROVIDER[provider];
+  // Only reuse the admin-configured model when the request is actually using
+  // the admin's provider. A seeker's own key (e.g. Google) must never inherit
+  // the admin's Claude model name — that mismatch is what caused Google to 404
+  // on every scoring batch and silently fall back to title-only scoring.
+  const adminModelFitsProvider =
+    adminSettings?.ai_model && adminSettings?.ai_provider === provider;
+  const model =
+    override?.model ||
+    (adminModelFitsProvider ? adminSettings.ai_model : null) ||
+    DEFAULT_MODEL_BY_PROVIDER[provider];
 
   if (provider === 'anthropic') {
     const client = new Anthropic({ apiKey });
