@@ -66,7 +66,10 @@ async function loadAdminSettings() {
       timezone: data.agent_timezone || SA_TIMEZONE,
       ai_provider: data.ai_provider || 'anthropic',
       ai_api_key: process.env.CLAUDE_API_KEY || data.ai_api_key || null,
-      ai_model: data.ai_model || DEFAULT_CLAUDE_MODEL
+      // The admin app has no model field, so data.ai_model is normally empty.
+      // Default to the right model for whichever provider is configured — never
+      // force Claude onto a Google/OpenAI key (that mismatch caused the 404s).
+      ai_model: data.ai_model || DEFAULT_MODEL_BY_PROVIDER[data.ai_provider || 'anthropic'] || DEFAULT_CLAUDE_MODEL
     };
     console.log(`⏰ Admin time window: ${adminSettings.start_hour}:00 - ${adminSettings.end_hour}:00 ${adminSettings.timezone}`);
     console.log(`🎛  Agent master switch: ${adminSettings.enabled ? 'ON' : 'OFF'}`);
