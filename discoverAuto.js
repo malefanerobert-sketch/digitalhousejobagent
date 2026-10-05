@@ -27,7 +27,7 @@ const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 // provider it belongs to is decided by dispatch_settings.ai_provider (set
 // in the admin panel). callScoringAI() below picks the right API for
 // whichever provider is actually configured, instead of assuming Anthropic.
-const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-2.5-flash' };
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
