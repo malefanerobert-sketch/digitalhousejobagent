@@ -1825,6 +1825,10 @@ function employerLabel(m){
 }
 function isSouthAfricanMatch(m){
   if(classifyLocationCountry(m.location)==='south_africa') return true;
+  // Do not silently hide jobs whose location is blank or unrecognized — only
+  // drop ones clearly classified as a DIFFERENT country. Blank/unknown ('other')
+  // locations stay visible so real SA jobs are never lost to a missing label.
+  if(classifyLocationCountry(m.location)==='other') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
   // Watched pages (is_custom_source=true) are user-added SA job boards/companies,
   // so a blank location on one of THEIR postings still counts as South African
