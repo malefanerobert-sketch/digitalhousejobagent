@@ -1928,6 +1928,38 @@ function noteBox(cls, id, text, btnHtml){
   const dur = Math.max(12, Math.round(text.length*0.16));
   return '<div class="'+cls+' sn-box sn-closed" data-note="'+id+'" title="Click to read the full message"><div class="sn-head"><span class="sn-view"><span class="sn-track" style="animation-duration:'+dur+'s;animation-delay:-'+Math.round(dur*0.28)+'s">'+esc(text)+'</span></span><span class="sn-caret">▾</span></div></div>';
 }
+// ---- Location scope (mirrors jobFit.locationInScope so the UI can explain
+// why an out-of-area "Discovered" match wasn't auto-applied, and offer Apply) ----
+const _locNorm = (s) => String(s||'').toLowerCase().replace(/&#x2013;|&ndash;/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+const _JHB_METRO=['johannesburg','joburg','jhb','jozi','sandton','midrand','randburg','roodepoort','soweto','rosebank','fourways','bryanston','sandringham','braamfontein','bedfordview','edenvale','germiston','kempton park','boksburg','benoni','alberton','brakpan','springs','krugersdorp','ekurhuleni','lonehill','northriding','melrose','illovo','parktown','houghton','linden'];
+const _TSHWANE_METRO=['pretoria','tshwane','centurion','clubview','silverton','menlyn','hatfield','brooklyn'];
+const _GAUTENG_OTHER=['vereeniging','vanderbijlpark','westonaria','randfontein','heidelberg'];
+const _GAUTENG_ALL=['gauteng',..._JHB_METRO,..._TSHWANE_METRO,..._GAUTENG_OTHER];
+const _JHB_ALIASES=['gauteng',..._JHB_METRO];
+const _PTA_ALIASES=['gauteng',..._TSHWANE_METRO];
+function _aliasesFor(pref){
+  const p=_locNorm(pref); if(!p) return [];
+  if(p==='gauteng') return _GAUTENG_ALL;
+  if(_JHB_ALIASES.includes(p) && p!=='gauteng'){
+    if(['johannesburg','joburg','jhb','jozi'].includes(p)) return _JHB_ALIASES;
+    return [p,'johannesburg','joburg','gauteng'];
+  }
+  if(_TSHWANE_METRO.includes(p)) return _PTA_ALIASES;
+  return [p];
+}
+function _containsPhrase(h,p){ return (' '+h+' ').includes(' '+p+' '); }
+function locationInScope(jobLocation, prefs){
+  prefs=Array.isArray(prefs)?prefs:[];
+  if(prefs.length===0 || (prefs.length===1 && prefs[0]==='All locations')) return true;
+  const loc=_locNorm(jobLocation); if(!loc) return false;
+  return prefs.some(p=>_aliasesFor(p).some(a=>_containsPhrase(loc,a)) || loc.includes(_locNorm(p)));
+}
+function isOutOfPreferredLocation(m){
+  const prefs=currentSeeker?.preferred_locations||[];
+  const scopeAll=prefs.length===0 || (prefs.length===1 && prefs[0]==='All locations');
+  if(scopeAll) return false;
+  return !locationInScope(m.location, prefs);
+}
 function renderMatches(){
   // Location dropdown = a fixed list of major South African metros (always
   // usable, even with zero matches yet) merged with any location that
@@ -1977,6 +2009,8 @@ function renderMatches(){
       '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
       (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
+        '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
+      (m.status==='pending' && isOutOfPreferredLocation(m) ? noteBox('skip-note', m.id, '📍 Found in '+(m.location||'another area')+' — outside your preferred locations, so the agent didn\u2019t auto-apply. Press Apply to send it anyway.',
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
       (m.status==='approved' ? noteBox('queued-note', m.id, 'You chose to apply — the agent will submit this application on its next run.',
         '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
