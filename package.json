@@ -1,7 +1,7 @@
 {
   "name": "digitalhouse-jobagent-worker",
   "version": "1.0.0",
-  "description": "Background worker that discovers job postings from Greenhouse/Lever boards, matches them to user profiles, and (in automatic mode) submits applications.",
+  "description": "Background worker that discovers South African job postings (Adzuna ZA / RemoteOK / Jobmail search and user-added Watched pages), matches them to user profiles, and (in automatic mode) submits applications.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {

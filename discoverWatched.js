@@ -18,8 +18,7 @@ const jobFit = require('./jobFit');
 
 // Handles job_custom_sources — company/job-board pages a user has added
 // themselves ("Watched pages" in the app). This is now the ONLY discovery
-// mechanism in the product (the old job_sources/Greenhouse-Lever catalog
-// approach has been retired) — the Agent visits each watched page itself,
+// mechanism for user-added SA sites — the Agent visits each watched page itself,
 // works out what jobs are posted there, and hands them to apply.js.
 //
 // Unlike a structured ATS feed, a watched page can be anything — a simple

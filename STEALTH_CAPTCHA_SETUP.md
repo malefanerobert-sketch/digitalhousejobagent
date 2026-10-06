@@ -46,7 +46,7 @@ CAPTCHA_API_KEY=your_2captcha_api_key_here
 
 ### 3. That's it
 
-Every existing code path (Greenhouse, Lever, SmartRecruiters, Ashby, Workable, AI agent) already routes through `captchaSolver.js` — no per-integration changes needed.
+The apply engine routes every posting through `captchaSolver.js` — no per-site changes needed.
 
 ## Runtime Behavior
 
@@ -76,7 +76,6 @@ If injection reports `callback=false`, the site does not use a `data-callback` h
 | Indeed | ~5% |
 | CareerJunction | ~10% |
 | Pnet | ~5% |
-| Greenhouse / Lever / most ATS | <1% |
 | Cloudflare-fronted boards | ~15% (mostly Turnstile) |
 
 For 100 applications a month, expect **$0-5** in 2Captcha spend.

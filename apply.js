@@ -456,7 +456,6 @@ async function attachDocument(fileInput, seeker, docType, documentsByType) {
   }
 }
 
-// Greenhouse job pages use a fairly consistent embedded application form.
 // ADMIN LOGIN — used before applying on watched-page sites that gate jobs
 // behind an account. The admin registers ONCE per company; the agent uses
 // that single account for every seeker's application (recruitment-agency
@@ -559,210 +558,6 @@ async function attemptAdminLogin(page, watched) {
     return { ok: false, reason: 'still on a login page after submit (multi-step or SSO login?)' };
   }
   return { ok: true };
-}
-
-async function applyOnGreenhouse(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
-
-  const firstName = await page.$('#first_name, input[name="job_application[first_name]"]');
-  const lastName = await page.$('#last_name, input[name="job_application[last_name]"]');
-  const email = await page.$('#email, input[name="job_application[email]"]');
-  const resumeInput = await page.$('input[type="file"]');
-
-  if (!firstName || !lastName || !email) {
-    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
-  }
-
-  const [given, ...rest] = seeker.full_name.trim().split(' ');
-  const surname = rest.join(' ') || given;
-
-  await firstName.fill(given);
-  await humanDelay();
-  await lastName.fill(surname);
-  await humanDelay();
-  await email.fill(seeker.dedicated_email || '');
-  await humanDelay();
-
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  const captchaBlock = await handleCaptcha(page);
-  if (captchaBlock) return captchaBlock;
-
-  const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [firstName, lastName, email, resumeInput]);
-
-  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
-}
-
-// Lever's hosted application forms: name="name", name="email", name="phone",
-// and a resume dropzone with an underlying file input.
-async function applyOnLever(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
-
-  const nameField = await page.$('input[name="name"]');
-  const emailField = await page.$('input[name="email"]');
-  const resumeInput = await page.$('input[type="file"][name="resume"], input[type="file"]');
-
-  if (!nameField || !emailField) {
-    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
-  }
-
-  await nameField.fill(seeker.full_name);
-  await humanDelay();
-  await emailField.fill(seeker.dedicated_email || '');
-  await humanDelay();
-
-  const phoneField = await page.$('input[name="phone"]');
-  if (phoneField && seeker.phone) {
-    await phoneField.fill(seeker.phone);
-    await humanDelay();
-  }
-
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  const captchaBlock = await handleCaptcha(page);
-  if (captchaBlock) return captchaBlock;
-
-  const submitBtn = await page.$('button[type="submit"]');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [nameField, emailField, phoneField, resumeInput]);
-
-  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
-}
-
-// SmartRecruiters hosted apply pages typically use name="firstName",
-// name="lastName", name="email", and a file input for the resume/CV.
-async function applyOnSmartRecruiters(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
-
-  const firstName = await page.$('input[name="firstName"], #firstName');
-  const lastName = await page.$('input[name="lastName"], #lastName');
-  const email = await page.$('input[name="email"], #email');
-  const resumeInput = await page.$('input[type="file"]');
-
-  if (!firstName || !lastName || !email) {
-    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
-  }
-
-  const [given, ...rest] = seeker.full_name.trim().split(' ');
-  const surname = rest.join(' ') || given;
-
-  await firstName.fill(given);
-  await humanDelay();
-  await lastName.fill(surname);
-  await humanDelay();
-  await email.fill(seeker.dedicated_email || '');
-  await humanDelay();
-
-  const phoneField = await page.$('input[name="phoneNumber"], input[name="phone"]');
-  if (phoneField && seeker.phone) {
-    await phoneField.fill(seeker.phone);
-    await humanDelay();
-  }
-
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  const captchaBlock = await handleCaptcha(page);
-  if (captchaBlock) return captchaBlock;
-
-  const submitBtn = await page.$('button[type="submit"]');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [firstName, lastName, email, phoneField, resumeInput]);
-
-  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
-}
-
-// Ashby's hosted job application forms are React-driven; fields are usually
-// exposed with name/id attributes containing "name" and "email".
-async function applyOnAshby(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
-
-  const nameField = await page.$('input[name*="name" i], input[id*="name" i]');
-  const emailField = await page.$('input[type="email"], input[name*="email" i]');
-  const resumeInput = await page.$('input[type="file"]');
-
-  if (!nameField || !emailField) {
-    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
-  }
-
-  await nameField.fill(seeker.full_name);
-  await humanDelay();
-  await emailField.fill(seeker.dedicated_email || '');
-  await humanDelay();
-
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  const captchaBlock = await handleCaptcha(page);
-  if (captchaBlock) return captchaBlock;
-
-  const submitBtn = await page.$('button[type="submit"]');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [nameField, emailField, resumeInput]);
-
-  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
-}
-
-// Workable's hosted apply forms typically use name="candidate[name]" or
-// separate first/last name fields, plus name="candidate[email]".
-async function applyOnWorkable(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
-
-  const fullNameField = await page.$('input[name="candidate[name]"]');
-  const firstName = await page.$('input[name="candidate[firstname]"]');
-  const lastName = await page.$('input[name="candidate[lastname]"]');
-  const emailField = await page.$('input[name="candidate[email]"], input[type="email"]');
-  const resumeInput = await page.$('input[type="file"]');
-
-  if (!emailField || (!fullNameField && (!firstName || !lastName))) {
-    return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
-  }
-
-  if (fullNameField) {
-    await fullNameField.fill(seeker.full_name);
-    await humanDelay();
-  } else {
-    const [given, ...rest] = seeker.full_name.trim().split(' ');
-    const surname = rest.join(' ') || given;
-    await firstName.fill(given);
-    await humanDelay();
-    await lastName.fill(surname);
-    await humanDelay();
-  }
-
-  await emailField.fill(seeker.dedicated_email || '');
-  await humanDelay();
-
-  const resumeResult = await attachResume(resumeInput, seeker);
-  if (resumeResult.error) return { ok: false, reason: resumeResult.error };
-
-  const captchaBlock = await handleCaptcha(page);
-  if (captchaBlock) return captchaBlock;
-
-  const submitBtn = await page.$('button[type="submit"]');
-  if (!submitBtn) {
-    return { ok: false, reason: 'Could not find a submit button on this form.' };
-  }
-
-  const missingFields = await findMissingRequiredFields(page, [fullNameField, firstName, lastName, emailField, resumeInput]);
-
-  return submitAndVerify(page, submitBtn, missingFields, match, seeker);
 }
 
 // Reads EVERY input/select/textarea actually present on the page — not a
@@ -1305,30 +1100,13 @@ async function run() {
           }
         }
 
-        let result;
-        if (source?.source_type === 'greenhouse') {
-          result = await applyOnGreenhouse(page, seeker, match);
-        } else if (source?.source_type === 'lever') {
-          result = await applyOnLever(page, seeker, match);
-        } else if (source?.source_type === 'smartrecruiters') {
-          result = await applyOnSmartRecruiters(page, seeker, match);
-        } else if (source?.source_type === 'ashby') {
-          result = await applyOnAshby(page, seeker, match);
-        } else if (source?.source_type === 'workable') {
-          result = await applyOnWorkable(page, seeker, match);
-        } else {
-          // Everything else — watched pages AND autonomous-search postings
-          // (Adzuna/RemoteOK/Jobmail, which have no job_sources row and
-          // aren't is_custom_source) — goes through the same AI-driven form
-          // filler. It was previously gated to is_custom_source only, which
-          // meant every autonomously-discovered job structurally could never
-          // be applied to and always landed in needs_manual_action. applyAI()
-          // was built to handle "any layout it's never seen before", which is
-          // exactly what an arbitrary job-board posting is.
-          result = await applyAI(page, seeker, match);
-        }
+        // Every posting — watched SA company pages AND autonomous-search
+        // postings (Adzuna/RemoteOK/Jobmail) — goes through the same AI-driven
+        // form filler, which is built to handle any layout it has never seen
+        // before. This is exactly what an arbitrary SA job-board posting is.
+        const result = await applyAI(page, seeker, match);
 
-        const formLabel = source?.source_type || (match.is_custom_source ? 'watched-page' : 'job-board');
+        const formLabel = match.is_custom_source ? 'watched-page' : 'job-board';
 
         if (result.ok) {
           const note = missingFieldsNote(result.missingFields);

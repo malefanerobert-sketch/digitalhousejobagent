@@ -1,11 +1,10 @@
 require('dotenv').config();
 const cron = require('node-cron');
-// discoverCustom.js (the structured Greenhouse/Lever/Ashby/SmartRecruiters/
-// Workable catalog approach, driven by the job_sources table) was retired
-// in favor of user-added Watched pages — but discoverAuto.js (autonomous
-// Adzuna/RemoteOK/Jobmail search, unrelated to that retired catalog code)
-// is a separate discovery path and now runs alongside it, so the Agent
-// gets both: pages users explicitly add, and jobs it finds on its own.
+// Two discovery paths run alongside each other, both South-Africa focused:
+// discoverWatched.js handles Watched pages (SA company / job-board pages a
+// user explicitly adds), and discoverAuto.js runs autonomous Adzuna ZA /
+// RemoteOK / Jobmail search. So the Agent gets both: pages users add, and
+// jobs it finds on its own.
 const discoverWatched = require('./discoverWatched');
 const discoverAuto = require('./discoverAuto');
 const apply = require('./apply');
