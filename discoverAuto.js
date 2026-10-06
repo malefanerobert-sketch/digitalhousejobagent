@@ -203,14 +203,18 @@ async function fetchAdzunaJobs(source, query = 'software') {
       company: job.company?.display_name || 'N/A',
       location: job.location?.display_name || 'ZA',
       description: job.description || '',
-      // DEDUP FIX: job.redirect_url carries Adzuna's rotating `se=` session
-      // token plus utm params that change on every crawl, so the same ad got
-      // a different job_url each run and slipped past the
-      // (job_seeker_id, job_url) unique constraint — re-inserting the same
-      // posting over and over (one real ad showed up 12 times). job.id is
-      // Adzuna's stable ad identifier, so build a canonical, param-free URL
-      // from it. This dedups correctly AND still opens the real listing.
-      url: `https://www.adzuna.co.za/details/${job.id}`,
+      // Use Adzuna's official redirect_url — it forwards to the EMPLOYER's real
+      // application page, which is where the agent can actually apply. The
+      // canonical www.adzuna.co.za/details/{id} listing page we used before is
+      // WAF-blocked (HTTP 403) and has no application form, so every Adzuna
+      // apply silently failed once we switched to it.
+      // The duplicate-insert problem redirect_url used to cause (its rotating
+      // `se=`/utm params defeated the (job_seeker_id, job_url) unique
+      // constraint, so one ad could be saved many times) is now handled by the
+      // save-time dedup in saveMatches(), which keys on the stable
+      // title + employer + location and skips the same ad across crawls
+      // regardless of its rotating URL.
+      url: job.redirect_url,
       posted_at: new Date(job.created).toISOString(),
       salary_min: job.salary_min,
       salary_max: job.salary_max,
