@@ -1979,6 +1979,15 @@ function renderMatches(){
     return true;
   });
   list.sort((a,b)=>new Date(b.discovered_at)-new Date(a.discovered_at));
+  // Safety-net dedup: the same posting can be saved from multiple feeds with
+  // different URLs. Show one card per real job (title+employer+location),
+  // keeping the most-advanced copy so a queued/applied one isn't hidden by a
+  // still-pending duplicate.
+  const dKey = (m)=>[m.job_title, m.employer_name||m.company_name, m.location].map(x=>String(x||'').toLowerCase().replace(/\s+/g,' ').trim()).join('|');
+  const dRank = (s)=>({applied:7, approved:6, submission_unverified:3, skipped:2, pending:1}[s]||0);
+  const bestByKey = new Map();
+  for(const m of list){ const k=dKey(m); const cur=bestByKey.get(k); if(!cur || dRank(m.status)>dRank(cur.status)) bestByKey.set(k,m); }
+  list = list.filter(m=>bestByKey.get(dKey(m))===m);
   lastFilteredIds = list.map(m=>m.id);
 
   const g=$('#matchGrid');

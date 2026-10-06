@@ -742,6 +742,34 @@ async function saveMatches(userId, matches, override) {
     }
   }
 
+  // DEDUP ACROSS FEEDS: the same posting is often syndicated to several feeds
+  // with different URLs. The upsert below only dedups on (job_seeker_id,
+  // job_url), so identical title+employer+location jobs from different feeds
+  // would pile up as separate matches — cluttering the seeker's Matches view
+  // and risking the agent applying to the same role several times. Skip any
+  // job whose normalized title+employer+location already exists for this
+  // seeker, and collapse duplicates inside this batch too.
+  const dedupKey = (t, c, l) => [t, c, l]
+    .map(x => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim())
+    .join('|');
+  const { data: existingRows } = await sb
+    .from('job_matches')
+    .select('job_title, company_name, employer_name, location')
+    .eq('job_seeker_id', userId);
+  const seenKeys = new Set((existingRows || [])
+    .map(r => dedupKey(r.job_title, r.employer_name || r.company_name, r.location)));
+  const dedupedMatches = [];
+  for (const job of matches) {
+    const key = dedupKey(job.title, job._employer || job.company, job.location);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    dedupedMatches.push(job);
+  }
+  const skippedDupes = matches.length - dedupedMatches.length;
+  if (skippedDupes) console.log(`  ⤷ skipped ${skippedDupes} duplicate posting(s) already matched for this seeker`);
+  matches = dedupedMatches;
+  if (matches.length === 0) { console.log(`  No new (non-duplicate) matches to save for user ${userId}`); return 0; }
+
   const rows = matches.map(job => ({
     job_seeker_id: userId,
     job_source_id: job.job_source_id || null,
