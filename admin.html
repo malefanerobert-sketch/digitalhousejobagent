@@ -139,7 +139,6 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         <button class="tab" data-tab="health" onclick="setTab('health')">Health</button>
         <button class="tab" data-tab="report" onclick="setTab('report')">Application Report</button>
         <button class="tab" data-tab="sources" onclick="setTab('sources')">Job Sources</button>
-        <button class="tab" data-tab="ats" onclick="setTab('ats')">ATS</button>
         <button class="tab" data-tab="settings" onclick="setTab('settings')">AI &amp; Agent settings</button>
       </div>
 
@@ -151,6 +150,36 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 
       <!-- COMPANIES (job_custom_sources — the global watched-page pool) -->
       <section id="tab-companies" class="hidden">
+
+        <div class="card" style="margin-bottom:18px">
+          <h3 style="margin-bottom:6px;font-size:15px">🧩 Supported ATS platforms</h3>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">Job-application systems the Agent fills in directly without spending AI credits. A job whose URL matches one of these hosts is routed to a purpose-built form filler first.</p>
+          <div style="margin-bottom:14px">
+            <div style="font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:8px">Dedicated handlers</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px">
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Greenhouse</div><div style="font-size:11.5px;color:var(--muted)">greenhouse.io · grnh.se</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Lever</div><div style="font-size:11.5px;color:var(--muted)">lever.co</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">SmartRecruiters</div><div style="font-size:11.5px;color:var(--muted)">smartrecruiters.com · smrtr.io</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Ashby</div><div style="font-size:11.5px;color:var(--muted)">ashbyhq.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Workable</div><div style="font-size:11.5px;color:var(--muted)">workable.com</div></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:8px">Generic form handler</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px">
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Recruitee</div><div style="font-size:11.5px;color:var(--muted)">recruitee.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Teamtailor</div><div style="font-size:11.5px;color:var(--muted)">teamtailor.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">BambooHR</div><div style="font-size:11.5px;color:var(--muted)">bamboohr.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">JazzHR</div><div style="font-size:11.5px;color:var(--muted)">jazzhr.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Breezy HR</div><div style="font-size:11.5px;color:var(--muted)">breezy.com · breezy.hr</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Pinpoint</div><div style="font-size:11.5px;color:var(--muted)">pinpoint.com · pinpoint.jobs</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Comeet</div><div style="font-size:11.5px;color:var(--muted)">comeet.com · comeet.co</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Fountain</div><div style="font-size:11.5px;color:var(--muted)">fountain.com</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Personio</div><div style="font-size:11.5px;color:var(--muted)">personio.com · personio.de</div></div>
+              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Jobvite</div><div style="font-size:11.5px;color:var(--muted)">jobvite.com</div></div>
+            </div>
+          </div>
+        </div>
         <div class="card" style="margin-bottom:18px">
           <h3 style="margin-bottom:6px;font-size:15px">➕ Add a company for the entire system</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
@@ -232,42 +261,6 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           <h3 style="margin-bottom:6px;font-size:15px">📊 User Sources Summary</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">Overview of which users have each source enabled/disabled.</p>
           <div id="sourceSummary"></div>
-        </div>
-      </section>
-
-      <!-- ATS PLATFORMS (apply targets the agent fills without AI credits) -->
-      <section id="tab-ats" class="hidden">
-        <div class="card">
-          <h3 style="margin-bottom:6px;font-size:15px">🧩 Supported ATS platforms</h3>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Job-application systems the Agent fills in directly without spending AI credits. A job whose URL matches one of these hosts is routed to a purpose-built form filler first.</p>
-
-          <div style="margin-bottom:14px">
-            <div style="font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:8px">Dedicated handlers</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px">
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Greenhouse</div><div style="font-size:11.5px;color:var(--muted)">greenhouse.io · grnh.se</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Lever</div><div style="font-size:11.5px;color:var(--muted)">lever.co</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">SmartRecruiters</div><div style="font-size:11.5px;color:var(--muted)">smartrecruiters.com · smrtr.io</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Ashby</div><div style="font-size:11.5px;color:var(--muted)">ashbyhq.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Workable</div><div style="font-size:11.5px;color:var(--muted)">workable.com</div></div>
-            </div>
-          </div>
-
-          <div>
-            <div style="font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:8px">Generic form handler</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px">
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Recruitee</div><div style="font-size:11.5px;color:var(--muted)">recruitee.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Teamtailor</div><div style="font-size:11.5px;color:var(--muted)">teamtailor.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">BambooHR</div><div style="font-size:11.5px;color:var(--muted)">bamboohr.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">JazzHR</div><div style="font-size:11.5px;color:var(--muted)">jazzhr.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Breezy HR</div><div style="font-size:11.5px;color:var(--muted)">breezy.com · breezy.hr</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Pinpoint</div><div style="font-size:11.5px;color:var(--muted)">pinpoint.com · pinpoint.jobs</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Comeet</div><div style="font-size:11.5px;color:var(--muted)">comeet.com · comeet.co</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Fountain</div><div style="font-size:11.5px;color:var(--muted)">fountain.com</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Personio</div><div style="font-size:11.5px;color:var(--muted)">personio.com · personio.de</div></div>
-              <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px"><div style="font-size:13px;font-weight:600">Jobvite</div><div style="font-size:11.5px;color:var(--muted)">jobvite.com</div></div>
-            </div>
-          </div>
         </div>
       </section>
 
