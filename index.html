@@ -1913,7 +1913,7 @@ async function loadMatches(){
   // shown with the reason.
   const {data, error} = await sb.from('job_matches').select('*')
     .eq('job_seeker_id', currentSeeker.id)
-    .in('status', ['pending','applied','skipped','approved','needs_manual_action','failed','submission_unverified','captcha_blocked'])
+    .in('status', ['pending','applied','skipped','approved'])
     .order('discovered_at', {ascending:false});
   // v1 scope: South Africa only. The classifyLocationCountry() function above
   // supports the full country list already — when international expansion
@@ -2005,10 +2005,6 @@ function renderMatches(){
     if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
     if (s === 'approved') return '<span class="pill green">⏳ Queued for agent</span>';
     if (s === 'skipped') return '<span class="pill skip">⏭ Skipped by agent</span>';
-    if (s === 'needs_manual_action') return '<span class="pill amber">✋ Needs manual action</span>';
-    if (s === 'failed') return '<span class="pill red">⚠ Application failed</span>';
-    if (s === 'submission_unverified') return '<span class="pill amber">❔ Submission not verified</span>';
-    if (s === 'captcha_blocked') return '<span class="pill red">🔒 Blocked by CAPTCHA</span>';
     return '<span class="pill gray">🔍 Discovered</span>'; // pending
   };
   g.innerHTML = list.map(m=>{
