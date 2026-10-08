@@ -201,7 +201,7 @@ async function fetchAdzunaJobs(source, query = 'software') {
       job_id: `adzuna_${job.id}`,
       title: job.title,
       company: job.company?.display_name || 'N/A',
-      location: job.location?.display_name || 'ZA',
+      location: job.location?.display_name || 'US',
       description: job.description || '',
       // Use Adzuna's official redirect_url — it forwards to the EMPLOYER's real
       // application page, which is where the agent can actually apply. The
@@ -662,7 +662,7 @@ User Profile:
 - Name: ${userProfile.full_name}
 - Job Titles Interested: ${(userProfile.job_title_keywords || []).join(', ') || 'Any'}
 - Remote Only: ${userProfile.remote_only ? 'Yes' : 'No'}
-- Location: South Africa
+- Location: United States
 - Highest qualification: ${userProfile.highest_qualification || 'not stated'}
 - Years of experience: ${userProfile.years_experience ?? 'not stated'}
 - Current position: ${userProfile.current_position || 'not stated'}

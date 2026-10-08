@@ -1824,16 +1824,16 @@ function employerLabel(m){
   return 'Company not listed';
 }
 function isSouthAfricanMatch(m){
-  if(classifyLocationCountry(m.location)==='south_africa') return true;
+  const c = classifyLocationCountry(m.location);
+  if(c==='south_africa' || c==='united_states') return true;
   // Do not silently hide jobs whose location is blank or unrecognized — only
   // drop ones clearly classified as a DIFFERENT country. Blank/unknown ('other')
-  // locations stay visible so real SA jobs are never lost to a missing label.
-  if(classifyLocationCountry(m.location)==='other') return true;
+  // locations stay visible so real jobs are never lost to a missing label.
+  if(c==='other') return true;
   if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
-  // Watched pages (is_custom_source=true) are user-added SA job boards/companies,
-  // so a blank location on one of THEIR postings still counts as South African
-  // instead of being silently dropped. Covers Pnet/CareerJunction/Job Mail/capitec
-  // and any future watched company without needing a hardcoded whitelist entry.
+  // Watched pages (is_custom_source=true) are user-added job boards/companies,
+  // so a blank location on one of THEIR postings still counts as in-scope
+  // instead of being silently dropped.
   if(!m.location && m.is_custom_source) return true;
   return false;
 }
@@ -1843,6 +1843,8 @@ function isSouthAfricanMatch(m){
 const SA_LOCATIONS=['Bloemfontein','Cape Town','Centurion','Durban','East London','George',
   'Gqeberha','Johannesburg','Kimberley','Midrand','Nelspruit','Pietermaritzburg','Polokwane',
   'Pretoria','Rustenburg','Sandton','Soweto','Stellenbosch','Remote'];
+const US_LOCATIONS=['New York','Los Angeles','Chicago','San Francisco','Seattle','Austin',
+  'Boston','Dallas','Denver','Atlanta','Miami','Washington DC','Phoenix','Remote'];
 
 // Preferred-locations multiselect (Profile view) — a tick-box dropdown built
 // on the same SA_LOCATIONS list as the Matches filter, merged with anything
@@ -1866,7 +1868,7 @@ document.addEventListener('click', e=>{
 function renderLocMenu(selected){
   const isAll = selected.length===1 && selected[0]==='All locations';
   const picked = isAll ? [] : selected;
-  const opts = [...new Set([...SA_LOCATIONS, ...picked])].sort();
+  const opts = [...new Set([...SA_LOCATIONS, ...US_LOCATIONS, ...picked])].sort();
   $('#pfLocsList').innerHTML = opts.map(l=>
     '<label class="loc-ms-opt'+(isAll?' disabled':'')+'"><input type="checkbox" value="'+esc(l)+'" '+
     (picked.includes(l)?'checked':'')+' onchange="onPfLocOptChange()"> '+esc(l)+'</label>'
@@ -1967,7 +1969,7 @@ function renderMatches(){
   // still appears once the agent finds a job there).
   const locSel=$('#mLoc'); const cur=state.mLoc;
   const matchLocs=matches.map(m=>m.location).filter(Boolean);
-  const locs=[...new Set([...SA_LOCATIONS, ...matchLocs])].sort();
+  const locs=[...new Set([...SA_LOCATIONS, ...US_LOCATIONS, ...matchLocs])].sort();
   locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
   if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
 
