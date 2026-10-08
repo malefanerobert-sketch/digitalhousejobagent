@@ -56,7 +56,13 @@ const DEFAULT_MODEL = {
 // into the override's call — that would send a Claude model name to Google.
 function currentModel(provider, override) {
   if (override?.model) return override.model;
-  if (override) return DEFAULT_MODEL[provider] || null;
+  if (override) {
+    // Honor the admin's chosen model when the override is on the same provider;
+    // otherwise keep that provider's default so a Gemini model name never leaks
+    // into a Claude call (or vice-versa).
+    if (cachedSettings?.ai_provider === provider && cachedSettings?.ai_model) return cachedSettings.ai_model;
+    return DEFAULT_MODEL[provider] || null;
+  }
   return cachedSettings?.ai_model || DEFAULT_MODEL[provider] || null;
 }
 

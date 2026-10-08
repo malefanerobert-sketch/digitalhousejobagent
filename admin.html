@@ -343,7 +343,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             to their own accounts.</p>
           <div class="row2">
             <div class="field"><label>AI provider</label>
-              <select id="setProvider"><option value="none">None — Agent disabled app-wide</option>
+              <select id="setProvider" onchange="renderModelOptions(this.value)"><option value="none">None — Agent disabled app-wide</option>
                 <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
                 <option value="google">Google (Gemini)</option></select></div>
             <div class="field"><label>API key</label>
@@ -354,13 +354,12 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             </div>
           </div>
           <div class="field">
-            <label>Model (exact API string — leave blank to use a sensible cheap default)</label>
-            <input id="setModel" placeholder="e.g. claude-haiku-4-5-20251001, claude-sonnet-5, gpt-4o-mini">
+            <label>Model</label>
+            <select id="setModel"></select>
             <p style="color:var(--muted);font-size:12px;margin-top:6px">
-              This is used for match scoring and for reading a user's Watched pages to find job postings — the default
-              here is Claude Sonnet 5 for Anthropic / GPT-4o-mini for OpenAI. Paste any valid model string from your
-              provider to override the default. Anthropic retires older model snapshots periodically — if scoring or
-              page-reading silently stops working, check whether the model string here is still current.</p>
+              Used for match scoring and reading a user's Watched pages. Anthropic retires older snapshots
+              periodically — if scoring or page-reading stops working, pick a newer model here.
+              Pick "Default" to let the agent use the current recommended model for your provider.</p>
           </div>
           <button class="btn btn-primary" id="setSaveBtn" onclick="saveSettings()">💾 Save</button>
           <p style="color:var(--muted);font-size:12px;margin-top:14px">
@@ -1247,14 +1246,44 @@ function closeSupportModal(){
 }
 
 /* ================= AI & AGENT SETTINGS (shared key + prompt) ================= */
+const MODEL_OPTIONS = {
+  anthropic: [
+    { v:'claude-sonnet-5', label:'Claude Sonnet 5 — recommended' },
+    { v:'claude-sonnet-4-6', label:'Claude Sonnet 4.6' },
+    { v:'claude-sonnet-4-5-20250929', label:'Claude Sonnet 4.5' },
+    { v:'claude-haiku-4-5-20251001', label:'Claude Haiku 4.5 — cheapest' }
+  ],
+  openai: [
+    { v:'gpt-4o-mini', label:'GPT-4o mini — recommended' },
+    { v:'gpt-4.1-mini', label:'GPT-4.1 mini' },
+    { v:'gpt-4.1', label:'GPT-4.1' }
+  ],
+  google: [
+    { v:'gemini-2.5-flash', label:'Gemini 2.5 Flash — recommended' },
+    { v:'gemini-2.5-flash-lite', label:'Gemini 2.5 Flash-Lite — cheapest' },
+    { v:'gemini-2.0-flash', label:'Gemini 2.0 Flash' }
+  ],
+  none: []
+};
+function renderModelOptions(provider, selected){
+  const sel = $('#setModel');
+  if(!sel) return;
+  const opts = MODEL_OPTIONS[provider] || [];
+  let html = '<option value="">Default (latest for this provider)</option>';
+  opts.forEach(o => { html += '<option value="'+o.v+'"'+(selected===o.v?' selected':'')+'>'+esc(o.label)+'</option>'; });
+  if(selected && !opts.some(o => o.v === selected)){
+    html += '<option value="'+esc(selected)+'" selected>'+esc(selected)+' (custom)</option>';
+  }
+  sel.innerHTML = html;
+}
 let appSettings=null;
 async function loadSettings(){
   const {data, error} = await sb.from('dispatch_settings').select('*').eq('id', true).single();
   appSettings = error ? null : data;
   if(appSettings){
     $('#setProvider').value = appSettings.ai_provider || 'none';
+    renderModelOptions(appSettings.ai_provider || 'none', appSettings.ai_model || '');
     $('#setKey').value = appSettings.ai_api_key || '';
-    $('#setModel').value = appSettings.ai_model || '';
     $('#setAgentPrompt').value = appSettings.agent_prompt || '';
     // Time window — three shapes: normal (start<end), overnight (start>end),
     // always-on (start===end). All three are just two ints in the DB; the UI
