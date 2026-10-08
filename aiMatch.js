@@ -213,6 +213,9 @@ async function completeWithAI(prompt, override) {
       const msg = await client.messages.create({
         model,
         max_tokens: 2000,
+        // Sonnet 5 adaptive-thinking is on by default; disable it so extraction
+        // replies actually contain the JSON/text (not just hidden thoughts).
+        thinking: { type: 'disabled' },
         messages: [{ role: 'user', content: prompt }]
       });
       return msg.content?.[0]?.text || '';

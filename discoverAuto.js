@@ -402,7 +402,11 @@ async function callScoringAI(prompt, override) {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model,
-      max_tokens: 200,
+      max_tokens: 1000,
+      // Sonnet 5 adaptive-thinking is on by default and burns the output-token
+      // budget before the JSON reply is emitted — disable it so the scorer
+      // actually receives the array (else JSON.parse gets empty text).
+      thinking: { type: 'disabled' },
       messages: [{ role: 'user', content: prompt }]
     });
     return response.content?.[0]?.text || '';
