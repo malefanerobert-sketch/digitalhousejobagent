@@ -183,7 +183,10 @@ async function fetchAdzunaJobs(source, query = 'software') {
   }
 
   try {
-    const url = new URL('https://api.adzuna.com/v1/api/jobs/za/search/1');
+    // Use the source's configured endpoint (country switch is driven by the
+    // database, e.g. .../jobs/us/search) rather than a hardcoded country path.
+    const endpoint = (source.api_endpoint || 'https://api.adzuna.com/v1/api/jobs/us/search').replace(/\/+$/, '');
+    const url = new URL(`${endpoint}/1`);
     url.searchParams.append('app_id', appId);
     url.searchParams.append('app_key', appKey);
     url.searchParams.append('results_per_page', '50');
