@@ -190,7 +190,8 @@ async function verifySubmission(page, match, seeker, submittedFields) {
 async function submitAndVerify(page, submitBtn, missingFields, match, seeker, earlierFields = []) {
   const submittedFields = [...earlierFields, ...(await snapshotSubmittedFields(page))];
   await humanDelay();
-  await submitBtn.click();
+  await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+  await submitBtn.click().catch(() => {});
   const verification = await verifySubmission(page, match, seeker, submittedFields);
   return { ...verification, missingFields };
 }
@@ -1026,18 +1027,89 @@ async function applyOnWorkable(page, seeker, match) {
 // Pinpoint, Comeet, Fountain, Personio, Jobvite) — all share a near-identical
 // name/email/phone/resume shape, so one tolerant handler covers them with no
 // AI tokens. Custom-domain hosts that don't match fall back to applyAI().
+// First matching element for `selector` anywhere in the document — main frame
+// first, then child iframes. Some ATS forms live inside an iframe (Pinpoint,
+// BambooHR, JazzHR), so a main-page-only lookup always fails for those.
+async function firstFieldAcrossFrames(page, selector) {
+  const main = await page.$(selector).catch(() => null);
+  if (main) return main;
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    try {
+      const el = await frame.$(selector);
+      if (el) return el;
+    } catch (_) { /* cross-frame lookup failures are fine */ }
+  }
+  return null;
+}
+
+// Clicks an element only if it is actually visible, scrolling it into view
+// first. Hidden duplicate buttons (mobile copies, overlays) are never clicked.
+async function clickVisible(el) {
+  if (!el) return false;
+  try {
+    const visible = await el.isVisible().catch(() => false);
+    if (!visible) return false;
+    await el.scrollIntoViewIfNeeded().catch(() => {});
+    await el.click({ timeout: 8000 }).catch(() => {});
+    return true;
+  } catch (_) { return false; }
+}
+
+// Closes the common cookie/consent banners and overlays that otherwise sit on
+// top of the submit button and block Playwright's click.
+async function dismissCookieBanners(page) {
+  const sels = [
+    'button:has-text("Accept all")', 'button:has-text("Accept All")',
+    'button:has-text("Accept all cookies")', 'button:has-text("I agree")',
+    'button:has-text("I accept")', 'button:has-text("Agree")',
+    'button:has-text("Accept")', 'button:has-text("OK")', 'button:has-text("Got it")'
+  ];
+  for (const sel of sels) {
+    const el = await page.$(sel).catch(() => null);
+    if (el && await clickVisible(el)) await page.waitForTimeout(400).catch(() => {});
+  }
+}
+
 async function applyOnSimpleAts(page, seeker, match) {
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+  await dismissCookieBanners(page);
 
-  const fullName = await page.$("input[name=\"name\"], input[name=\"fullname\"], input[name=\"full_name\"], input[name=\"candidate[name]\"]").then(a=>a||null);
-  const firstName = await page.$("input[name=\"first_name\"], input[name=\"firstname\"], input[name=\"firstName\"]").then(a=>a||null);
-  const lastName  = await page.$("input[name=\"last_name\"], input[name=\"lastname\"], input[name=\"lastName\"]").then(a=>a||null);
-  const email     = await page.$("input[type=\"email\"], input[name=\"email\"], input[name=\"candidate[email]\"]").then(a=>a||null);
-  const phone     = await page.$("input[name=\"phone\"], input[name=\"phone_number\"], input[name=\"phoneNumber\"], input[type=\"tel\"]").then(a=>a||null);
-  const resumeInput = await page.$("input[type=\"file\"]").then(a=>a||null);
+  const NAME_SEL = 'input[name="name"], input[name="fullname"], input[name="full_name"], input[name="candidate[name]"], ' +
+    'input[placeholder*="full name" i], input[placeholder*="your name" i], input[autocomplete="name"]';
+  const FIRST_SEL = 'input[name="first_name"], input[name="firstname"], input[name="firstName"], ' +
+    'input[placeholder*="first name" i], input[autocomplete="given-name"]';
+  const LAST_SEL = 'input[name="last_name"], input[name="lastname"], input[name="lastName"], ' +
+    'input[placeholder*="last name" i], input[autocomplete="family-name"]';
+  const EMAIL_SEL = 'input[type="email"], input[name="email"], input[name="candidate[email]"], input[autocomplete="email"]';
+  const PHONE_SEL = 'input[name="phone"], input[name="phone_number"], input[name="phoneNumber"], input[type="tel"], input[autocomplete="tel"]';
+  const RESUME_SEL = 'input[type="file"]';
+
+  let fullName = await firstFieldAcrossFrames(page, NAME_SEL);
+  let firstName = await firstFieldAcrossFrames(page, FIRST_SEL);
+  let lastName = await firstFieldAcrossFrames(page, LAST_SEL);
+  let email = await firstFieldAcrossFrames(page, EMAIL_SEL);
+  let phone = await firstFieldAcrossFrames(page, PHONE_SEL);
+  let resumeInput = await firstFieldAcrossFrames(page, RESUME_SEL);
+
+  // Many ATS pages show the description first and only reveal the form after
+  // clicking their "Apply" button. Click a visible one, then re-scan.
+  if ((!fullName && (!firstName || !lastName)) || !email) {
+    const entry = await findApplyEntryPoint(page);
+    if (entry && await clickVisible(entry)) {
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(800).catch(() => {});
+      fullName = fullName || await firstFieldAcrossFrames(page, NAME_SEL);
+      firstName = firstName || await firstFieldAcrossFrames(page, FIRST_SEL);
+      lastName = lastName || await firstFieldAcrossFrames(page, LAST_SEL);
+      email = email || await firstFieldAcrossFrames(page, EMAIL_SEL);
+      phone = phone || await firstFieldAcrossFrames(page, PHONE_SEL);
+      resumeInput = resumeInput || await firstFieldAcrossFrames(page, RESUME_SEL);
+    }
+  }
 
   if ((!fullName && (!firstName || !lastName)) || !email) {
-    return { ok: false, reason: "Could not find standard name/email fields — form layout may differ from expected." };
+    return { ok: false, reason: "Could not find standard name/email fields — the form may be behind a login, an apply click, or an unusual layout." };
   }
 
   if (fullName) {
@@ -1045,9 +1117,9 @@ async function applyOnSimpleAts(page, seeker, match) {
     await humanDelay();
   } else {
     const [given, ...rest] = String(seeker.full_name || "").trim().split(" ");
-    await firstName.fill(given);
+    await firstName.fill(given || "");
     await humanDelay();
-    await lastName.fill(rest.join(" ") || given);
+    await lastName.fill(rest.join(" ") || (given || ""));
     await humanDelay();
   }
 
@@ -1062,7 +1134,8 @@ async function applyOnSimpleAts(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$("button[type=\"submit\"], input[type=\"submit\"]").then(a=>a||null);
+  const submitBtn = await firstFieldAcrossFrames(page,
+    'button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")');
   if (!submitBtn) return { ok: false, reason: "Could not find a submit button on this form." };
 
   const missingFields = await findMissingRequiredFields(page, [fullName, firstName, lastName, email, phone, resumeInput]);
@@ -1107,7 +1180,12 @@ async function applyAI(page, seeker, match) {
             : `Got ${step} step(s) into this application, then reached a page with no form and no "Apply" button to continue — needs a human to finish.`
         };
       }
-      await entry.click().catch(() => {});
+      if (!(await clickVisible(entry))) {
+        return {
+          ok: false,
+          reason: 'Found an "Apply" button but it was not visible/clickable — the form may be behind a modal, overlay, or a hidden duplicate control.'
+        };
+      }
       await humanDelay();
       continue; // re-scan whatever we land on next
     }
@@ -1171,7 +1249,7 @@ async function applyAI(page, seeker, match) {
     }
     earlierFields.push(...(await snapshotSubmittedFields(page)));
     await humanDelay();
-    await stepBtn.el.click().catch(() => {});
+    await clickVisible(stepBtn.el);
     await page.waitForLoadState('networkidle').catch(() => {});
     // else: a Next/Continue step — loop back around and handle whatever it reveals
   }
@@ -1400,7 +1478,7 @@ async function run() {
         if (isCrash && attempt === 1) {
           console.warn(`[apply]  ⚠ browser tab crashed on attempt 1 (${err.message}) — retrying once with a fresh page`);
         } else {
-          const isNetworkIssue = /net::|ERR_|timeout|ENOTFOUND|EAI_AGAIN/i.test(err.message || '');
+          const isNetworkIssue = /net::|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION|ERR_TIMED_OUT|ENOTFOUND|EAI_AGAIN|NS_ERROR_OFFLINE|NS_BINDING_ABORTED/i.test(err.message || '');
           const note = isNetworkIssue
             ? `This posting's link appears broken, mistyped, or no longer exists (${err.message}).`
             : (isCrash ? `The browser crashed twice trying to load/process this posting (${err.message}).` : err.message);
