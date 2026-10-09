@@ -1029,12 +1029,12 @@ async function applyOnWorkable(page, seeker, match) {
 async function applyOnSimpleAts(page, seeker, match) {
   await page.waitForLoadState("networkidle");
 
-  const fullName = await page.$("input[name=\"name\"], input[name=\"fullname\"], input[name=\"full_name\"], input[name=\"candidate[name]\"]").then(a=>a[0]||null);
-  const firstName = await page.$("input[name=\"first_name\"], input[name=\"firstname\"], input[name=\"firstName\"]").then(a=>a[0]||null);
-  const lastName  = await page.$("input[name=\"last_name\"], input[name=\"lastname\"], input[name=\"lastName\"]").then(a=>a[0]||null);
-  const email     = await page.$("input[type=\"email\"], input[name=\"email\"], input[name=\"candidate[email]\"]").then(a=>a[0]||null);
-  const phone     = await page.$("input[name=\"phone\"], input[name=\"phone_number\"], input[name=\"phoneNumber\"], input[type=\"tel\"]").then(a=>a[0]||null);
-  const resumeInput = await page.$("input[type=\"file\"]").then(a=>a[0]||null);
+  const fullName = await page.$("input[name=\"name\"], input[name=\"fullname\"], input[name=\"full_name\"], input[name=\"candidate[name]\"]").then(a=>a||null);
+  const firstName = await page.$("input[name=\"first_name\"], input[name=\"firstname\"], input[name=\"firstName\"]").then(a=>a||null);
+  const lastName  = await page.$("input[name=\"last_name\"], input[name=\"lastname\"], input[name=\"lastName\"]").then(a=>a||null);
+  const email     = await page.$("input[type=\"email\"], input[name=\"email\"], input[name=\"candidate[email]\"]").then(a=>a||null);
+  const phone     = await page.$("input[name=\"phone\"], input[name=\"phone_number\"], input[name=\"phoneNumber\"], input[type=\"tel\"]").then(a=>a||null);
+  const resumeInput = await page.$("input[type=\"file\"]").then(a=>a||null);
 
   if ((!fullName && (!firstName || !lastName)) || !email) {
     return { ok: false, reason: "Could not find standard name/email fields — form layout may differ from expected." };
@@ -1062,7 +1062,7 @@ async function applyOnSimpleAts(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$("button[type=\"submit\"], input[type=\"submit\"]").then(a=>a[0]||null);
+  const submitBtn = await page.$("button[type=\"submit\"], input[type=\"submit\"]").then(a=>a||null);
   if (!submitBtn) return { ok: false, reason: "Could not find a submit button on this form." };
 
   const missingFields = await findMissingRequiredFields(page, [fullName, firstName, lastName, email, phone, resumeInput]);
