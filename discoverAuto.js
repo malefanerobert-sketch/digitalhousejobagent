@@ -891,7 +891,7 @@ ${idx + 1}. ${j.title}
    Company: ${j.company}
    Location: ${j.location}
    Remote: ${j.remote ? 'Yes' : 'No'}
-   Description: ${j.description.substring(0, 200)}...
+   Description: ${(j.description || '').substring(0, 200)}...
 `).join('\n')}
 
 Respond ONLY with JSON array of scores, e.g.: [85, 72, 91, ...]
@@ -955,7 +955,9 @@ async function saveMatches(userId, matches, override) {
       feedDesc.toLowerCase() !== String(job.title || '').toLowerCase();
     const needEmployer = isPlaceholderCompany(job.company);
     if (needEmployer || !feedGood) {
-      const detail = await resolveDetailFromPostingUrl(job.url, override);
+      // resolveDetailFromPostingUrl returns null on a non-OK response, so
+      // fall back to an empty object rather than dereferencing null.
+      const detail = (await resolveDetailFromPostingUrl(job.url, override)) || {};
       job._employer = needEmployer ? (detail.employer || null) : String(job.company).trim();
       job._description = feedGood ? feedDesc : (detail.description || feedDesc || null);
     } else {
