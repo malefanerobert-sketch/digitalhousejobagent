@@ -819,7 +819,7 @@ async function fillGenericStep(page, seeker) {
 }
 
 async function applyOnGreenhouse(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
   const firstName = await page.$('#first_name, input[name="job_application[first_name]"]');
   const lastName = await page.$('#last_name, input[name="job_application[last_name]"]');
@@ -859,7 +859,7 @@ async function applyOnGreenhouse(page, seeker, match) {
 // Lever's hosted application forms: name="name", name="email", name="phone",
 // and a resume dropzone with an underlying file input.
 async function applyOnLever(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
   const nameField = await page.$('input[name="name"]');
   const emailField = await page.$('input[name="email"]');
@@ -899,7 +899,7 @@ async function applyOnLever(page, seeker, match) {
 // SmartRecruiters hosted apply pages typically use name="firstName",
 // name="lastName", name="email", and a file input for the resume/CV.
 async function applyOnSmartRecruiters(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
   const firstName = await page.$('input[name="firstName"], #firstName');
   const lastName = await page.$('input[name="lastName"], #lastName');
@@ -945,7 +945,7 @@ async function applyOnSmartRecruiters(page, seeker, match) {
 // Ashby's hosted job application forms are React-driven; fields are usually
 // exposed with name/id attributes containing "name" and "email".
 async function applyOnAshby(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
   const nameField = await page.$('input[name*="name" i], input[id*="name" i]');
   const emailField = await page.$('input[type="email"], input[name*="email" i]');
@@ -979,7 +979,7 @@ async function applyOnAshby(page, seeker, match) {
 // Workable's hosted apply forms typically use name="candidate[name]" or
 // separate first/last name fields, plus name="candidate[email]".
 async function applyOnWorkable(page, seeker, match) {
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
   const fullNameField = await page.$('input[name="candidate[name]"]');
   const firstName = await page.$('input[name="candidate[firstname]"]');
@@ -1027,7 +1027,7 @@ async function applyOnWorkable(page, seeker, match) {
 // name/email/phone/resume shape, so one tolerant handler covers them with no
 // AI tokens. Custom-domain hosts that don't match fall back to applyAI().
 async function applyOnSimpleAts(page, seeker, match) {
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
 
   const fullName = await page.$("input[name=\"name\"], input[name=\"fullname\"], input[name=\"full_name\"], input[name=\"candidate[name]\"]").then(a=>a||null);
   const firstName = await page.$("input[name=\"first_name\"], input[name=\"firstname\"], input[name=\"firstName\"]").then(a=>a||null);
