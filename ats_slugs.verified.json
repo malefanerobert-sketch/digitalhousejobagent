@@ -1,0 +1,300 @@
+{
+  "recruitee": [
+    {
+      "slug": "jobs",
+      "jobs": 13
+    },
+    {
+      "slug": "bettercollective",
+      "jobs": 13
+    },
+    {
+      "slug": "matresearch",
+      "jobs": 9
+    },
+    {
+      "slug": "recaregmbh",
+      "jobs": 8
+    },
+    {
+      "slug": "starr",
+      "jobs": 5
+    },
+    {
+      "slug": "miaplaza",
+      "jobs": 4
+    },
+    {
+      "slug": "spreadgroup",
+      "jobs": 4
+    },
+    {
+      "slug": "anywhereworks",
+      "jobs": 3
+    },
+    {
+      "slug": "yourcareer",
+      "jobs": 3
+    },
+    {
+      "slug": "openclaims",
+      "jobs": 3
+    },
+    {
+      "slug": "carlfriedrik",
+      "jobs": 3
+    },
+    {
+      "slug": "egeria",
+      "jobs": 1
+    },
+    {
+      "slug": "tellent",
+      "jobs": 0
+    },
+    {
+      "slug": "actionforme",
+      "jobs": 0
+    }
+  ],
+  "teamtailor": [
+    {
+      "slug": "tusmedia8-1736328817",
+      "jobs": 76
+    },
+    {
+      "slug": "tribebuilders",
+      "jobs": 25
+    },
+    {
+      "slug": "thealineagroup-1700147786.na",
+      "jobs": 23
+    },
+    {
+      "slug": "spiko",
+      "jobs": 20
+    },
+    {
+      "slug": "southpole",
+      "jobs": 17
+    },
+    {
+      "slug": "realpetfoodcompany",
+      "jobs": 14
+    },
+    {
+      "slug": "career",
+      "jobs": 13
+    },
+    {
+      "slug": "volue",
+      "jobs": 13
+    },
+    {
+      "slug": "perkboxvivup",
+      "jobs": 10
+    },
+    {
+      "slug": "thestudio.na",
+      "jobs": 9
+    },
+    {
+      "slug": "preferredbynature-1671527207",
+      "jobs": 7
+    },
+    {
+      "slug": "yego",
+      "jobs": 6
+    },
+    {
+      "slug": "root",
+      "jobs": 5
+    },
+    {
+      "slug": "arrowheadgs",
+      "jobs": 4
+    },
+    {
+      "slug": "flowcase",
+      "jobs": 1
+    },
+    {
+      "slug": "theherocompany.na",
+      "jobs": 0
+    }
+  ],
+  "bamboohr": [
+    {
+      "slug": "armstrongfluidtechnology",
+      "jobs": 154
+    },
+    {
+      "slug": "arcetyp",
+      "jobs": 140
+    },
+    {
+      "slug": "401auto",
+      "jobs": 133
+    },
+    {
+      "slug": "baileynelson",
+      "jobs": 123
+    },
+    {
+      "slug": "morrisonexpress",
+      "jobs": 88
+    },
+    {
+      "slug": "ritchiestransport",
+      "jobs": 76
+    },
+    {
+      "slug": "tggaccounting",
+      "jobs": 69
+    },
+    {
+      "slug": "cmtsllc",
+      "jobs": 61
+    },
+    {
+      "slug": "smardt",
+      "jobs": 58
+    },
+    {
+      "slug": "rngd",
+      "jobs": 57
+    },
+    {
+      "slug": "ffun",
+      "jobs": 55
+    },
+    {
+      "slug": "data4",
+      "jobs": 55
+    },
+    {
+      "slug": "acino",
+      "jobs": 52
+    },
+    {
+      "slug": "a3",
+      "jobs": 24
+    },
+    {
+      "slug": "aits",
+      "jobs": 9
+    }
+  ],
+  "personio": [
+    {
+      "slug": "skalbach-gmbh",
+      "jobs": 219
+    },
+    {
+      "slug": "thermondo",
+      "jobs": 197
+    },
+    {
+      "slug": "zahneinsgmbh",
+      "jobs": 133
+    },
+    {
+      "slug": "viva-fitness",
+      "jobs": 128
+    },
+    {
+      "slug": "tierarztpluspartner",
+      "jobs": 111
+    },
+    {
+      "slug": "bright-consulting-gmbh",
+      "jobs": 106
+    },
+    {
+      "slug": "optiker-bode-gmbh",
+      "jobs": 105
+    },
+    {
+      "slug": "fischbach-gruppe",
+      "jobs": 97
+    },
+    {
+      "slug": "pmx",
+      "jobs": 95
+    },
+    {
+      "slug": "stark",
+      "jobs": 52
+    },
+    {
+      "slug": "open",
+      "jobs": 8
+    },
+    {
+      "slug": "onecore",
+      "jobs": 4
+    },
+    {
+      "slug": "openprovider",
+      "jobs": 0
+    }
+  ],
+  "breezy": [
+    {
+      "slug": "srs-merchandising",
+      "jobs": 389
+    },
+    {
+      "slug": "everstar",
+      "jobs": 369
+    },
+    {
+      "slug": "rinvio",
+      "jobs": 301
+    },
+    {
+      "slug": "vanguard-ip",
+      "jobs": 273
+    },
+    {
+      "slug": "transporting-logistics",
+      "jobs": 269
+    },
+    {
+      "slug": "turner-mining-group",
+      "jobs": 262
+    },
+    {
+      "slug": "10-4-truck-recruiting",
+      "jobs": 234
+    },
+    {
+      "slug": "ensemble-performing-arts",
+      "jobs": 223
+    },
+    {
+      "slug": "salt-city-trucking",
+      "jobs": 200
+    },
+    {
+      "slug": "kmg-prestige",
+      "jobs": 188
+    },
+    {
+      "slug": "asb-freight-co",
+      "jobs": 163
+    },
+    {
+      "slug": "crimsonblu",
+      "jobs": 144
+    },
+    {
+      "slug": "4th-day-trucking",
+      "jobs": 102
+    },
+    {
+      "slug": "jobs",
+      "jobs": 0
+    }
+  ]
+}
