@@ -778,7 +778,7 @@ async function resolveDetailFromPostingUrl(url, override) {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobDiscoveryBot/1.0)', 'Accept': 'text/html' }
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { employer: null, description: null };
     const html = await res.text();
 
     // 1. schema.org JobPosting hiringOrganization — reliable and free.
@@ -955,7 +955,7 @@ async function saveMatches(userId, matches, override) {
       feedDesc.toLowerCase() !== String(job.title || '').toLowerCase();
     const needEmployer = isPlaceholderCompany(job.company);
     if (needEmployer || !feedGood) {
-      const detail = await resolveDetailFromPostingUrl(job.url, override);
+      const detail = await resolveDetailFromPostingUrl(job.url, override) || {};
       job._employer = needEmployer ? (detail.employer || null) : String(job.company).trim();
       job._description = feedGood ? feedDesc : (detail.description || feedDesc || null);
     } else {
