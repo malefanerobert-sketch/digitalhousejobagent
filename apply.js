@@ -1079,7 +1079,7 @@ function atsHandlerForUrl(jobUrl){
   if (/smartrecruiters\.com|smrtr\.io/.test(h)) return applyOnSmartRecruiters;
   if (/ashbyhq\.com/.test(h)) return applyOnAshby;
   if (/workable\.com/.test(h)) return applyOnWorkable;
-  if (/recruitee\.com|teamtailor\.com|bamboohr\.com|jazzhr\.com|breezy(?:hr)?\.(?:com|hr)|pinpoint(?:hq)?\.(?:com|jobs)|comeet\.(?:com|co)|fountain\.com|personio\.(?:com|de)|jobvite\.com/.test(h)) return applyOnSimpleAts;
+  if (/recruitee\.com|teamtailor\.com|bamboohr\.com|jazzhr\.com|applytojob\.com|breezy(?:hr)?\.(?:com|hr)|pinpoint(?:hq)?\.(?:com|jobs)|comeet\.(?:com|co)|fountain\.com|personio\.(?:com|de)|jobvite\.com/.test(h)) return applyOnSimpleAts;
   return null;
 }
 async function applyAI(page, seeker, match) {
@@ -1339,6 +1339,12 @@ async function run() {
         await page.goto(match.job_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await humanDelay();
 
+        // Adzuna redirect links land on the employer's real page via an HTTP
+        // redirect. Route the ATS filler by that FINAL host, not the
+        // adzuna.com wrapper, so Adzuna-discovered jobs auto-apply with the
+        // same purpose-built handlers as the direct ATS feeds.
+        const landingUrl = page.url();
+
         // REQUIREMENTS CHECK: read the ad and skip it if it clearly asks for
         // more than the seeker has (qualification level, years of experience,
         // mandatory technical skills). Fails open — an unreadable page or an
@@ -1366,7 +1372,7 @@ async function run() {
 
         // Route by posting host: dedicated ATS handlers (fixed forms, no AI)
         // first, generic AI-driven filler for everything else.
-        const atsApply = atsHandlerForUrl(match.job_url);
+        const atsApply = atsHandlerForUrl(landingUrl) || atsHandlerForUrl(match.job_url);
         const result = atsApply
           ? await atsApply(page, seeker, match)
           : await applyAI(page, seeker, match);
