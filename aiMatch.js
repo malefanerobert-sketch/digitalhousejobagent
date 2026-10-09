@@ -47,7 +47,8 @@ function agentPrompt() {
 const DEFAULT_MODEL = {
   anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4o-mini',
-  google: 'gemini-3.8-flash'
+  google: 'gemini-3.8-flash',
+  groq: 'llama-3.3-70b-versatile'
 };
 // The model must follow the provider that is ACTUALLY being used. A seeker
 // override can be on a different provider than the shared key (e.g. the
@@ -120,22 +121,26 @@ async function scoreWithAnthropic(apiKey, model, resumeText, job) {
   return msg.content?.[0]?.text || '';
 }
 
-async function scoreWithOpenAI(apiKey, model, resumeText, job) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+// Groq serves free Llama models behind an OpenAI-compatible /chat/completions
+// endpoint, so it shares the exact same request/response shape as OpenAI.
+const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+
+async function chatCompletion(baseUrl, apiKey, model, messages, maxTokens) {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 200,
-      messages: [{ role: 'user', content: PROMPT_TEMPLATE(resumeText, job) }]
-    })
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages })
   });
-  if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+  if (!res.ok) throw new Error(`API error (${res.status})`);
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '';
+}
+
+async function scoreWithOpenAI(apiKey, model, resumeText, job, baseUrl = 'https://api.openai.com/v1') {
+  return chatCompletion(baseUrl, apiKey, model, [{ role: 'user', content: PROMPT_TEMPLATE(resumeText, job) }], 200);
 }
 
 // Google Gemini speaks a different shape to the other two: the key goes in a
@@ -181,6 +186,8 @@ async function scoreWithAI(resumeText, job, override) {
       text = await scoreWithAnthropic(apiKey, model, resumeText, job);
     } else if (provider === 'openai') {
       text = await scoreWithOpenAI(apiKey, model, resumeText, job);
+    } else if (provider === 'groq') {
+      text = await scoreWithOpenAI(apiKey, model, resumeText, job, GROQ_BASE_URL);
     } else if (provider === 'google') {
       text = await callGemini(apiKey, model, PROMPT_TEMPLATE(resumeText, job), 200);
     } else {
@@ -220,14 +227,9 @@ async function completeWithAI(prompt, override) {
       });
       return msg.content?.[0]?.text || '';
     } else if (provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
-      });
-      if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || '';
+      return await chatCompletion('https://api.openai.com/v1', apiKey, model, [{ role: 'user', content: prompt }], 2000);
+    } else if (provider === 'groq') {
+      return await chatCompletion(GROQ_BASE_URL, apiKey, model, [{ role: 'user', content: prompt }], 2000);
     } else if (provider === 'google') {
       return await callGemini(apiKey, model, prompt, 2000);
     }

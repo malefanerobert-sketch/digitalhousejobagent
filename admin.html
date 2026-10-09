@@ -375,10 +375,11 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             <div class="field"><label>AI provider</label>
               <select id="setProvider" onchange="renderModelOptions(this.value)"><option value="none">None — Agent disabled app-wide</option>
                 <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
-                <option value="google">Google (Gemini)</option></select></div>
+                <option value="google">Google (Gemini)</option>
+                <option value="groq">Groq (Llama — free tier)</option></select></div>
             <div class="field"><label>API key</label>
               <div style="display:flex;gap:6px">
-                <input type="password" id="setKey" placeholder="sk-… / AIza… / AQ…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">
+                <input type="password" id="setKey" placeholder="sk-… / AIza… / AQ… / gsk_…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">
                 <button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'">👁</button>
               </div>
             </div>
@@ -1293,6 +1294,10 @@ const MODEL_OPTIONS = {
     { v:'gemini-2.5-flash-lite', label:'Gemini 2.5 Flash-Lite — cheapest' },
     { v:'gemini-2.0-flash', label:'Gemini 2.0 Flash' }
   ],
+  groq: [
+    { v:'llama-3.3-70b-versatile', label:'Llama 3.3 70B Versatile — recommended (free)' },
+    { v:'llama-3.1-8b-instant', label:'Llama 3.1 8B Instant — fastest (free)' }
+  ],
   none: []
 };
 function renderModelOptions(provider, selected){
@@ -1665,12 +1670,13 @@ function renderAccounts(){
                 '<option value="anthropic">Anthropic (Claude)</option>'+
                 '<option value="openai">OpenAI (GPT)</option>'+
                 '<option value="google">Google (Gemini)</option>'+
+                '<option value="groq">Groq (Llama — free tier)</option>'+
               '</select>'+
             '</div>'+
             '<div class="field">'+
               '<label>AI API key (this user)</label>'+
               '<div style="display:flex;gap:6px">'+
-                '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza… / AQ…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">'+
+                '<input type="password" data-user-ai-key="'+a.id+'" placeholder="sk-… / AIza… / AQ… / gsk_…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">'+
                 '<button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type===\'password\'?\'text\':\'password\'">👁</button>'+
               '</div>'+
             '</div>'+
