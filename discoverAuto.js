@@ -892,15 +892,17 @@ async function run() {
 
     // Fetch from all enabled sources
     for (const source of enabledSources) {
-      const keywords = (user.job_title_keywords || []).join(' ') || 'software';
-      const jobs = await fetchJobsFromSource(source, keywords);
-      // Stamp the originating source id onto every job so saveMatches can
-      // persist job_matches.job_source_id. This was previously left null,
-      // which meant feed matches (e.g. Jobmail) were never linked back to
-      // their source and any admin stat grouping matches by source
-      // under-reported the feeds.
-      jobs.forEach(j => { j.job_source_id = source.id; });
-      allJobs = allJobs.concat(jobs);
+      const keywords = (user.job_title_keywords && user.job_title_keywords.length)
+        ? user.job_title_keywords
+        : ['software'];
+      // Search each job title separately instead of one combined phrase, so
+      // the feed actually fills up when a single combined search would return
+      // only a handful of roles (and then dedup them away on later runs).
+      for (const kw of keywords) {
+        const jobs = await fetchJobsFromSource(source, kw);
+        jobs.forEach(j => { j.job_source_id = source.id; });
+        allJobs = allJobs.concat(jobs);
+      }
     }
 
     // NOTE: watched pages (job_custom_sources) are intentionally NOT
