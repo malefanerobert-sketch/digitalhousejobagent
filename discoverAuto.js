@@ -27,7 +27,7 @@ const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 // provider it belongs to is decided by dispatch_settings.ai_provider (set
 // in the admin panel). callScoringAI() below picks the right API for
 // whichever provider is actually configured, instead of assuming Anthropic.
-const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash' };
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash', groq: 'llama-3.3-70b-versatile' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
@@ -631,6 +631,16 @@ async function callScoringAI(prompt, override) {
       body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: prompt }] })
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '';
+  } else if (provider === 'groq') {
+    // Groq's free Llama endpoint is OpenAI-compatible — same shape, different host.
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: prompt }] })
+    });
+    if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
     const data = await res.json();
     return data.choices?.[0]?.message?.content || '';
   } else if (provider === 'google') {
