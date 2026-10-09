@@ -174,98 +174,208 @@ async function fetchJobsFromSource(source, query = 'software') {
 }
 
 /**
- * ATS board sources (Greenhouse, Lever, Ashby, Workable, ...).
- * These platforms host real, public job boards per company, so the agent can
- * pull jobs straight from them and reuse the same platform's form filler when
- * applying — no AI credits for discovery, none for filling the form.
+ * ATS board sources (all 15 platforms).
+ * Each platform publishes jobs on company-specific public boards/feeds; we
+ * pull straight from those so the saved link IS the employer's real apply
+ * page and the matching ATS handler can auto-fill it. Company slugs fail
+ * soft (logged and skipped) so an unverified slug never breaks the run.
  */
-const ATS_DEFAULT_BOARDS = [
-  { type: 'greenhouse', company: 'airbnb' },
-  { type: 'greenhouse', company: 'stripe' },
-  { type: 'greenhouse', company: 'instacart' },
-  { type: 'lever', company: 'palantir' },
-  { type: 'lever', company: 'spotify' },
-  { type: 'ashby', company: 'openai' },
-  { type: 'ashby', company: 'vercel' },
-  { type: 'workable', company: 'n26' }
-];
+const ATS_BOARDS = {
+  greenhouse: ['airbnb','stripe','doordash','instacart','roblox','duolingo','plaid','dropbox','datadog','figma','pinterest','lyft','coinbase','reddit','snap'],
+  lever: ['palantir','spotify','affirm','gusto','twilio','nerdwallet','seatgeek'],
+  smartrecruiters: ['Amazon','Visa','McDonalds','Bosch','LinkedIn','Skechers'],
+  ashby: ['openai','anthropic','vercel','linear','ramp','cursor','replit'],
+  workable: ['n26','typeform','treatwell'],
+  recruitee: ['bettercollective','jobs','matresearch','recaregmbh','starr','miaplaza','spreadgroup','anywhereworks','yourcareer','openclaims','carlfriedrik','egeria','tellent','actionforme'],
+  teamtailor: ['usgnorthamerica','neat','tfscro','volue','southpole','swanio','perkboxvivup','causeway-1588594217','sokin','root','tribebuilders','realpetfoodcompany','wsa0','arrowheadgs','theherocompany.na','career'],
+  bamboohr: ['armstrongfluidtechnology','arcetyp','401auto','baileynelson','morrisonexpress','tggaccounting','ritchiestransport','cmtsllc','rngd','smardt','a3','ffun','data4','acino','aits'],
+  personio: ['skalbach-gmbh','bright-consulting-gmbh','viva-fitness','stark','thermondo','tierarztpluspartner','zahneinsgmbh','pmx','fischbach-gruppe','optiker-bode-gmbh','open','onecore','openprovider'],
+  breezy: ['srs-merchandising','everstar','rinvio','transporting-logistics','vanguard-ip','turner-mining-group','10-4-truck-recruiting','ensemble-performing-arts','salt-city-trucking','crimsonblu','asb-freight-co','kmg-prestige','4th-day-trucking','jobs'],
+  jazzhr: ['lakecountygovernment','ilsos','newmanuniversity','sparrowliving','ibynd','demanddrive','essar','phoenixcybersecurity','hubsync','autorabit','jazzwebinars','360careers','hrworks','fortmyersbroadcastingco','img','getjob','tpm','cppayrollllcdbaconnectpay','careers'],
+  comeet: ['tripleten:98.008','teambuilderrecruiting:45.003','lumenis:A1.00C','growthspace:D7.00A','appnext:42.003','maytronics:E3.008','mdclone:66.004','komodor:96.005','snapscale:C9.006','covenantindustries:3B.00F','acclaim:CA.00B','solasecurity:A9.003','reflectiz:CA.008','halon:B5.00E','vega:C9.009','senai:CA.004','promo:73.00F','ironscales:1A.007','cycognito:14.00A','beamr:A9.00B','ocean_security:F9.001'],
+  jobvite: ['northwest-center','nimmi','carfax','ctbk','sourcepoint','pih','ashcompanies','synqor-careers','heifer','torrancememorialjobs','trinity-pm','elire','jobvite'],
+  pinpoint: ['projectcanary','fs-elliott','iventure','workwithus','bmt','allstarservicesnow','mnimarkets','lush','franklin-electric','grasshopper','article','nmc','isginc','reimaginedcareers','trulygoodfoods','trinidadbenham','ifx','nuvitek','confluence','compasshealthnetwork'],
+  fountain: ['leaf-home','best-choice-roofing','my-savant-ai','clear','aimbridge','speed-and-scale','wedriveu','kyte','bring-it-now','onboardiq','wheel','progressive-roofing','the-amenity-collective']
+};
 
-async function fetchAtsBoards(source, query = 'software') {
+async function _fetchJson(url){
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DHJobAgent/1.0)', 'Accept': 'application/json' } });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return await res.json();
+}
+
+async function _fetchText(url){
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DHJobAgent/1.0)' } });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return await res.text();
+}
+
+function _atsFilter(items, query){
   const qwords = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
-  const isRelevant = (title) => !qwords.length
-    || qwords.some(w => String(title || '').toLowerCase().includes(w));
+  return items.filter(j => !qwords.length
+    || qwords.some(w => String(j.title || '').toLowerCase().includes(w)));
+}
 
+async function fetchAtsBoards(source, query = 'software'){
   const out = [];
 
-  for (const board of ATS_DEFAULT_BOARDS) {
-    try {
-      let items = [];
+  for (const [type, companies] of Object.entries(ATS_BOARDS)) {
+    for (const company of companies) {
+      try {
+        let items = [];
 
-      if (board.type === 'greenhouse') {
-        const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.company}/jobs`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        items = (data.jobs || []).map(j => ({
-          source: 'greenhouse',
-          job_id: `gh_${board.company}_${j.id}`,
-          title: j.title,
-          company: j.company_name || board.company,
-          url: `https://boards.greenhouse.io/${board.company}/jobs/${j.id}`,
-          location: (j.location && j.location.name) || '',
-          description: '',
-          posted_at: j.updated_at || ''
-        }));
-      } else if (board.type === 'lever') {
-        const res = await fetch(`https://api.lever.co/v0/postings/${board.company}?mode=json`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        items = (Array.isArray(data) ? data : []).map(j => ({
-          source: 'lever',
-          job_id: `lever_${board.company}_${j.id}`,
-          title: j.text || j.title,
-          company: board.company,
-          url: j.hostedUrl || `https://jobs.lever.co/${board.company}/${j.id}`,
-          location: (j.categories && j.categories.location) || '',
-          description: j.descriptionPlain || j.additionalPlain || '',
-          posted_at: j.createdAt ? j.createdAt : ''
-        }));
-      } else if (board.type === 'ashby') {
-        const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${board.company}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        items = (data.jobs || []).map(j => ({
-          source: 'ashby',
-          job_id: `ashby_${board.company}_${j.id}`,
-          title: j.title,
-          company: board.company,
-          url: j.jobUrl || `https://jobs.ashbyhq.com/${board.company}/${j.id}`,
-          location: j.location || '',
-          description: '',
-          posted_at: j.publishedAt || ''
-        }));
-      } else if (board.type === 'workable') {
-        const res = await fetch(`https://apply.workable.com/api/v1/widget/accounts/${board.company}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        items = (data.jobs || []).map(j => ({
-          source: 'workable',
-          job_id: `workable_${board.company}_${j.id || j.shortcode || j.title}`,
-          title: j.title,
-          company: j.companyName || board.company,
-          url: j.url,
-          location: [j.city, j.country].filter(Boolean).join(', '),
-          description: j.description || '',
-          posted_at: j.published_on || ''
-        }));
-      } else {
-        continue;
+        if (type === 'greenhouse') {
+          const data = await _fetchJson(`https://boards-api.greenhouse.io/v1/boards/${company}/jobs`);
+          items = (data.jobs || []).map(j => ({
+            source: 'greenhouse', job_id: `gh_${company}_${j.id}`, title: j.title,
+            company: j.company_name || company,
+            url: `https://boards.greenhouse.io/${company}/jobs/${j.id}`,
+            location: (j.location && j.location.name) || '', description: '',
+            posted_at: j.updated_at || ''
+          }));
+        } else if (type === 'lever') {
+          const data = await _fetchJson(`https://api.lever.co/v0/postings/${company}?mode=json`);
+          items = (Array.isArray(data) ? data : []).map(j => ({
+            source: 'lever', job_id: `lever_${company}_${j.id}`, title: j.text || j.title,
+            company, url: j.hostedUrl || `https://jobs.lever.co/${company}/${j.id}`,
+            location: (j.categories && j.categories.location) || '',
+            description: j.descriptionPlain || j.additionalPlain || '',
+            posted_at: j.createdAt ? j.createdAt : ''
+          }));
+        } else if (type === 'smartrecruiters') {
+          const data = await _fetchJson(`https://api.smartrecruiters.com/v1/companies/${company}/postings`);
+          items = (data.content || []).map(j => ({
+            source: 'smartrecruiters', job_id: `sr_${company}_${j.id}`, title: j.name,
+            company: (j.company && j.company.name) || company,
+            url: `https://jobs.smartrecruiters.com/${company}/${j.id}`,
+            location: (j.location && j.location.city) || '', description: j.summary || '',
+            posted_at: j.releasedDate || ''
+          }));
+        } else if (type === 'ashby') {
+          const data = await _fetchJson(`https://api.ashbyhq.com/posting-api/job-board/${company}`);
+          items = (data.jobs || []).map(j => ({
+            source: 'ashby', job_id: `ashby_${company}_${j.id}`, title: j.title, company,
+            url: j.jobUrl || `https://jobs.ashbyhq.com/${company}/${j.id}`,
+            location: j.location || '', description: '', posted_at: j.publishedAt || ''
+          }));
+        } else if (type === 'workable') {
+          const data = await _fetchJson(`https://apply.workable.com/api/v1/widget/accounts/${company}`);
+          items = (data.jobs || []).map(j => ({
+            source: 'workable', job_id: `workable_${company}_${j.id || j.shortcode || j.title}`,
+            title: j.title, company: j.companyName || company, url: j.url,
+            location: [j.city, j.country].filter(Boolean).join(', '),
+            description: j.description || '', posted_at: j.published_on || ''
+          }));
+        } else if (type === 'recruitee') {
+          const data = await _fetchJson(`https://${company}.recruitee.com/api/offers`);
+          items = (data.offers || []).map(j => ({
+            source: 'recruitee', job_id: `recruitee_${company}_${j.id}`, title: j.title,
+            company: j.company_name || company, url: j.careers_url || `https://${company}.recruitee.com/o/${j.slug || j.id}`,
+            location: j.location || '', description: '', posted_at: j.published_at || ''
+          })).filter(j => j.title);
+        } else if (type === 'teamtailor') {
+          const data = await _fetchJson(`https://${company}.teamtailor.com/jobs.json`);
+          items = (data.items || []).map(j => ({
+            source: 'teamtailor', job_id: `teamtailor_${company}_${j.id}`, title: j.title || '',
+            company, url: j.url || `https://${company}.teamtailor.com`,
+            location: '', description: '', posted_at: j.date_published || ''
+          })).filter(j => j.title);
+        } else if (type === 'bamboohr') {
+          const data = await _fetchJson(`https://${company}.bamboohr.com/careers/list`);
+          items = (data.result || []).map(j => ({
+            source: 'bamboohr', job_id: `bamboohr_${company}_${j.id}`, title: j.jobOpeningName || '',
+            company, url: `https://${company}.bamboohr.com/careers/${j.id}`, location: j.location || '',
+            description: '', posted_at: ''
+          })).filter(j => j.title);
+        } else if (type === 'jazzhr') {
+          const htmlText = await _fetchText(`https://${company}.applytojob.com/apply/jobs`);
+          const seen = new Set();
+          const jobRe = /<a[^>]*class="job_title_link"[^>]*href="\/apply\/jobs\/details\/([A-Za-z0-9]+)\?&"[^>]*>([\s\S]*?)<\/a>/g;
+          let m;
+          while ((m = jobRe.exec(htmlText)) !== null) {
+            const id = m[1];
+            const title = String(m[2]).replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+            if (seen.has(id) || !title) continue;
+            seen.add(id);
+            items.push({ source: 'jazzhr', job_id: `jazzhr_${company}_${id}`, title, company,
+              url: `https://${company}.applytojob.com/apply/jobs/details/${id}`, location: '', description: '', posted_at: '' });
+          }
+        } else if (type === 'personio') {
+          const data = await _fetchJson(`https://${company}.jobs.personio.de/search.json`);
+          const arr = Array.isArray(data) ? data : (data.jobs || []);
+          items = arr.map(j => ({
+            source: 'personio', job_id: `personio_${company}_${j.id}`, title: j.name || j.title || '',
+            company, url: `https://${company}.jobs.personio.de/job/${j.id}`,
+            location: (Array.isArray(j.offices) && j.offices.length) ? j.offices.join(', ') : (j.office || ''),
+            description: '', posted_at: j.createdAt || ''
+          })).filter(j => j.title && j.id);
+        } else if (type === 'breezy') {
+          const data = await _fetchJson(`https://${company}.breezy.hr/json`);
+          const arr = Array.isArray(data) ? data : (data.positions || []);
+          items = arr.map(j => ({
+            source: 'breezy', job_id: `breezy_${company}_${j.id || j.friendly_id || j.name}`,
+            title: j.name || '', company: (j.company && j.company.name) || company,
+            url: j.url || `https://${company}.breezy.hr`, location: (j.location && (j.location.name || j.location.city)) || '',
+            description: '', posted_at: j.published_date || ''
+          })).filter(j => j.title);
+        } else if (type === 'comeet') {
+          const [comeetSlug, listId] = String(company).split(':');
+          const htmlText = await _fetchText(`https://www.comeet.com/jobs/${comeetSlug}/${listId}`);
+          const seen = new Set();
+          const urlRe = new RegExp('"url_active_page":\\s*"(https://www\\.comeet\\.com/jobs/' + comeetSlug + '/[^"]+)"', 'g');
+          let m;
+          while ((m = urlRe.exec(htmlText)) !== null) {
+            const url = m[1];
+            if (seen.has(url)) continue;
+            seen.add(url);
+            const parts = url.split('/').filter(Boolean);
+            const jobId = parts[parts.length - 1] || '';
+            const title = (parts[parts.length - 2] || '').split('-').filter(Boolean).join(' ');
+            if (!jobId || !title) continue;
+            items.push({ source: 'comeet', job_id: `comeet_${comeetSlug}_${jobId}`, title, company: comeetSlug,
+              url, location: '', description: '', posted_at: '' });
+          }
+        } else if (type === 'jobvite') {
+          const htmlText = await _fetchText(`https://jobs.jobvite.com/${company}/jobs`);
+          const seen = new Set();
+          const jobRe = new RegExp('<a[^>]*href="/' + company + '/job/([A-Za-z0-9]+)"[^>]*>([\\s\\S]*?)</a>', 'g');
+          let m;
+          while ((m = jobRe.exec(htmlText)) !== null) {
+            const id = m[1];
+            const title = String(m[2]).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+            if (seen.has(id) || !title) continue;
+            seen.add(id);
+            items.push({ source: 'jobvite', job_id: `jobvite_${company}_${id}`, title, company,
+              url: `https://jobs.jobvite.com/${company}/job/${id}`, location: '', description: '', posted_at: '' });
+          }
+        } else if (type === 'pinpoint') {
+          const data = await _fetchJson(`https://${company}.pinpointhq.com/jobs.json`);
+          items = (data.data || []).map(j => ({
+            source: 'pinpoint', job_id: `pinpoint_${company}_${j.id}`, title: j.title || '',
+            company, url: j.url || (j.path ? `https://${company}.pinpointhq.com${j.path}` : ''),
+            location: (typeof j.location === 'string') ? j.location : ((j.location && (j.location.name || j.location.city)) || ''),
+            description: '', posted_at: ''
+          })).filter(j => j.title);
+        } else if (type === 'fountain') {
+          const htmlText = await _fetchText(`https://web.fountain.com/c/${company}`);
+          const seen = new Set();
+          const jobRe = /"title":"([^"]{3,90})","slug":"([a-z0-9-]{2,120})"/g;
+          let m;
+          while ((m = jobRe.exec(htmlText)) !== null) {
+            const title = m[1]; const slug = m[2];
+            if (seen.has(slug)) continue;
+            seen.add(slug);
+            items.push({ source: 'fountain', job_id: `fountain_${company}_${slug}`, title, company,
+              url: `https://web.fountain.com/apply/${company}/opening/${slug}`, location: '', description: '', posted_at: '' });
+          }
+        }
+
+        const relevant = _atsFilter(items, query);
+        out.push(...relevant);
+        console.log(`    ✓ ATS ${type}/${company}: ${relevant.length}/${items.length} relevant jobs`);
+      } catch (err) {
+        console.warn(`    ⚠ ATS board ${type}/${company} failed: ${err.message}`);
       }
-
-      const relevant = items.filter(j => isRelevant(j.title));
-      out.push(...relevant);
-      console.log(`    ✓ ATS ${board.type}/${board.company}: ${relevant.length}/${items.length} relevant jobs`);
-    } catch (err) {
-      console.warn(`    ⚠ ATS board ${board.type}/${board.company} failed: ${err.message}`);
     }
   }
 
@@ -986,6 +1096,11 @@ async function run() {
 
     const enabledSourceIds = userSources.map(us => us.job_source_id);
     const enabledSources = allSources.filter(s => enabledSourceIds.includes(s.id));
+
+    // ATS boards are pulled straight from their public APIs (no DB row needed),
+    // so every job we save points at the employer's real apply page and the
+    // matching ATS form-filler can auto-apply to it.
+    enabledSources.push({ name: 'ATS boards (US)', source_type: 'ats', id: null });
 
     console.log(`  Sources enabled: ${enabledSources.map(s => s.name).join(', ')}`);
 
