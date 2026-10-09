@@ -161,6 +161,8 @@ async function fetchJobsFromSource(source, query = 'software') {
         return await fetchJnetJobs(source, query);
       case 'careerjunction':
         return await fetchCareerJunctionJobs(source, query);
+      case 'ats':
+        return await fetchAtsBoards(source, query);
       default:
         console.warn(`⚠ Unknown source type: ${source.source_type}`);
         return [];
@@ -169,6 +171,105 @@ async function fetchJobsFromSource(source, query = 'software') {
     console.error(`❌ ${source.name} fetch failed:`, err.message);
     return [];
   }
+}
+
+/**
+ * ATS board sources (Greenhouse, Lever, Ashby, Workable, ...).
+ * These platforms host real, public job boards per company, so the agent can
+ * pull jobs straight from them and reuse the same platform's form filler when
+ * applying — no AI credits for discovery, none for filling the form.
+ */
+const ATS_DEFAULT_BOARDS = [
+  { type: 'greenhouse', company: 'airbnb' },
+  { type: 'greenhouse', company: 'stripe' },
+  { type: 'greenhouse', company: 'instacart' },
+  { type: 'lever', company: 'palantir' },
+  { type: 'lever', company: 'spotify' },
+  { type: 'ashby', company: 'openai' },
+  { type: 'ashby', company: 'vercel' },
+  { type: 'workable', company: 'n26' }
+];
+
+async function fetchAtsBoards(source, query = 'software') {
+  const qwords = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const isRelevant = (title) => !qwords.length
+    || qwords.some(w => String(title || '').toLowerCase().includes(w));
+
+  const out = [];
+
+  for (const board of ATS_DEFAULT_BOARDS) {
+    try {
+      let items = [];
+
+      if (board.type === 'greenhouse') {
+        const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.company}/jobs`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        items = (data.jobs || []).map(j => ({
+          source: 'greenhouse',
+          job_id: `gh_${board.company}_${j.id}`,
+          title: j.title,
+          company: j.company_name || board.company,
+          url: `https://boards.greenhouse.io/${board.company}/jobs/${j.id}`,
+          location: (j.location && j.location.name) || '',
+          description: '',
+          posted_at: j.updated_at || ''
+        }));
+      } else if (board.type === 'lever') {
+        const res = await fetch(`https://api.lever.co/v0/postings/${board.company}?mode=json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        items = (Array.isArray(data) ? data : []).map(j => ({
+          source: 'lever',
+          job_id: `lever_${board.company}_${j.id}`,
+          title: j.text || j.title,
+          company: board.company,
+          url: j.hostedUrl || `https://jobs.lever.co/${board.company}/${j.id}`,
+          location: (j.categories && j.categories.location) || '',
+          description: j.descriptionPlain || j.additionalPlain || '',
+          posted_at: j.createdAt ? j.createdAt : ''
+        }));
+      } else if (board.type === 'ashby') {
+        const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${board.company}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        items = (data.jobs || []).map(j => ({
+          source: 'ashby',
+          job_id: `ashby_${board.company}_${j.id}`,
+          title: j.title,
+          company: board.company,
+          url: j.jobUrl || `https://jobs.ashbyhq.com/${board.company}/${j.id}`,
+          location: j.location || '',
+          description: '',
+          posted_at: j.publishedAt || ''
+        }));
+      } else if (board.type === 'workable') {
+        const res = await fetch(`https://apply.workable.com/api/v1/widget/accounts/${board.company}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        items = (data.jobs || []).map(j => ({
+          source: 'workable',
+          job_id: `workable_${board.company}_${j.id || j.shortcode || j.title}`,
+          title: j.title,
+          company: j.companyName || board.company,
+          url: j.url,
+          location: [j.city, j.country].filter(Boolean).join(', '),
+          description: j.description || '',
+          posted_at: j.published_on || ''
+        }));
+      } else {
+        continue;
+      }
+
+      const relevant = items.filter(j => isRelevant(j.title));
+      out.push(...relevant);
+      console.log(`    ✓ ATS ${board.type}/${board.company}: ${relevant.length}/${items.length} relevant jobs`);
+    } catch (err) {
+      console.warn(`    ⚠ ATS board ${board.type}/${board.company} failed: ${err.message}`);
+    }
+  }
+
+  return out;
 }
 
 /**
