@@ -964,7 +964,7 @@ async function loadReport(){
   const {data, error} = await sb
     .from('job_matches')
     .select('id, job_title, company_name, employer_name, job_url, status, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at)')
-    .in('status', ['failed','needs_manual_action','captcha_blocked'])
+    .in('status', ['failed','needs_manual_action','captcha_blocked','submission_unverified'])
     .order('decided_at', {ascending:false, nullsFirst:false})
     .limit(500);
   if(error){
