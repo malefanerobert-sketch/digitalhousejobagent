@@ -15,12 +15,14 @@
 // cache for the rest of the run — avoids re-querying Supabase for every
 // single job.
 
+const { GroqKeyPool } = require('./groqKeyPool');
+const groqPool = new GroqKeyPool();
 let cachedSettings = null;
 
 async function loadSettings(supabase) {
   const { data, error } = await supabase
     .from('dispatch_settings')
-    .select('ai_provider, ai_api_key, ai_model, agent_prompt, agent_enabled')
+    .select('ai_provider, ai_api_key, ai_api_keys, ai_key_cooldown_seconds, ai_model, agent_prompt, agent_enabled')
     .eq('id', true)
     .maybeSingle();
   if (error) {
@@ -29,6 +31,8 @@ async function loadSettings(supabase) {
   } else {
     cachedSettings = data || { ai_provider: 'none', ai_api_key: null, ai_model: null, agent_prompt: null, agent_enabled: true };
   }
+  groqPool.configure(cachedSettings.ai_api_keys, cachedSettings.ai_api_key, cachedSettings.ai_key_cooldown_seconds);
+  if (cachedSettings.ai_provider === 'groq') console.log(`[ai-match] shared Groq vault: ${groqPool.slots.filter(Boolean).length}/10 slots configured; model ${currentModel('groq')}; rotation enabled`);
   return cachedSettings;
 }
 
@@ -70,7 +74,7 @@ function currentModel(provider, override) {
 // Is the shared company key configured? Independent of whether the admin's
 // master switch is on — see isAgentEnabled() for that.
 function isEnabled() {
-  return !!(cachedSettings?.ai_provider && cachedSettings.ai_provider !== 'none' && cachedSettings.ai_api_key);
+  return !!(cachedSettings?.ai_provider && cachedSettings.ai_provider !== 'none' && (cachedSettings.ai_api_key || (cachedSettings.ai_provider === 'groq' && groqPool.hasKeys())));
 }
 
 // Dispatch Admin's master on/off switch (dispatch_settings.agent_enabled).
@@ -176,7 +180,7 @@ async function callGemini(apiKey, model, prompt, maxTokens) {
 // seeker override to use their own key/provider instead of the shared one.
 async function scoreWithAI(resumeText, job, override) {
   const provider = override?.provider || cachedSettings?.ai_provider;
-  const apiKey = override?.apiKey || cachedSettings?.ai_api_key;
+  const apiKey = override?.apiKey || cachedSettings?.ai_api_key || (provider === 'groq' && groqPool.hasKeys() ? '__pool__' : null);
   if (!provider || provider === 'none' || !apiKey) return null;
   const model = currentModel(provider, override);
 
@@ -187,7 +191,7 @@ async function scoreWithAI(resumeText, job, override) {
     } else if (provider === 'openai') {
       text = await scoreWithOpenAI(apiKey, model, resumeText, job);
     } else if (provider === 'groq') {
-      text = await scoreWithOpenAI(apiKey, model, resumeText, job, GROQ_BASE_URL);
+      text = override ? await scoreWithOpenAI(apiKey, model, resumeText, job, GROQ_BASE_URL) : await groqPool.complete(model, [{ role: 'user', content: PROMPT_TEMPLATE(resumeText, job) }], 200);
     } else if (provider === 'google') {
       text = await callGemini(apiKey, model, PROMPT_TEMPLATE(resumeText, job), 200);
     } else {
@@ -210,7 +214,7 @@ async function scoreWithAI(resumeText, job, override) {
 // scoreWithAI: pass a resolved seeker override to use their own key.
 async function completeWithAI(prompt, override) {
   const provider = override?.provider || cachedSettings?.ai_provider;
-  const apiKey = override?.apiKey || cachedSettings?.ai_api_key;
+  const apiKey = override?.apiKey || cachedSettings?.ai_api_key || (provider === 'groq' && groqPool.hasKeys() ? '__pool__' : null);
   if (!provider || provider === 'none' || !apiKey) return null;
   const model = currentModel(provider, override);
   try {
@@ -229,7 +233,7 @@ async function completeWithAI(prompt, override) {
     } else if (provider === 'openai') {
       return await chatCompletion('https://api.openai.com/v1', apiKey, model, [{ role: 'user', content: prompt }], 2000);
     } else if (provider === 'groq') {
-      return await chatCompletion(GROQ_BASE_URL, apiKey, model, [{ role: 'user', content: prompt }], 2000);
+      return override ? await chatCompletion(GROQ_BASE_URL, apiKey, model, [{ role: 'user', content: prompt }], 2000) : await groqPool.complete(model, [{ role: 'user', content: prompt }], 2000);
     } else if (provider === 'google') {
       return await callGemini(apiKey, model, prompt, 2000);
     }

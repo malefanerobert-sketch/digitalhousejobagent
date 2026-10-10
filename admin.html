@@ -365,9 +365,9 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         </div>
 
         <div class="card" style="margin-bottom:18px">
-          <h3 style="margin-bottom:6px;font-size:15px">Shared AI key</h3>
+          <h3 style="margin-bottom:6px;font-size:15px">Shared AI keys — 10-slot Groq vault</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            One DigitalHouse-owned key powers the Agent for every JobAgent user — match scoring, CV/cover letter/motivational
+            DigitalHouse-owned AI keys power the Agent for every JobAgent user — match scoring, CV/cover letter/motivational
             letter drafting, reading a user's Watched pages, and applying on their behalf. Users never see or manage this
             (they only ever see the word "Agent" in the app); the cost is recovered through their subscription, not billed
             to their own accounts.</p>
@@ -377,12 +377,18 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
                 <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
                 <option value="google">Google (Gemini)</option>
                 <option value="groq">Groq (Llama — free tier)</option></select></div>
-            <div class="field"><label>API key</label>
+            <div class="field" id="singleKeyField"><label>API key</label>
               <div style="display:flex;gap:6px">
                 <input type="password" id="setKey" placeholder="sk-… / AIza… / AQ… / gsk_…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">
                 <button type="button" class="btn btn-sm" title="Show/hide" onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'">👁</button>
               </div>
             </div>
+          </div>
+          <div id="groqKeyVault" class="hidden" style="margin-bottom:16px">
+            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Exactly 10 Groq key slots (K1–K10). Fill any number of slots. Every slot uses the same model selected below. The updated Railway worker rotates ready keys and skips keys that hit a limit.</p>
+            <div id="groqKeyRows" class="row2"></div>
+            <div class="field" style="margin-top:10px"><label>Fallback cooldown (seconds)</label><input id="setGroqCooldown" type="number" min="10" max="600" step="10" value="60"></div>
+            <p style="color:var(--muted);font-size:12px">Provider retry timing takes priority. Keys in the same organization can share limits. These keys are saved to your database, not this browser; restrict dispatch_settings to authorized admins and the worker.</p>
           </div>
           <div class="field">
             <label>Model</label>
@@ -394,9 +400,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <button class="btn btn-primary" id="setSaveBtn" onclick="saveSettings()">💾 Save</button>
           <p style="color:var(--muted);font-size:12px;margin-top:14px">
-            This key is stored in <code>dispatch_settings</code> and read directly by the Railway worker
-            (<code>discoverWatched.js</code>/<code>apply.js</code>) on every run — no further backend change is needed
-            when you update it here.</p>
+            Settings are stored in <code>dispatch_settings</code>. For 10-key rotation, install the supplied SQL migration, updated <code>aiMatch.js</code>, and <code>groqKeyPool.js</code>, then redeploy the Railway worker. The admin page alone cannot rotate worker requests.</p>
         </div>
         <div class="card">
           <h3 style="margin-bottom:6px;font-size:15px">Agent instructions</h3>
@@ -1296,11 +1300,28 @@ const MODEL_OPTIONS = {
   ],
   groq: [
     { v:'llama-3.3-70b-versatile', label:'Llama 3.3 70B Versatile — recommended (free)' },
-    { v:'llama-3.1-8b-instant', label:'Llama 3.1 8B Instant — fastest (free)' }
+    { v:'llama-3.1-8b-instant', label:'Llama 3.1 8B Instant — fastest' },
+    { v:'qwen/qwen3.8-27b', label:'qwen/qwen3.8-27b' },
+    { v:'openai/gpt-oss-120b', label:'openai/gpt-oss-120b' },
+    { v:'openai/gpt-oss-20b', label:'openai/gpt-oss-20b' },
+    { v:'qwen/qwen3-32b', label:'qwen/qwen3-32b' }
   ],
   none: []
 };
+const GROQ_SLOT_COUNT = 10;
+function cleanGroqKey(value){ return String(value || '').trim().replace(/^bearer\s+/i,'').replace(/^["']|["']$/g,'').trim(); }
+function renderGroqSlots(keys){
+  const padded=Array.from({length:GROQ_SLOT_COUNT},(_,i)=>cleanGroqKey(Array.isArray(keys)?keys[i]:''));
+  $('#groqKeyRows').innerHTML=padded.map((key,i)=>`<div class="field"><label for="groqKey${i}">K${i+1} — Groq API key</label><div style="display:flex;gap:6px"><input type="password" id="groqKey${i}" data-groq-slot="${i}" value="${esc(key)}" placeholder="gsk_… (optional)" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1"><button type="button" class="btn btn-sm" title="Show/hide K${i+1}" onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'">👁</button><button type="button" class="btn btn-sm" title="Clear K${i+1}" onclick="document.getElementById('groqKey${i}').value=''">✕</button></div></div>`).join('');
+}
+function readGroqSlots(){ return Array.from({length:GROQ_SLOT_COUNT},(_,i)=>cleanGroqKey($('#groqKey'+i).value) || null); }
+function showProviderKeyFields(provider){
+  $('#groqKeyVault').classList.toggle('hidden',provider!=='groq');
+  $('#singleKeyField').classList.toggle('hidden',provider==='groq');
+}
+renderGroqSlots([]);
 function renderModelOptions(provider, selected){
+  showProviderKeyFields(provider);
   const sel = $('#setModel');
   if(!sel) return;
   const opts = MODEL_OPTIONS[provider] || [];
@@ -1319,6 +1340,9 @@ async function loadSettings(){
     $('#setProvider').value = appSettings.ai_provider || 'none';
     renderModelOptions(appSettings.ai_provider || 'none', appSettings.ai_model || '');
     $('#setKey').value = appSettings.ai_api_key || '';
+    const savedGroqKeys = Array.isArray(appSettings.ai_api_keys) ? appSettings.ai_api_keys : [];
+    renderGroqSlots(savedGroqKeys.some(Boolean) ? savedGroqKeys : (appSettings.ai_provider==='groq' ? [appSettings.ai_api_key] : []));
+    $('#setGroqCooldown').value = appSettings.ai_key_cooldown_seconds || 60;
     $('#setAgentPrompt').value = appSettings.agent_prompt || '';
     // Time window — three shapes: normal (start<end), overnight (start>end),
     // always-on (start===end). All three are just two ints in the DB; the UI
@@ -1581,19 +1605,24 @@ async function toggleAgentEnabled(){
 }
 async function saveSettings(){
   const provider=$('#setProvider').value;
-  const key=$('#setKey').value.trim() || null;
-  const model=$('#setModel').value.trim() || null;
+  const keys=readGroqSlots();
+  const key=provider==='groq' ? (keys.find(Boolean) || null) : ($('#setKey').value.trim() || null);
+  const cooldown=Number($('#setGroqCooldown').value);
+  if(!Number.isInteger(cooldown)||cooldown<10||cooldown>600){ toast('Cooldown must be between 10 and 600 seconds','err'); return; }
+  const model=$('#setModel').value.trim() || (provider==='groq' ? 'llama-3.3-70b-versatile' : null);
   const agentPrompt=$('#setAgentPrompt').value.trim() || null;
   const btns=[$('#setSaveBtn'), $('#setPromptSaveBtn')];
   btns.forEach(b=>{ if(b){ b.disabled=true; b.textContent='Saving…'; } });
   const {error} = await sb.from('dispatch_settings').update({
-    ai_provider:provider, ai_api_key:key, ai_model:model, agent_prompt:agentPrompt, updated_at:new Date().toISOString()
+    ai_provider:provider, ai_api_key:key, ai_api_keys:keys, ai_key_cooldown_seconds:cooldown, ai_model:model, agent_prompt:agentPrompt, updated_at:new Date().toISOString()
   }).eq('id', true);
   btns.forEach(b=>{ if(b){ b.disabled=false; b.textContent='💾 Save'; } });
   if(error){ toast('⚠ '+error.message,'err'); return; }
   if(appSettings){
     appSettings.ai_provider = provider;
     appSettings.ai_api_key  = key;
+    appSettings.ai_api_keys = keys;
+    appSettings.ai_key_cooldown_seconds = cooldown;
     appSettings.ai_model    = model;
     appSettings.agent_prompt= agentPrompt;
   }
