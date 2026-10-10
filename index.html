@@ -566,7 +566,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
       <!-- APPLICATIONS -->
       <section id="view-applications" class="hidden">
         <div class="card"><h3>Applied jobs</h3><div id="appList"></div></div>
-        <div class="card" style="margin-top:16px"><h3>Needs your attention</h3><div id="attnList"></div></div>
       </section>
 
       <!-- DOCUMENTS -->
@@ -2174,24 +2173,6 @@ function renderApplications(){
           '<button class="btn btn-ghost btn-xs" data-del-app="'+a.id+'" title="Delete this record">'+TRASH_ICON+'</button>'+
           '</div>';
       }).join('');
-
-  const attn = applications.filter(a => ATTENTION_RESULTS.includes(a.result));
-  const attnEl = $('#attnList');
-  if (attnEl) {
-    attnEl.innerHTML = !attn.length
-      ? '<div class="empty">Nothing needs your attention.</div>'
-      : attn.map(a => {
-          const meta = ATTENTION_META[a.result] || { icon: '', label: a.result };
-          const jm = a.job_matches || {};
-          return '<div class="lrow">'+
-            '<div class="grow"><b>'+esc(jm.job_title||'Unknown role')+'</b>'+
-            (employerLabel(jm)?'<div class="sub2">'+esc(employerLabel(jm))+'</div>':'')+
-            '<div class="sub2" style="margin-top:4px">'+esc(fmtStamp(a.attempted_at))+(a.notes ? ' · '+esc(a.notes) : '')+'</div></div>'+
-            '<span class="pill amber">'+meta.icon+' '+esc(meta.label)+'</span>'+
-            (jm.job_url ? '<button class="btn btn-ghost btn-xs" data-view-job="'+a.id+'" title="View job">View</button>' : '')+
-            '</div>';
-        }).join('');
-  }
 }
 
 function applicationDetails(id){
@@ -2280,11 +2261,6 @@ $('#appList').addEventListener('click', (e)=>{
     renderApplications();
     renderDashboard();
   });
-});
-
-$('#attnList').addEventListener('click', (e)=>{
-  const vj=e.target.closest('button[data-view-job]');
-  if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap&&ap.job_matches) openJobView(ap.job_matches); }
 });
 
 /* ================= OTHER DOCUMENTS ================= */
