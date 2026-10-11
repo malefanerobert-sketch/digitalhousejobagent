@@ -894,14 +894,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   </div>
 </div>
 
-<!-- read-only proof captured after a website confirms a submission -->
-<div class="modal hidden" id="applicationModal">
-  <div class="modal-card" style="max-width:720px">
-    <div class="modal-head"><h3 id="amTitle">Application details</h3><button class="x-btn" onclick="closeModal('applicationModal')">✕</button></div>
-    <div id="amBody"></div>
-  </div>
-</div>
-
 <!-- confirm modal -->
 <div class="modal hidden" id="confirmModal">
   <div class="modal-card" style="max-width:440px">
@@ -2179,74 +2171,50 @@ function renderApplications(){
   applications.filter(isConfirmedApplication).forEach(a=>{if(!byJob.has(a.job_match_id||a.id))byJob.set(a.job_match_id||a.id,a);});
   const applied=[...byJob.values()];
   $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Application completed</p>'+
-    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button><button class="btn btn-ghost btn-xs" data-view-application="'+esc(a.id)+'">Confirmation</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
+    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
 }
 
+function safeApplicationDetailUrl(value){
+  try{
+    const url=new URL(value);
+    if(url.protocol!=='https:'||url.username||url.password)return '';
+    if(new RegExp(SOURCE_PATTERN,'i').test(url.hostname))return '';
+    return url.href;
+  }catch{return '';}
+}
+function completedApplicationForJob(job,explicit){
+  if(typeof isConfirmedApplication!=='function')return null;
+  if(explicit&&isConfirmedApplication(explicit))return explicit;
+  if(!job?.id||typeof applications==='undefined'||!Array.isArray(applications))return null;
+  return applications.filter(a=>a.job_match_id===job.id&&isConfirmedApplication(a))
+    .sort((a,b)=>new Date(b.attempted_at||0)-new Date(a.attempted_at||0))[0]||null;
+}
+function applicationDetailsMarkup(a){
+  if(!a)return '';
+  const receipt=privateJobText(a.confirmation_text||'');
+  const ref=privateJobText(a.confirmation_reference||'');
+  const link=safeApplicationDetailUrl(a.confirmation_url);
+  const screenshot=safeApplicationDetailUrl(a.confirmation_screenshot_url);
+  const fields=Array.isArray(a.submitted_fields)?a.submitted_fields:[];
+  return '<section id="jobApplicationDetails" style="margin-top:24px;padding-top:18px;border-top:1px solid var(--line)">'+
+    '<h3 style="margin-bottom:10px">Application completed</h3>'+
+    (a.attempted_at?'<div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div>':'')+
+    (receipt?'<div style="margin-top:14px"><b style="font-size:13px">Confirmation details</b><p style="margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55">'+esc(receipt)+'</p></div>':'')+
+    (ref?'<div class="sub2" style="margin-top:8px">Reference: <b>'+esc(ref)+'</b></div>':'')+
+    (link?'<div style="margin-top:10px"><a class="btn btn-ghost btn-xs" href="'+esc(link)+'" target="_blank" rel="noopener">Open confirmation page ↗</a></div>':'')+
+    (fields.length?'<div style="margin-top:18px"><b style="font-size:13px">Answers sent</b><div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">'+fields.map(f=>'<div style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px"><b>'+esc(privateJobText(f.field||'Application field'))+'</b><div class="sub2" style="margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(privateJobText(f.value??''))+'</div></div>').join('')+'</div></div>':'<div class="sub2" style="margin-top:18px">No form answers were captured for this record.</div>')+
+    (screenshot?'<div style="margin-top:18px"><b style="font-size:13px">Confirmation screenshot</b><img src="'+esc(screenshot)+'" alt="Application confirmation" style="display:block;width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line)"></div>':'')+
+    '</section>';
+}
+// Legacy calls now open the same combined job view; there is no separate confirmation card.
 function applicationDetails(id){
-  const a = applications.find(x=>x.id===id);
-  if(!a) return;
-  // The user-facing "View" now shows job information only (no proof block,
-  // no "historical record — proof unavailable" fallback). Route any legacy
-  // caller to the same in-app job viewer the Matches tab uses.
-
-  const confirmed = isConfirmedApplication(a) && a.verification_status === 'confirmed';
-  const manual = a.verification_status === 'user_confirmed' || a.verification_status === 'admin_confirmed';
-  const fields = Array.isArray(a.submitted_fields) ? a.submitted_fields : [];
-  const receipt = a.confirmation_text || '';
-  const hasProof = confirmed && (receipt || a.confirmation_reference || a.confirmation_screenshot_url);
-  $('#amTitle').textContent = a.job_matches?.job_title || 'Application details';
-
-  let proofBlock;
-  if(confirmed){
-    proofBlock =
-      '<div style="border:1px solid rgba(49,208,170,.35);background:rgba(49,208,170,.07);border-radius:12px;padding:14px;margin-bottom:16px">'+
-        '<b style="color:var(--ok)">✓ Confirmed by the job website</b>'+
-        '<div class="sub2" style="margin-top:6px">The agent found a submission receipt after sending the form.</div>'+
-      '</div>';
-  } else if(manual){
-    // Preserve the saved confirmation details without the attribution banner.
-    proofBlock = '';
-  } else if(a.result==='submission_unverified'){
-    proofBlock =
-      '<div class="danger-box" style="margin-bottom:16px"><b>❔ Submission not verified</b><div class="sub2" style="margin-top:6px">The agent clicked Submit, but the website did not show a receipt. This job is not marked Applied.</div></div>';
-  } else {
-    proofBlock =
-      '<div style="border:1px solid var(--line);background:var(--input-bg);border-radius:12px;padding:14px;margin-bottom:16px">'+
-        '<b>Historical record — proof unavailable</b><div class="sub2" style="margin-top:6px">This application was recorded before submission proof was introduced, so we do not claim it was confirmed by the website.</div>'+
-      '</div>';
-  }
-
-  const receiptBlock = (receipt || a.confirmation_reference || a.confirmation_url)
-    ? '<div style="margin:18px 0"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Website receipt</b>'+
-      (receipt ? '<p style="margin:8px 0 0;line-height:1.55">'+esc(receipt)+'</p>' : '')+
-      (a.confirmation_reference ? '<div class="sub2" style="margin-top:8px">Reference: <b>'+esc(a.confirmation_reference)+'</b></div>' : '')+
-      (a.confirmation_url ? '<div style="margin-top:8px"><a class="btn btn-ghost btn-xs" href="'+esc(a.confirmation_url)+'" target="_blank" rel="noopener">Open confirmation page ↗</a></div>' : '')+
-      '</div>'
-    : '';
-
-  const fieldsBlock = fields.length
-    ? '<div style="margin-top:18px"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Answers sent</b>'+
-      '<div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">'+
-      fields.map(f=>'<div style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px"><b>'+esc(f.field||'Application field')+'</b><div class="sub2" style="margin-top:3px;white-space:pre-wrap">'+esc(f.value||'')+'</div></div>').join('')+
-      '</div></div>'
-    : '<div class="sub2" style="margin-top:18px">No form answers were captured for this record.</div>';
-
-  const screenshot = a.confirmation_screenshot_url
-    ? '<div style="margin-top:18px"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Confirmation screenshot</b><img src="'+esc(a.confirmation_screenshot_url)+'" alt="Job website submission confirmation" style="display:block;width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line)"></div>'
-    : (hasProof ? '<div class="sub2" style="margin-top:18px">A website receipt was captured. Screenshot storage was unavailable for this submission.</div>' : '');
-
-  $('#amBody').innerHTML =
-    proofBlock+
-    '<div class="sub2">'+esc(coLabel(a.job_matches?.company_name))+' · '+new Date(a.attempted_at).toLocaleString()+'</div>'+
-    receiptBlock+fieldsBlock+screenshot;
-  $('#applicationModal').classList.remove('hidden');
+  const a=applications.find(x=>x.id===id);
+  if(a)openJobView(a.job_matches||{},a);
 }
 
 $('#appList').addEventListener('click', (e)=>{
-  const detail=e.target.closest('button[data-view-application]');
-  if(detail){ applicationDetails(detail.dataset.viewApplication); return; }
   const vj=e.target.closest('button[data-view-job]');
-  if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap&&ap.job_matches) openJobView(ap.job_matches); return; }
+  if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap) openJobView(ap.job_matches||{},ap); return; }
   const btn=e.target.closest('button[data-del-app]');
   if(!btn) return;
   const id=btn.dataset.delApp;
@@ -2556,7 +2524,7 @@ function renderScopedJobDetails(description,salary,status){
   if(!blocks&&!fallback)return '<div class="sub2">Job details are not available yet. The agent will retry retrieving them on a later scan.</div>';
   return notice+blocks+fallback;
 }
-function openJobView(j){
+function openJobView(j,application=null){
   j = j || {};
   const title   = privateJobText(j.job_title || 'Job details');
   const company = cleanJobText((typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||''));
@@ -2597,7 +2565,8 @@ function openJobView(j){
   // Full job description — the primary content when we have it
   const descBlock=renderScopedJobDetails(desc,salary,j.job_description_status||'legacy');
 
-  $('#jmBody').innerHTML = header + chipRow + descBlock;
+  const completed=completedApplicationForJob(j,application);
+  $('#jmBody').innerHTML = header + chipRow + descBlock + applicationDetailsMarkup(completed);
   $('#jobModal').classList.remove('hidden');
 }
 $$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
