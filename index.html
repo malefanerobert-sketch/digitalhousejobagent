@@ -1678,12 +1678,13 @@ function renderDashboard(){
   // "Matches" is the agent's own pipeline (discovered, queued, applied).
   // "Applications sent" counts the jobs the agent has actually applied to.
   const appliedCount = new Set(applications.filter(isConfirmedApplication).map(a=>a.job_match_id||a.id)).size;
-  $$('.nav-badge-sync').forEach(b=>{ b.textContent=matches.length; b.classList.toggle('hidden',matches.length===0); });
-  $('#stNew').textContent=matches.length;
+  const viewCounts=matchViewCounts();
+  $$('.nav-badge-sync').forEach(b=>{ b.textContent=viewCounts.discovered; b.classList.toggle('hidden',viewCounts.discovered===0); });
+  $('#stNew').textContent=viewCounts.discovered;
   $('#stApps').textContent=appliedCount;
   const blockedCount=(currentSeeker?.blocked_companies?.length||0)+(currentSeeker?.blocked_locations?.length||0);
-  $('#stSkipped').textContent=matches.filter(isSkippedMatch).length;
-  $$('.skipped-badge-sync').forEach(b=>{const n=matches.filter(isSkippedMatch).length;b.textContent=n;b.classList.toggle('hidden',n===0);});
+  $('#stSkipped').textContent=viewCounts.skipped;
+  $$('.skipped-badge-sync').forEach(b=>{const n=viewCounts.skipped;b.textContent=n;b.classList.toggle('hidden',n===0);});
 
   // Top-right "Last …" label removed — per-card timestamps carry the truth.
   // Profile is "complete" when the strengthened required fields are filled — CV upload is now optional.
@@ -1901,6 +1902,7 @@ async function loadMatches(){
   matches=all.filter(m=>m.job_title!=='⚠ Watched page could not be read (not a job)'&&m.job_title!=='(watched page)');
 }
 function isSkippedMatch(m){return m.status!=='applied' && !!(m.status==='skipped'||m.agent_skipped_at||m.skip_reason);}
+function matchViewCounts(rows=matches){const skipped=rows.filter(isSkippedMatch).length;return {discovered:rows.length-skipped,skipped};}
 // Display the saved event timestamp, not the current clock. SAST is UTC+02:00 year-round.
 function discoveryDate(value){
   if(!value)return 'Date and time unavailable';
@@ -1980,7 +1982,7 @@ function isOutOfPreferredLocation(m){
   if(scopeAll) return false;
   return !locationInScope(m.location, prefs);
 }
-function isVisibleMatch(m){return state.view!=='skipped'||isSkippedMatch(m);}
+function isVisibleMatch(m){return state.view==='skipped'?isSkippedMatch(m):!isSkippedMatch(m);}
 function renderMatches(){
   // Location dropdown = a fixed list of major South African metros (always
   // usable, even with zero matches yet) merged with any location that
@@ -1988,14 +1990,14 @@ function renderMatches(){
   // still appears once the agent finds a job there).
   const locSel=$('#mLoc'); const cur=state.mLoc==='all'?'all':canonicalLocationLabel(state.mLoc);
   state.mLoc=cur;
-  const matchLocs=matches.map(m=>canonicalLocationLabel(m.location)).filter(Boolean);
+  const visiblePool=matches.filter(isVisibleMatch);
+  const matchLocs=visiblePool.map(m=>canonicalLocationLabel(m.location)).filter(Boolean);
   const locs=[...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs].map(canonicalLocationLabel))].sort();
   locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
   if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
 
   const q=state.mQ.toLowerCase();
-  let list = matches.filter(m=>{
-    if(!isVisibleMatch(m)) return false;
+  let list = visiblePool.filter(m=>{
     // Saved discoveries remain visible even if a later block prevents future work.
     if(state.mLoc!=='all' && locationKey(m.location)!==locationKey(state.mLoc)) return false;
     if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
@@ -2007,7 +2009,7 @@ function renderMatches(){
   const g=$('#matchGrid');
   if(!list.length){
     g.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="big">📡</div>'+
-      (matches.length ? 'No matches fit these filters. Try clearing them.' : (state.view==='skipped'?'No skipped matches.':'No discoveries saved yet. Railway only discovers; admins apply.'))+'</div>';
+      (visiblePool.length ? 'No matches fit these filters. Try clearing them.' : (state.view==='skipped'?'No skipped matches.':'No discovered matches in this view.'))+'</div>';
     updateBulkBar();
     return;
   }
@@ -2115,7 +2117,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
     btn.disabled=true;
     const {error}=await sb.rpc('request_job_application',{p_match_id:id});
     if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
-    if(mm){mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
+    if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
     toast('Queued for admin ✓ No automatic application will be sent','ok');renderMatches();renderDashboard();return;
   }
   if(action==='delete'){
