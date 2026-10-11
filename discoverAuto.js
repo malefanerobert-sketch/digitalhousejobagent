@@ -1154,6 +1154,7 @@ async function run() {
     allJobs.forEach(j => {
       const why = jobFit.titleSkipReason(j.title, user);
       if (why) { j.skip_reason = jobFit.skipMessage(why); }
+      else if (!jobFit.locationInScope(j.location,user.preferred_locations)) { j.skip_reason='Outside your preferred locations. Request Apply to ask an admin to apply anyway.'; }
     });
 
     // A seeker set to 'none' has deliberately opted out of AI entirely —

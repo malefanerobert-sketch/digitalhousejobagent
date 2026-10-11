@@ -1367,9 +1367,8 @@ async function runOnce() {
 
 let applyRunInProgress=false;
 async function run() {
-  if(applyRunInProgress){console.log('[apply] previous run still active; overlapping run skipped');return;}
-  applyRunInProgress=true;
-  try {return await runOnce();} finally {applyRunInProgress=false;}
+  console.log('[apply] Disabled: Railway discovers only. Applications are controlled by admins.');
+  return {disabled:true,mode:'admin_only'};
 }
 module.exports = { run };
 

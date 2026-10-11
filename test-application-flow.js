@@ -85,10 +85,10 @@ async function main(){
   const failBtn={scrollIntoViewIfNeeded:async()=>{},click:async()=>{throw new Error('click failed');}};
   result=await sandbox.submitAndVerify(page,failBtn,[],{},{});assert(result.unverified);assert(!result.ok);
   console.log('PASS failed click is not swallowed or marked successful');
-  const lockStart=src.indexOf('let applyRunInProgress=false;');const lockEnd=src.indexOf('module.exports',lockStart);let runs=0,release;
-  const lock=vm.createContext({console:{log(){}},runOnce:async()=>{runs++;await new Promise(r=>release=r);}});vm.runInContext(src.slice(lockStart,lockEnd),lock);
-  const first=lock.run();await lock.run();assert.equal(runs,1);release();await first;
-  console.log('PASS overlapping application cron runs are skipped');
+  const runStart=src.indexOf('async function run() {',src.indexOf('let applyRunInProgress=false;'));
+  const runEnd=src.indexOf('module.exports',runStart);const disabled=vm.createContext({console:{log(){}}});vm.runInContext(src.slice(runStart,runEnd),disabled);
+  assert.equal((await disabled.run()).mode,'admin_only');
+  console.log('PASS automatic runner disabled in admin-only workflow');
   const web=fs.readFileSync(__dirname+'/index.html','utf8');const fstart=web.indexOf('function isConfirmedApplication('),fend=web.indexOf('\n}\n',fstart)+3;
   const ws=vm.createContext({URL});vm.runInContext(web.slice(fstart,fend),ws);
   assert(!ws.isConfirmedApplication({result:'success',verification_status:'confirmed',confirmation_text:negatives[0],confirmation_url:'https://www.adzuna.com/details/1'}));
@@ -98,8 +98,8 @@ async function main(){
   const renderStart=web.indexOf('function renderApplications('),renderEnd=web.indexOf('\nfunction applicationDetails(',renderStart);
   await page.addScriptTag({content:'const applications=[{id:"old",result:"success",verification_status:"confirmed",confirmation_text:"Applications must be submitted prior to closing",confirmation_url:"https://www.adzuna.com/details/1",attempted_at:"2026-10-11",job_matches:{job_title:"Example job",company_name:"Example"}},{id:"bad",result:"submission_unverified",notes:"No new receipt",attempted_at:"2026-10-11",job_matches:{job_title:"Other job",company_name:"Example"}}];const ATTENTION_META={submission_unverified:{label:"Submission not verified"}};const $=s=>document.querySelector(s);const esc=s=>String(s||"").replaceAll("<","&lt;");const employerLabel=m=>m.company_name;const fmtStamp=s=>s;'+web.slice(fstart,fend)+'\n'+web.slice(renderStart,renderEnd)});
   await page.evaluate(()=>renderApplications());
-  const rendered=await page.locator('#appList').innerText();assert(rendered.includes('Confirmed applications (0)'));assert(rendered.includes('Attempts needing review (2)'));assert(rendered.includes('Previous success needs review'));assert(rendered.includes('No new receipt'));
-  console.log('PASS application history surfaces failures and does not display false Confirmed labels');
+  const rendered=await page.locator('#appList').innerText();assert(rendered.includes('No completed applications recorded yet'));assert(!rendered.includes('No new receipt'));assert(!rendered.includes('Previous success needs review'));
+  console.log('PASS Applied matches excludes failures and unsupported historical confirmations');
 
  } finally {await browser.close();await new Promise(r=>server.close(r));}
 }

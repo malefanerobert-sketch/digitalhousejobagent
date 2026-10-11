@@ -625,6 +625,7 @@ async function run() {
         // the literal fallback, so the agent can never drift up into
         // engineer / scientist / manager roles for a sub-degree seeker.
         const skipWhy = jobFit.titleSkipReason(job.title, seeker);
+        const skipReason=skipWhy ? jobFit.skipMessage(skipWhy) : (!jobFit.locationInScope(job.location,seeker.preferred_locations) ? 'Outside your preferred locations. Request Apply to ask an admin to apply anyway.' : null);
 
         if (await alreadyKnown(seeker.id, absoluteUrl)) continue;
 
@@ -667,8 +668,8 @@ async function run() {
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source
-          status: skipWhy ? 'skipped' : 'pending',
-          skip_reason: skipWhy ? jobFit.skipMessage(skipWhy) : null,
+          status: skipReason ? 'skipped' : 'pending',
+          skip_reason: skipReason,
           is_custom_source: true
         });
 

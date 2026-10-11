@@ -1,13 +1,2 @@
-const fs=require('fs'),assert=require('assert/strict');let chromium;try{chromium=require('playwright').chromium;}catch(_){chromium=require('/data/application-tests/node_modules/playwright').chromium;}
-(async()=>{const web=fs.readFileSync(__dirname+'/index.html','utf8');const b=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||require('child_process').execSync('command -v chromium').toString().trim(),args:['--no-sandbox']});const p=await b.newPage();try{
- await p.setContent('<select id="mLoc"></select><div id="matchGrid"></div>');
- const a=web.indexOf('const _locNorm'),z=web.indexOf('\nlet lastFilteredIds=',a);
- const h=web.indexOf("$('#matchGrid').addEventListener('click', async (e)=>"),he=web.indexOf('\nasync function loadApplications',h);
- const bootstrap=`var currentSeeker={preferred_locations:['Johannesburg']};var matches=[{id:'hidden',status:'pending',location:'Johannesburg',job_title:'Hidden discovery'},{id:'outside',status:'pending',location:'Cape Town',job_title:'Outside discovery'},{id:'skip',status:'skipped',location:'Johannesburg',job_title:'Skipped job'},{id:'done',status:'applied',location:'Johannesburg',job_title:'Applied job'},{id:'problem',status:'needs_manual_action',location:'Cape Town',job_title:'Manual job'}];var state={mLoc:'all',mQ:'',selected:new Set()};var SA_LOCATIONS=[],US_LOCATIONS=[],lastFilteredIds=[],openNotes=new Set();var $=s=>document.querySelector(s);var esc=s=>String(s||'');var isBlocked=()=>false;var employerLabel=m=>m.company_name;var coLabel=s=>s||'';var noteBox=(c,id,t,ch)=>'<div>'+t+ch+'</div>';var matchDisplayTime=()=>'';var timeAgo=()=>'';var updateBulkBar=()=>{};var renderDashboard=()=>{};var toast=()=>{};var writes=[];var sb={from:table=>({update:value=>({eq:async(k,v)=>{writes.push({table,value,k,v});return {error:null}}})})};`;
- await p.addScriptTag({content:bootstrap+web.slice(a,z)+'\n'+web.slice(h,he)});await p.evaluate(()=>renderMatches());
- assert.equal(await p.locator('.mcard').count(),3);assert.equal(await p.locator('button[data-action=apply][data-id=outside]').count(),1);
- await p.click('button[data-action=apply][data-id=outside]');assert((await p.locator('#matchGrid').innerText()).includes('Queued for agent'));
- const writes=await p.evaluate(()=>writes);assert.equal(writes.length,1);assert.equal(writes[0].value.status,'approved');assert.equal(writes[0].v,'outside');
- await p.evaluate(()=>{matches.find(m=>m.id==='outside').status='failed';renderMatches()});assert.equal(await p.locator('.mcard').count(),2);assert(!(await p.locator('#matchGrid').innerText()).includes('Outside discovery'));
- console.log('PASS actual Matches rendering and Apply click queues approved; failure leaves Matches for admin review');
-}finally{await b.close();}})().catch(e=>{console.error(e);process.exit(1)});
+// Match rendering and admin-only Apply behavior are tested together.
+require('./test-admin-workflow');
