@@ -1134,6 +1134,7 @@ async function doNewPass(){
 }
 
 async function signOut(){
+  stopMatchLiveRefresh();
   await sb.auth.signOut();
   currentUser=null; currentSeeker=null;
   $('#app').classList.add('hidden');
@@ -1147,6 +1148,7 @@ async function enterApp(user){
   $('#authWrap').classList.add('hidden');
   $('#app').classList.remove('hidden');
   await refreshAll();
+  startMatchLiveRefresh();
 }
 
 async function refreshAll(){
@@ -1163,6 +1165,34 @@ async function refreshAll(){
   updateAgentPill();
   setView(state.view);
 }
+
+/* ================= LIVE MATCH REFRESH ================= */
+let matchRefreshTimer=null,matchRefreshController=null,matchRefreshBusy=false,matchRefreshEpoch=0;
+function stopMatchLiveRefresh(){
+  clearInterval(matchRefreshTimer);matchRefreshTimer=null;matchRefreshEpoch++;
+  if(matchRefreshController)matchRefreshController.abort();
+}
+function startMatchLiveRefresh(){
+  stopMatchLiveRefresh();
+  matchRefreshTimer=setInterval(refreshLiveMatchLists,60000);
+}
+async function refreshLiveMatchLists(){
+  if(matchRefreshBusy||document.hidden||!currentUser||!currentSeeker?.id)return;
+  const userId=currentUser.id,seekerId=currentSeeker.id,epoch=matchRefreshEpoch;
+  const controller=new AbortController();matchRefreshController=controller;matchRefreshBusy=true;
+  const timeout=setTimeout(()=>controller.abort(),30000);
+  try{
+    const results=await Promise.all([loadMatches({silent:true,signal:controller.signal}),loadApplications({silent:true,signal:controller.signal})]);
+    if(results.some(ok=>ok===false)||controller.signal.aborted||epoch!==matchRefreshEpoch||currentUser?.id!==userId||currentSeeker?.id!==seekerId)return;
+    // Refresh record views and counters only. Never reload or overwrite profile form edits.
+    renderDashboard();updateAgentPill();
+    if(state.view==='matches'||state.view==='skipped')renderMatches();
+    if(state.view==='applications')renderApplications();
+  }catch(error){console.warn('Match refresh unavailable; keeping displayed results.');}
+  finally{clearTimeout(timeout);if(matchRefreshController===controller)matchRefreshController=null;matchRefreshBusy=false;}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLiveMatchLists();});
+window.addEventListener('focus',()=>refreshLiveMatchLists());
 
 /* ================= VIEWS / NAV ================= */
 const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches',''], skipped:['Skipped by agent','Request Apply to send a skipped job to the admin queue'],
@@ -1888,18 +1918,23 @@ function updatePfLocsLabel(){
     : (sel.length<=2 ? sel.join(', ') : sel[0]+', '+sel[1]+' +'+(sel.length-2)+' more');
 }
 
-async function loadMatches(){
-  if(!currentSeeker){ matches=[]; return; }
-  const all=[]; const size=500;
-  for(let offset=0;;offset+=size){
-    const {data,error}=await sb.from('job_matches').select('*')
-      .eq('job_seeker_id',currentSeeker.id).order('discovered_at',{ascending:false}).order('id')
-      .range(offset,offset+size-1);
-    if(error){toast('Could not load discoveries: '+error.message,'err');return;}
-    const rows=data||[];all.push(...rows);if(rows.length<size)break;
-  }
-  // Notices about unreadable sources aren't discovered vacancies. No country/status narrowing.
-  matches=all.filter(m=>m.job_title!=='⚠ Watched page could not be read (not a job)'&&m.job_title!=='(watched page)');
+async function loadMatches({silent=false,signal=null}={}){
+  const seekerId=currentSeeker?.id;
+  if(!seekerId){matches=[];return false;}
+  const all=[];const size=500;
+  try{
+    for(let offset=0;;offset+=size){
+      let query=sb.from('job_matches').select('*').eq('job_seeker_id',seekerId)
+        .order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
+      if(signal)query=query.abortSignal(signal);
+      const {data,error}=await query;
+      if(error)throw error;
+      const rows=data||[];all.push(...rows);if(rows.length<size)break;
+    }
+    if(signal?.aborted||currentSeeker?.id!==seekerId)return false;
+    matches=all.filter(m=>m.job_title!=='⚠ Watched page could not be read (not a job)'&&m.job_title!=='(watched page)');
+    return true;
+  }catch(error){if(!silent)toast('Could not load discoveries: '+(error.message||'Connection error'),'err');return false;}
 }
 function isSkippedMatch(m){return m.status!=='applied' && !!(m.status==='skipped'||m.agent_skipped_at||m.skip_reason);}
 function matchViewCounts(rows=matches){const skipped=rows.filter(isSkippedMatch).length;return {discovered:rows.length-skipped,skipped};}
@@ -2135,17 +2170,23 @@ $('#matchGrid').addEventListener('click', async (e)=>{
 });
 
 /* ================= APPLICATIONS ================= */
-async function loadApplications(){
-  if(!currentSeeker){applications=[];return;}
+async function loadApplications({silent=false,signal=null}={}){
+  const seekerId=currentSeeker?.id;
+  if(!seekerId){applications=[];return false;}
   const all=[];const size=500;
-  for(let offset=0;;offset+=size){
-    const {data,error}=await sb.from('application_log')
-      .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
-      .eq('job_seeker_id',currentSeeker.id).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
-    if(error){toast('Could not load applied matches: '+error.message,'err');return;}
-    const rows=data||[];all.push(...rows);if(rows.length<size)break;
-  }
-  applications=all;
+  try{
+    for(let offset=0;;offset+=size){
+      let query=sb.from('application_log')
+        .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
+        .eq('job_seeker_id',seekerId).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
+      if(signal)query=query.abortSignal(signal);
+      const {data,error}=await query;
+      if(error)throw error;
+      const rows=data||[];all.push(...rows);if(rows.length<size)break;
+    }
+    if(signal?.aborted||currentSeeker?.id!==seekerId)return false;
+    applications=all;return true;
+  }catch(error){if(!silent)toast('Could not load applied matches: '+(error.message||'Connection error'),'err');return false;}
 }
 
 const ATTENTION_RESULTS = ['failed','captcha_blocked','needs_manual_action','submission_unverified'];
