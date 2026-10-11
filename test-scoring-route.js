@@ -1,0 +1,22 @@
+const fs=require('node:fs');
+const vm=require('node:vm');
+const assert=require('node:assert/strict');
+const {groqRequestBody}=require('./groqKeyPool');
+(async()=>{
+ const body=groqRequestBody('openai/gpt-oss-20b',[{role:'user',content:'test'}],200);
+ assert.equal(body.max_completion_tokens,2048);assert.equal(body.reasoning_effort,'low');assert.equal(body.include_reasoning,false);
+ assert.equal(groqRequestBody('qwen/qwen3.8-27b',[],200).max_completion_tokens,200);
+ console.log('PASS OSS request uses sufficient completion budget and low reasoning');
+ const src=fs.readFileSync(__dirname+'/discoverAuto.js','utf8');
+ const start=src.indexOf('async function callScoringAI(');const end=src.indexOf('// Source labels',start);
+ let calls=[];
+ const c=vm.createContext({adminSettings:{ai_provider:'groq',ai_api_key:'fake',ai_model:'openai/gpt-oss-20b'},DEFAULT_MODEL_BY_PROVIDER:{groq:'openai/gpt-oss-20b'},aiMatch:{isEnabled:()=>true,completeWithAIOrThrow:async(...args)=>{calls.push(args);return 'OK';}}});
+ vm.runInContext(src.slice(start,end),c);
+ assert.equal(await c.callScoringAI('batch'),'OK');assert.equal(calls[0][0],'batch');assert.equal(calls[0][2],2000);
+ const override={provider:'groq',apiKey:'personal-fake'};await c.callScoringAI('personal',override);assert.equal(calls[1][1],override);
+ assert(!src.includes("fetch('https://api.groq.com/openai/v1/chat/completions'"));
+ console.log('PASS autonomous scoring uses common helper, no direct Groq bypass, overrides preserved');
+ c.aiMatch.completeWithAIOrThrow=async()=>{throw new Error('provider unavailable');};
+ await assert.rejects(c.callScoringAI('bad'),/provider unavailable/);
+ console.log('PASS helper failures propagate to existing title fallback');
+})().catch(e=>{console.error(e);process.exitCode=1;});

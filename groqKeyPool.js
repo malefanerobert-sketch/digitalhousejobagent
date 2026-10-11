@@ -23,6 +23,17 @@ function retryDelayMs(headers, message, fallbackSeconds) {
   const valid = delays.filter(n => Number.isFinite(n) && n > 0);
   return (valid.length ? Math.max(...valid) : fallbackSeconds*1000) + 250;
 }
+function groqRequestBody(model, messages, maxTokens) {
+  const body = { model, messages, max_completion_tokens: maxTokens };
+  if (/^openai\/gpt-oss-(20b|120b)$/.test(model)) {
+    // The completion budget includes reasoning; don't spend scoring's whole
+    // 200-token budget before returning the actual JSON answer.
+    body.max_completion_tokens = Math.max(2048, maxTokens);
+    body.reasoning_effort = 'low';
+    body.include_reasoning = false;
+  }
+  return body;
+}
 class GroqKeyPool {
   constructor({fetchImpl = (...args)=>fetch(...args), now = ()=>Date.now(), sleep = ms=>new Promise(r=>setTimeout(r,ms)), logger = console, maxWaitMs = 90000} = {}) {
     this.fetch = fetchImpl; this.now = now; this.sleep = sleep; this.logger = logger; this.maxWaitMs = maxWaitMs;
@@ -57,7 +68,7 @@ class GroqKeyPool {
         res=await this.fetch(ENDPOINT,{
           method:'POST', signal:AbortSignal.timeout(45000),
           headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},
-          body:JSON.stringify({model,messages,max_tokens:maxTokens})
+          body:JSON.stringify(groqRequestBody(model,messages,maxTokens))
         });
       } catch (_) {
         health.until=this.now()+this.cooldownSeconds*1000;
@@ -84,6 +95,10 @@ class GroqKeyPool {
         health.invalid=true;
         this.logger.warn(`[groq-pool] K${i+1} invalid; switching slots`); continue;
       }
+      if (res.status===404 || res.status===400) {
+        const code=String(detail.code||'').slice(0,80);
+        if (/model/i.test(code) || /model/i.test(String(detail.message||''))) throw new Error(`Groq model ${model} unavailable (${res.status}${code ? '; '+code : ''}); refresh models in Admin and save an active model`);
+      }
       if (res.status>=500) {
         health.until=this.now()+retryDelayMs(res.headers,detail.message,this.cooldownSeconds);
         this.logger.warn(`[groq-pool] K${i+1} HTTP ${res.status}; switching slots`);
@@ -95,4 +110,4 @@ class GroqKeyPool {
     }
   }
 }
-module.exports={GroqKeyPool,retryDelayMs,SLOT_COUNT};
+module.exports={GroqKeyPool,retryDelayMs,SLOT_COUNT,groqRequestBody};

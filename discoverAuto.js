@@ -16,6 +16,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const sb = require('./supabaseClient');
 const jobFit = require('./jobFit');
+const aiMatch = require('./aiMatch');
 
 // Adzuna's app_id is a public identifier (not a secret); default to the one
 // registered for this project so Railway only has to hold the secret app_key.
@@ -27,7 +28,7 @@ const ADZUNA_API_KEY = process.env.ADZUNA_API_KEY || '';
 // provider it belongs to is decided by dispatch_settings.ai_provider (set
 // in the admin panel). callScoringAI() below picks the right API for
 // whichever provider is actually configured, instead of assuming Anthropic.
-const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash', groq: 'llama-3.3-70b-versatile' };
+const DEFAULT_MODEL_BY_PROVIDER = { anthropic: 'claude-sonnet-4-5-20250929', openai: 'gpt-4o-mini', google: 'gemini-3.8-flash', groq: 'openai/gpt-oss-20b' };
 
 // Config
 const SA_TIMEZONE = 'Africa/Johannesburg';
@@ -41,6 +42,7 @@ let adminSettings = null; // Will be loaded from DB
  * Returns true if the run should proceed, false if the master switch is off.
  */
 async function loadAdminSettings() {
+  await aiMatch.loadSettings(sb);
   const { data, error } = await sb
     .from('dispatch_settings')
     .select('agent_enabled, agent_run_start_hour, agent_run_end_hour, agent_timezone, ai_provider, ai_api_key, ai_model')
@@ -65,7 +67,7 @@ async function loadAdminSettings() {
       end_hour: data.agent_run_end_hour ?? 16,
       timezone: data.agent_timezone || SA_TIMEZONE,
       ai_provider: data.ai_provider || 'anthropic',
-      ai_api_key: process.env.CLAUDE_API_KEY || data.ai_api_key || null,
+      ai_api_key: data.ai_api_key || ((data.ai_provider || 'anthropic') === 'anthropic' ? process.env.CLAUDE_API_KEY : null) || null,
       // The admin app has no model field, so data.ai_model is normally empty.
       // Default to the right model for whichever provider is configured — never
       // force Claude onto a Google/OpenAI key (that mismatch caused the 404s).
@@ -82,7 +84,7 @@ async function loadAdminSettings() {
     return false;
   }
 
-  if (!adminSettings.ai_api_key) {
+  if (!adminSettings.ai_api_key && !aiMatch.isEnabled()) {
     console.warn('⚠ No Agent API key available — AI scoring is unavailable; deterministic title scoring will be used');
   }
 
@@ -599,7 +601,7 @@ async function fetchCareerJunctionJobs(source, query = 'software') {
  */
 async function callScoringAI(prompt, override) {
   const provider = override?.provider || adminSettings?.ai_provider;
-  const apiKey = override?.apiKey || adminSettings?.ai_api_key;
+  const apiKey = override?.apiKey || adminSettings?.ai_api_key || (aiMatch.isEnabled() ? '__shared_pool__' : null);
   if (!provider || provider === 'none' || !apiKey) return null;
   // Only reuse the admin-configured model when the request is actually using
   // the admin's provider. A seeker's own key (e.g. Google) must never inherit
@@ -634,15 +636,9 @@ async function callScoringAI(prompt, override) {
     const data = await res.json();
     return data.choices?.[0]?.message?.content || '';
   } else if (provider === 'groq') {
-    // Groq's free Llama endpoint is OpenAI-compatible — same shape, different host.
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: prompt }] })
-    });
-    if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
+    // All company Groq requests use the same pool as watched pages and apply.
+    // Explicit seeker keys stay isolated from the shared company pool.
+    return await aiMatch.completeWithAIOrThrow(prompt, override, 2000);
   } else if (provider === 'google') {
     // Mirror of aiMatch.js callGemini: thinkingBudget=0 so Gemini 2.5+
     // (incl. 3.8-flash) stops burning the output-token budget on hidden
@@ -865,7 +861,7 @@ async function scoreJobsWithClaude(jobs, userProfile, override) {
   if (jobs.length === 0) return [];
 
   const provider = override?.provider || adminSettings?.ai_provider;
-  const apiKey = override?.apiKey || adminSettings?.ai_api_key;
+  const apiKey = override?.apiKey || adminSettings?.ai_api_key || (aiMatch.isEnabled() ? '__shared_pool__' : null);
 
   // Never persist fake 0% matches. If AI is unavailable, use the strict
   // title matcher and discard unrelated jobs.

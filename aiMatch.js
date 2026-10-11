@@ -15,7 +15,7 @@
 // cache for the rest of the run — avoids re-querying Supabase for every
 // single job.
 
-const { GroqKeyPool } = require('./groqKeyPool');
+const { GroqKeyPool, groqRequestBody } = require('./groqKeyPool');
 const groqPool = new GroqKeyPool();
 let cachedSettings = null;
 
@@ -52,7 +52,7 @@ const DEFAULT_MODEL = {
   anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4o-mini',
   google: 'gemini-3.8-flash',
-  groq: 'llama-3.3-70b-versatile'
+  groq: 'openai/gpt-oss-20b'
 };
 // The model must follow the provider that is ACTUALLY being used. A seeker
 // override can be on a different provider than the shared key (e.g. the
@@ -136,7 +136,7 @@ async function chatCompletion(baseUrl, apiKey, model, messages, maxTokens) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages })
+    body: JSON.stringify(baseUrl === GROQ_BASE_URL ? groqRequestBody(model, messages, maxTokens) : { model, max_tokens: maxTokens, messages })
   });
   if (!res.ok) throw new Error(`API error (${res.status})`);
   const data = await res.json();
@@ -212,18 +212,17 @@ async function scoreWithAI(resumeText, job, override) {
 // Generic text-completion helper for the Watched Pages feature (extracting
 // job listings from raw HTML) and application field-mapping — same shape as
 // scoreWithAI: pass a resolved seeker override to use their own key.
-async function completeWithAI(prompt, override) {
+async function completeWithAIOrThrow(prompt, override, maxTokens = 2000) {
   const provider = override?.provider || cachedSettings?.ai_provider;
   const apiKey = override?.apiKey || cachedSettings?.ai_api_key || (provider === 'groq' && groqPool.hasKeys() ? '__pool__' : null);
   if (!provider || provider === 'none' || !apiKey) return null;
   const model = currentModel(provider, override);
-  try {
     if (provider === 'anthropic') {
       const Anthropic = require('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey });
       const msg = await client.messages.create({
         model,
-        max_tokens: 2000,
+        max_tokens: maxTokens,
         // Sonnet 5 adaptive-thinking is on by default; disable it so extraction
         // replies actually contain the JSON/text (not just hidden thoughts).
         thinking: { type: 'disabled' },
@@ -231,17 +230,22 @@ async function completeWithAI(prompt, override) {
       });
       return msg.content?.[0]?.text || '';
     } else if (provider === 'openai') {
-      return await chatCompletion('https://api.openai.com/v1', apiKey, model, [{ role: 'user', content: prompt }], 2000);
+      return await chatCompletion('https://api.openai.com/v1', apiKey, model, [{ role: 'user', content: prompt }], maxTokens);
     } else if (provider === 'groq') {
-      return override ? await chatCompletion(GROQ_BASE_URL, apiKey, model, [{ role: 'user', content: prompt }], 2000) : await groqPool.complete(model, [{ role: 'user', content: prompt }], 2000);
+      return override ? await chatCompletion(GROQ_BASE_URL, apiKey, model, [{ role: 'user', content: prompt }], maxTokens) : await groqPool.complete(model, [{ role: 'user', content: prompt }], maxTokens);
     } else if (provider === 'google') {
-      return await callGemini(apiKey, model, prompt, 2000);
+      return await callGemini(apiKey, model, prompt, maxTokens);
     }
     return null;
-  } catch (err) {
-    console.error(`[ai-match] completeWithAI failed (${provider}/${model}):`, err.message);
+}
+
+async function completeWithAI(prompt, override, maxTokens = 2000) {
+  try { return await completeWithAIOrThrow(prompt, override, maxTokens); }
+  catch (err) {
+    const provider = override?.provider || cachedSettings?.ai_provider;
+    console.error(`[ai-match] completeWithAI failed (${provider}/${currentModel(provider, override)}):`, err.message);
     return null;
   }
 }
 
-module.exports = { loadSettings, isEnabled, isAgentEnabled, resolveSeekerOverride, scoreWithAI, completeWithAI, agentPrompt };
+module.exports = { loadSettings, isEnabled, isAgentEnabled, resolveSeekerOverride, scoreWithAI, completeWithAI, completeWithAIOrThrow, agentPrompt };

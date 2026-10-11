@@ -376,7 +376,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
               <select id="setProvider" onchange="renderModelOptions(this.value)"><option value="none">None — Agent disabled app-wide</option>
                 <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option>
                 <option value="google">Google (Gemini)</option>
-                <option value="groq">Groq (Llama — free tier)</option></select></div>
+                <option value="groq">Groq (shared key pool)</option></select></div>
             <div class="field" id="singleKeyField"><label>API key</label>
               <div style="display:flex;gap:6px">
                 <input type="password" id="setKey" placeholder="sk-… / AIza… / AQ… / gsk_…" autocomplete="off" data-lpignore="true" data-1p-ignore style="flex:1">
@@ -393,6 +393,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           <div class="field">
             <label>Model</label>
             <select id="setModel"></select>
+            <div id="groqModelTools" class="hidden" style="margin-top:8px"><button type="button" class="btn btn-sm" id="refreshGroqModelsBtn" onclick="refreshGroqModels()">↻ Refresh Groq models</button><p id="groqModelStatus" style="color:var(--muted);font-size:12px;margin-top:6px">All ten slots use the selected model. Refresh to check live model availability.</p></div>
             <p style="color:var(--muted);font-size:12px;margin-top:6px">
               Used for match scoring and reading a user's Watched pages. Anthropic retires older snapshots
               periodically — if scoring or page-reading stops working, pick a newer model here.
@@ -1299,12 +1300,9 @@ const MODEL_OPTIONS = {
     { v:'gemini-2.0-flash', label:'Gemini 2.0 Flash' }
   ],
   groq: [
-    { v:'llama-3.3-70b-versatile', label:'Llama 3.3 70B Versatile — recommended (free)' },
-    { v:'llama-3.1-8b-instant', label:'Llama 3.1 8B Instant — fastest' },
-    { v:'qwen/qwen3.8-27b', label:'qwen/qwen3.8-27b' },
+    { v:'openai/gpt-oss-20b', label:'openai/gpt-oss-20b — recommended' },
     { v:'openai/gpt-oss-120b', label:'openai/gpt-oss-120b' },
-    { v:'openai/gpt-oss-20b', label:'openai/gpt-oss-20b' },
-    { v:'qwen/qwen3-32b', label:'qwen/qwen3-32b' }
+    { v:'qwen/qwen3.8-27b', label:'qwen/qwen3.8-27b' }
   ],
   none: []
 };
@@ -1318,8 +1316,36 @@ function readGroqSlots(){ return Array.from({length:GROQ_SLOT_COUNT},(_,i)=>clea
 function showProviderKeyFields(provider){
   $('#groqKeyVault').classList.toggle('hidden',provider!=='groq');
   $('#singleKeyField').classList.toggle('hidden',provider==='groq');
+  $('#groqModelTools').classList.toggle('hidden',provider!=='groq');
 }
 renderGroqSlots([]);
+async function refreshGroqModels(silent=false){
+  if($('#setProvider').value!=='groq')return;
+  const keys=[...new Set(readGroqSlots().filter(Boolean))];
+  const status=$('#groqModelStatus'),btn=$('#refreshGroqModelsBtn');
+  if(!keys.length){status.textContent='Add a Groq key before refreshing models.';return;}
+  const selected=$('#setModel').value;
+  btn.disabled=true;status.textContent='Checking Groq’s live model list…';
+  try{
+    let response;
+    for(const key of keys){
+      response=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+key},signal:AbortSignal.timeout(15000)});
+      if(response.ok)break;
+      if(![401,429].includes(response.status))break;
+    }
+    if(!response.ok)throw new Error('Model list request returned HTTP '+response.status);
+    const data=await response.json();
+    const models=(data.data||[]).filter(m=>m.active!==false&&!/whisper|tts|guard|orpheus|playai|embed|transcri/i.test(m.id)).map(m=>({v:m.id,label:m.id})).sort((a,b)=>a.v.localeCompare(b.v));
+    if(!models.length)throw new Error('No chat models were returned');
+    if($('#setProvider').value!=='groq')return;
+    MODEL_OPTIONS.groq=models;
+    const available=!selected||models.some(m=>m.v===selected);
+    renderModelOptions('groq',available?selected:(models.find(m=>m.v==='openai/gpt-oss-20b')||models[0]).v);
+    status.textContent=available ? models.length+' active chat models found. All slots use the selected model.' : 'The previous model is unavailable. A live model is selected below; click Save to apply it.';
+    if(!silent)toast(available?'Groq models refreshed':'Previous model unavailable — review the selection and Save',available?'ok':'err');
+  }catch(e){status.textContent='Could not refresh models: '+e.message+' — saved settings were not changed.';}
+  finally{btn.disabled=false;}
+}
 function renderModelOptions(provider, selected){
   showProviderKeyFields(provider);
   const sel = $('#setModel');
@@ -1343,6 +1369,7 @@ async function loadSettings(){
     const savedGroqKeys = Array.isArray(appSettings.ai_api_keys) ? appSettings.ai_api_keys : [];
     renderGroqSlots(savedGroqKeys.some(Boolean) ? savedGroqKeys : (appSettings.ai_provider==='groq' ? [appSettings.ai_api_key] : []));
     $('#setGroqCooldown').value = appSettings.ai_key_cooldown_seconds || 60;
+    if(appSettings.ai_provider==='groq')refreshGroqModels(true);
     $('#setAgentPrompt').value = appSettings.agent_prompt || '';
     // Time window — three shapes: normal (start<end), overnight (start>end),
     // always-on (start===end). All three are just two ints in the DB; the UI
@@ -1609,7 +1636,7 @@ async function saveSettings(){
   const key=provider==='groq' ? (keys.find(Boolean) || null) : ($('#setKey').value.trim() || null);
   const cooldown=Number($('#setGroqCooldown').value);
   if(!Number.isInteger(cooldown)||cooldown<10||cooldown>600){ toast('Cooldown must be between 10 and 600 seconds','err'); return; }
-  const model=$('#setModel').value.trim() || (provider==='groq' ? 'llama-3.3-70b-versatile' : null);
+  const model=$('#setModel').value.trim() || (provider==='groq' ? 'openai/gpt-oss-20b' : null);
   const agentPrompt=$('#setAgentPrompt').value.trim() || null;
   const btns=[$('#setSaveBtn'), $('#setPromptSaveBtn')];
   btns.forEach(b=>{ if(b){ b.disabled=true; b.textContent='Saving…'; } });
@@ -1699,7 +1726,7 @@ function renderAccounts(){
                 '<option value="anthropic">Anthropic (Claude)</option>'+
                 '<option value="openai">OpenAI (GPT)</option>'+
                 '<option value="google">Google (Gemini)</option>'+
-                '<option value="groq">Groq (Llama — free tier)</option>'+
+                '<option value="groq">Groq (shared key pool)</option>'+
               '</select>'+
             '</div>'+
             '<div class="field">'+
