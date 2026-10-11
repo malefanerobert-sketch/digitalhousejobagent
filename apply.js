@@ -1161,6 +1161,14 @@ async function runOnce() {
       .map(l => `${l.job_seeker_id}|${l.job_matches.job_url}`)
   );
 
+  // Fail closed per applicant. Even explicit Apply cannot bypass confirmed factual readiness.
+  const readinessBySeeker=new Map();
+  for(const id of seekerIds){
+    const {data,error}=await supabase.rpc('get_application_readiness',{p_seeker_id:id});
+    readinessBySeeker.set(id,!error&&data?.ready===true);
+    if(error||data?.ready!==true)console.log('[apply] Awaiting applicant information; profile not ready. No application attempted.');
+  }
+
   const titleSkips = []; // pending rows above the seeker's level: marked 'skipped' (still visible in Matches)
   const toProcess = pending.filter(m => {
     // An 'approved' row means the user pressed Apply on the Matches card — an
@@ -1170,6 +1178,7 @@ async function runOnce() {
     // worker must stop processing pending matches for it, otherwise it keeps
     // burning tokens on someone whose account has been switched off.
     if (!m.job_seekers || m.job_seekers.status !== 'active') return false;
+    if(readinessBySeeker.get(m.job_seeker_id)!==true)return false;
     const blockedCompanies = m.job_seekers?.blocked_companies || [];
     const isBlockedCompany = blockedCompanies.some(b => b.toLowerCase() === (m.company_name || '').toLowerCase());
     if (isBlockedCompany) return false;
