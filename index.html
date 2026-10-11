@@ -565,7 +565,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 
       <!-- APPLICATIONS -->
       <section id="view-applications" class="hidden">
-        <div class="card"><h3>Applied jobs</h3><div id="appList"></div></div>
+        <div class="card"><h3>Application history</h3><div id="appList"></div></div>
       </section>
 
       <!-- DOCUMENTS -->
@@ -985,7 +985,7 @@ function fmtStamp(iso){
 function matchDisplayTime(m){
   if(m.status==='applied' && Array.isArray(applications)){
     const rows = applications
-      .filter(a => a.job_match_id === m.id && !ATTENTION_RESULTS.includes(a.result))
+      .filter(a => a.job_match_id === m.id && isConfirmedApplication(a))
       .sort((x,y)=> new Date(y.attempted_at) - new Date(x.attempted_at));
     if(rows.length && rows[0].attempted_at) return rows[0].attempted_at;
   }
@@ -1180,7 +1180,7 @@ async function refreshAll(){
 
 /* ================= VIEWS / NAV ================= */
 const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Matched jobs','Jobs your agent has discovered for you'],
-  applications:['Applied jobs','Jobs your agent has applied to for you'],
+  applications:['Application history','Confirmed submissions and attempts needing review'],
   docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
   help:['Contact us','Send a message to the JobAgent team']};
@@ -1691,7 +1691,7 @@ function isBlocked(kind,val){
 function renderDashboard(){
   // "Matches" is the agent's own pipeline (discovered, queued, applied).
   // "Applications sent" counts the jobs the agent has actually applied to.
-  const appliedCount = applications.filter(a=>!ATTENTION_RESULTS.includes(a.result)).length;
+  const appliedCount = applications.filter(isConfirmedApplication).length;
   $$('.nav-badge-sync').forEach(b=>{ b.textContent=matches.length; b.classList.toggle('hidden',matches.length===0); });
   $('#stNew').textContent=matches.length;
   $('#stApps').textContent=appliedCount;
@@ -2144,6 +2144,15 @@ async function loadApplications(){
 }
 
 const ATTENTION_RESULTS = ['failed','captcha_blocked','needs_manual_action','submission_unverified'];
+function isConfirmedApplication(a){
+  if(a.result!=='success')return false;
+  if(a.verification_status==='user_confirmed')return true;
+  if(a.verification_status!=='confirmed'||!a.confirmation_text)return false;
+  try{if(/(^|\.)adzuna\.[a-z.]+$/i.test(new URL(a.confirmation_url).hostname))return false;}catch(_){return false;}
+  const lines=String(a.confirmation_text).split(/\n+|(?<=[.!?])\s+/);
+  return lines.some(t=>! /\b(?:must|should|required|please|before|prior to|after|once|if|when|until|click|need to|will be|can be|may be|how to)\b/i.test(t)&&/\byour application\s+(?:(?:has been|was|is)\s+)?(?:successfully\s+)?(?:submitted|received)\b|\b(?:we have|we've|we)\s+(?:successfully\s+)?received\s+your application\b|\byou (?:have )?successfully applied\b|\b(?:thank you|thanks) for (?:applying|submitting your application)\b|\bapplication (?:successfully submitted|submission successful)\b/i.test(t));
+}
+
 const ATTENTION_META = {
   failed: {icon:'⚠️', label:'Application failed'},
   captcha_blocked: {icon:'🔒', label:'Blocked by a CAPTCHA'},
@@ -2154,25 +2163,16 @@ const ATTENTION_META = {
 // Windows/Chrome font setups (same class of bug as the earlier 🪪 ID icon).
 const TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
 
-function renderApplications(){
-  const applied = applications.filter(a=>!ATTENTION_RESULTS.includes(a.result));
-
-  const el=$('#appList');
-  el.innerHTML = !applied.length
-    ? '<div class="empty"><div class="big">📮</div>No applications yet. Approve a match and your agent will send it off.</div>'
-    : applied.map(a=>{
-        const confirmed = a.verification_status === 'confirmed';
-        const manual = a.verification_status === 'user_confirmed';
-        const pillClass = 'green';
-        const pillText = confirmed ? '✓ Confirmed' : (manual ? '✓ Applied by you' : 'Success');
-        return '<div class="lrow">'+
-          '<div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div>'+
-          '<div class="sub2" style="margin-top:4px">Submitted · '+esc(fmtStamp(a.attempted_at))+'</div></div>'+
-          '<span class="pill '+pillClass+'">'+esc(pillText)+'</span>'+
-          (a.job_matches ? '<button class="btn btn-ghost btn-xs" data-view-job="'+a.id+'">View</button>' : '')+
-          '<button class="btn btn-ghost btn-xs" data-del-app="'+a.id+'" title="Delete this record">'+TRASH_ICON+'</button>'+
-          '</div>';
-      }).join('');
+function renderApplications(showAll=false){
+  const applied=applications.filter(isConfirmedApplication);
+  const issues=applications.filter(a=>!isConfirmedApplication(a)).sort((a,b)=>new Date(b.attempted_at)-new Date(a.attempted_at));
+  const row=(a,confirmed)=>{
+    const unsupported=a.result==='success'&&!confirmed;
+    const label=confirmed?(a.verification_status==='user_confirmed'?'✓ Applied by you':'✓ Confirmed receipt'):(unsupported?'❔ Previous success needs review':(ATTENTION_META[a.result]?.label||'Needs review'));
+    const note=unsupported?'The stored text does not prove submission to the employer. Do not automatically resubmit this job.':(a.notes||'No outcome details were recorded.');
+    return '<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2" style="margin-top:4px">'+(confirmed?'Submitted':'Attempted')+' · '+esc(fmtStamp(a.attempted_at))+'</div>'+(!confirmed?'<div class="sub2" style="margin-top:6px;white-space:pre-wrap">'+esc(note.slice(0,700))+'</div>':'')+'</div><span class="pill '+(confirmed?'green':'orange')+'">'+esc(label)+'</span>'+(a.job_matches?'<button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button>':'')+'<button class="btn btn-ghost btn-xs" data-view-application="'+esc(a.id)+'">Evidence</button></div>';
+  };
+  $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Only genuine employer receipts or your own confirmation count as Applied. An uncertain attempt is not retried automatically.</p><h4 style="margin:16px 0 8px">Confirmed applications ('+applied.length+')</h4>'+(applied.length?applied.map(a=>row(a,true)).join(''):'<div class="empty">No verified application receipts yet.</div>')+'<h4 style="margin:20px 0 8px">Attempts needing review ('+issues.length+')</h4>'+(issues.length?issues.slice(0,showAll?issues.length:20).map(a=>row(a,false)).join(''):'<p class="sub2">No blocked or uncertain attempts.</p>')+(!showAll&&issues.length>20?'<button class="btn btn-ghost" style="margin-top:12px" onclick="renderApplications(true)">Show all attempt records</button>':'');
 }
 
 function applicationDetails(id){
@@ -2181,8 +2181,8 @@ function applicationDetails(id){
   // The user-facing "View" now shows job information only (no proof block,
   // no "historical record — proof unavailable" fallback). Route any legacy
   // caller to the same in-app job viewer the Matches tab uses.
-  if (a.job_matches) { openJobView(a.job_matches); return; }
-  const confirmed = a.verification_status === 'confirmed';
+
+  const confirmed = isConfirmedApplication(a) && a.verification_status === 'confirmed';
   const manual = a.verification_status === 'user_confirmed';
   const fields = Array.isArray(a.submitted_fields) ? a.submitted_fields : [];
   const receipt = a.confirmation_text || '';

@@ -23,6 +23,8 @@ const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
 const jobFit = require('./jobFit');
 const captchaSolver = require('./captchaSolver');
+const applicationFlow = require('./applicationFlow');
+console.log('[apply] application flow v2 loaded: employer navigation, strict receipts, overlap guard');
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -61,21 +63,18 @@ function cleanupTemp(tempPath) {
 }
 
 async function logResult(match, result, notes, evidence = {}) {
-  await supabase.from('application_log').insert({
-    job_match_id: match.id,
-    job_seeker_id: match.job_seeker_id,
-    result,
-    notes,
-    verification_status: evidence.verification_status || null,
-    submitted_fields: evidence.submitted_fields || [],
-    confirmation_text: evidence.confirmation_text || null,
-    confirmation_reference: evidence.confirmation_reference || null,
-    confirmation_url: evidence.confirmation_url || null,
-    confirmation_screenshot_url: evidence.confirmation_screenshot_url || null
+  const { error: logError } = await supabase.from('application_log').insert({
+    job_match_id:match.id,job_seeker_id:match.job_seeker_id,result,notes,
+    verification_status:evidence.verification_status||null,
+    submitted_fields:evidence.submitted_fields||[],confirmation_text:evidence.confirmation_text||null,
+    confirmation_reference:evidence.confirmation_reference||null,confirmation_url:evidence.confirmation_url||null,
+    confirmation_screenshot_url:evidence.confirmation_screenshot_url||null
   });
-  await supabase.from('job_matches')
-    .update({ status: result === 'success' ? 'applied' : result, decided_at: new Date().toISOString() })
-    .eq('id', match.id);
+  if(logError)throw new Error('Could not record application outcome: '+logError.message);
+  const { error: statusError } = await supabase.from('job_matches').update({
+    status:result==='success'?'applied':result,decided_at:new Date().toISOString()
+  }).eq('id',match.id);
+  if(statusError)throw new Error('Outcome recorded but match status was not updated: '+statusError.message);
 }
 
 // A completed form is not proof of an application. Capture the values that
@@ -112,10 +111,7 @@ async function snapshotSubmittedFields(page) {
   }).catch(() => []);
 }
 
-function findConfirmationText(bodyText) {
-  const lines = String(bodyText || '').split(/\n+/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
-  return lines.find(line => /thank you|application.{0,80}(submitted|received|complete)|we.{0,12}(received|have received).{0,80}application|submission.{0,40}(complete|successful)/i.test(line)) || null;
-}
+function findConfirmationText(bodyText) { return applicationFlow.findConfirmationText(bodyText); }
 
 // Pull a reference / tracking number out of a confirmation page. Finds a
 // keyword (application / reference / submission / tracking), then returns the
@@ -125,19 +121,8 @@ function findConfirmationText(bodyText) {
 // real reference is shown. (The previous inline regex captured the literal
 // word "reference" because its case-insensitive [A-Z0-9] also matched letters.)
 function extractReference(bodyText) {
-  const text = String(bodyText || '');
-  const re = /(?:application|reference|submission|tracking)[^\n]{0,40}/ig;
-  let m;
-  // Scan EVERY keyword occurrence, not just the first — on a real confirmation
-  // page the word "application" usually appears earlier (e.g. "your application
-  // has been received") than the line that actually carries the reference code.
-  while ((m = re.exec(text))) {
-    const codes = m[0].match(/[A-Z0-9][A-Z0-9-]{3,}/gi) || [];
-    for (const c of codes) {
-      if (/\d/.test(c) && !/^(number|reference|application|submission|tracking)$/i.test(c)) return c;
-    }
-  }
-  return null;
+  const m=String(bodyText||'').match(/(?:confirmation|reference|tracking|application)\s*(?:id|number|no\.?|reference)\s*[:#]\s*([A-Z0-9][A-Z0-9-]{3,})/i);
+  return m&&/\d/.test(m[1])?m[1]:null;
 }
 
 async function storeConfirmationScreenshot(page, match, seeker) {
@@ -160,40 +145,29 @@ async function storeConfirmationScreenshot(page, match, seeker) {
   }
 }
 
-async function verifySubmission(page, match, seeker, submittedFields) {
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(1200).catch(() => {});
-  const bodyText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 12000)).catch(() => '');
-  const confirmationText = findConfirmationText(bodyText);
-  const confirmationReference = extractReference(bodyText);
-  const evidence = {
-    submitted_fields: submittedFields || [],
-    confirmation_text: confirmationText,
-    confirmation_reference: confirmationReference,
-    confirmation_url: page.url()
-  };
-
-  if (!confirmationText) {
-    return {
-      ok: false,
-      unverified: true,
-      reason: 'The agent clicked Submit, but this site did not show a confirmation receipt. It is not marked as applied.',
-      evidence: { ...evidence, verification_status: 'unverified' }
-    };
-  }
-
-  evidence.confirmation_screenshot_url = await storeConfirmationScreenshot(page, match, seeker);
-  evidence.verification_status = 'confirmed';
-  return { ok: true, evidence };
+async function verifySubmission(page, match, seeker, submittedFields, before) {
+  const proof=await applicationFlow.waitForReceipt(page,before);
+  const evidence={submitted_fields:submittedFields||[],confirmation_text:proof.ok?proof.receipt:null,
+    confirmation_reference:proof.ok?extractReference(proof.text):null,confirmation_url:proof.url,
+    verification_status:proof.ok?'confirmed':'unverified'};
+  if(!proof.ok)return {ok:false,unverified:true,reason:proof.reason,evidence};
+  evidence.confirmation_screenshot_url=await storeConfirmationScreenshot(page,match,seeker);
+  return {ok:true,evidence};
 }
 
 async function submitAndVerify(page, submitBtn, missingFields, match, seeker, earlierFields = []) {
-  const submittedFields = [...earlierFields, ...(await snapshotSubmittedFields(page))];
-  await humanDelay();
-  await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
-  await submitBtn.click().catch(() => {});
-  const verification = await verifySubmission(page, match, seeker, submittedFields);
-  return { ...verification, missingFields };
+  if(applicationFlow.isAggregatorUrl(page.url()))return {ok:false,reason:'Still on a job-board advert, not an employer application form. No submission attempted.'};
+  const missing=await applicationFlow.requiredErrors(page);
+  if(missing.length)return {ok:false,safeToFill:true,missingFields:missing,reason:'Required application fields are missing or invalid: '+missing.join(', ')};
+  const before=await applicationFlow.snapshotReceiptPage(page);
+  const submittedFields=[...earlierFields,...(await snapshotSubmittedFields(page))];
+  try {
+    await humanDelay();
+    page=await applicationFlow.clickAndFollow(page,submitBtn);
+  } catch(err) {
+    return {ok:false,unverified:true,reason:'Submission click did not complete reliably: '+applicationFlow.actionableError(err),evidence:{submitted_fields:submittedFields,verification_status:'unverified',confirmation_url:page.url()}};
+  }
+  return verifySubmission(page,match,seeker,submittedFields,before);
 }
 
 async function detectCaptcha(page) {
@@ -239,26 +213,7 @@ async function getFieldLabel(page, field) {
 // authorization, LinkedIn URL, a custom question). We still submit with
 // what we have, but we scan for required fields left empty so the result
 // can tell the user exactly what that site still needs from them.
-async function findMissingRequiredFields(page, filledFields) {
-  const filled = new Set((filledFields || []).filter(Boolean));
-  const missing = [];
-  try {
-    const fields = await page.$$(
-      'input[required], select[required], textarea[required], ' +
-      '[aria-required="true"]'
-    );
-    for (const field of fields) {
-      if (filled.has(field)) continue;
-      const type = (await field.getAttribute('type')) || '';
-      if (['file', 'hidden', 'submit', 'checkbox', 'radio', 'button'].includes(type)) continue;
-      let value = '';
-      try { value = await field.inputValue(); } catch (_) { /* not a value-bearing element */ }
-      if (value && value.trim().length > 0) continue;
-      missing.push(await getFieldLabel(page, field));
-    }
-  } catch (_) { /* best effort — never let this block a real submission */ }
-  return missing;
-}
+async function findMissingRequiredFields(page, filledFields) { return applicationFlow.requiredErrors(page); }
 
 function missingFieldsNote(missingFields) {
   if (!missingFields || missingFields.length === 0) return '';
@@ -566,38 +521,7 @@ async function attemptAdminLogin(page, watched) {
 // each one is for, however it's labelled. Tags each element with a
 // data-agent-idx attribute so the mapping AI returns can be matched back to
 // a real element afterwards.
-async function extractFormFields(page) {
-  return await page.evaluate(() => {
-    const els = Array.from(document.querySelectorAll('input, select, textarea'));
-    return els.map((el, i) => {
-      el.setAttribute('data-agent-idx', String(i));
-      let label = '';
-      if (el.id) {
-        const l = document.querySelector(`label[for="${el.id}"]`);
-        if (l) label = l.textContent.trim();
-      }
-      if (!label) {
-        const parentLabel = el.closest('label');
-        if (parentLabel) label = parentLabel.textContent.trim();
-      }
-      const options = el.tagName === 'SELECT'
-        ? Array.from(el.options).slice(0, 40).map(o => o.textContent.trim() || o.value)
-        : undefined;
-      return {
-        idx: i,
-        tag: el.tagName.toLowerCase(),
-        type: el.type || null,
-        name: el.name || null,
-        id: el.id || null,
-        placeholder: el.placeholder || null,
-        ariaLabel: el.getAttribute('aria-label') || null,
-        label: label || null,
-        required: !!(el.required || el.getAttribute('aria-required') === 'true'),
-        options
-      };
-    }).filter(f => !['hidden', 'submit', 'button', 'image', 'password'].includes(f.type));
-  });
-}
+async function extractFormFields(page) { return applicationFlow.applicationFields(page); }
 
 function buildFieldMappingPrompt(fields, seeker, documentsByType) {
   // Full profile — soft fields included so the agent can compose short answers
@@ -681,10 +605,10 @@ ${canAutofillSoft ? `
 Rules for SOFT / SUBJECTIVE questions — you MAY compose short, authentic-sounding answers from the profile when the field asks for one and the direct answer isn't on the profile:
 - "Tell us about yourself" / short bio → use the "bio" field verbatim if present; otherwise write 2-3 sentences synthesised from job_titles, current_position, years_experience, skills, highest_qualification. First person, warm but professional.
 - "Why this role?" / motivation / cover-letter-style prompt → 3-5 sentences tying the candidate's job_titles / skills / current_position to what the role obviously needs. Do not name the company unless it's referenced elsewhere in the form fields. Never claim specific past achievements the profile doesn't list.
-- "Can you work under pressure?" / "Do you handle stress well?" → use pressure_ok if set (true → "Yes"); if not set, answer "Yes" with a brief one-line reason drawn from current_position / years_experience.
-- "Are you a team player?" / "Do you work well in a team?" → use team_player if set (true → "Yes"); otherwise "Yes" with a one-line reason.
+- "Can you work under pressure?" / "Do you handle stress well?" → use pressure_ok if set (true → "Yes"); if not set, omit the field rather than invent an answer.
+- "Are you a team player?" / "Do you work well in a team?" → use team_player if set (true → "Yes"); otherwise omit the field.
 - Hobbies / interests → use "hobbies" verbatim if present; otherwise omit rather than invent.
-- "When can you start?" → use available_from if set, otherwise notice_period_days ("Available in <N> days"); otherwise "Immediately" only if notice_period_days is 0 or null.
+- "When can you start?" → use available_from if set, otherwise notice_period_days ("Available in <N> days"); otherwise "Immediately" only if notice_period_days is explicitly 0; otherwise omit the field.
 - "Willing to relocate?" / "Own transport?" / "Driver's licence?" → answer from the corresponding profile fields.
 
 For a soft answer you compose: keep it concise (a short paragraph max for open textareas, one sentence for short-answer inputs), first person, plain language, no clichés like "team player" or "hard worker", no fabricated numbers, no fabricated employer / project / school names.
@@ -697,26 +621,18 @@ Reply with ONLY a JSON array, no other text. If nothing on this page is fillable
 }
 
 async function fillFieldsWithAI(page, fields, mapping) {
-  const filledEls = [];
-  for (const m of mapping) {
-    if (!m || typeof m.idx !== 'number') continue;
-    const field = fields.find(f => f.idx === m.idx);
-    if (!field) continue;
-    const el = await page.$(`[data-agent-idx="${m.idx}"]`);
-    if (!el) continue;
+  const filledEls=[];
+  for(const m of mapping) {
+    if(!m||typeof m.idx!=='number')continue;
+    const field=fields.find(f=>f.idx===m.idx);if(!field)continue;
+    const el=await firstFieldAcrossFrames(page,`[data-agent-idx="${m.idx}"]`);if(!el)continue;
     try {
-      if (m.action === 'select') {
-        await el.selectOption({ label: String(m.value) }).catch(() => el.selectOption(String(m.value)).catch(() => {}));
-      } else if (m.action === 'check') {
-        if (m.value) await el.check().catch(() => {});
-      } else if (m.action === 'fill' && field.tag !== 'select') {
-        await el.fill(String(m.value ?? '')).catch(() => {});
-      } else {
-        continue;
-      }
-      filledEls.push(el);
-      await humanDelay();
-    } catch (_) { /* best effort — one bad field shouldn't sink the whole application */ }
+      if(m.action==='select')await el.selectOption({label:String(m.value)}).catch(()=>el.selectOption(String(m.value)));
+      else if(m.action==='check'&&m.value===true)await el.check();
+      else if(m.action==='fill'&&field.tag!=='select'&&!['radio','checkbox','file','password'].includes(field.type))await el.fill(String(m.value??''));
+      else continue;
+      filledEls.push(el);await humanDelay();
+    } catch(err){console.warn('[apply] could not fill application field '+(field.label||field.name||field.idx)+': '+applicationFlow.actionableError(err));}
   }
   return filledEls;
 }
@@ -736,70 +652,19 @@ async function fillFieldsWithAI(page, fields, mapping) {
 // Submit) — the loop below re-scans the page after every click and keeps
 // going as long as there's still something to fill or click, up to
 // MAX_FORM_STEPS pages, rather than stopping after a single pass.
-async function findApplyEntryPoint(page) {
-  return await page.$(
-    'a:has-text("Apply now"), a:has-text("Apply Now"), a:has-text("Apply"), ' +
-    'button:has-text("Apply now"), button:has-text("Apply Now"), button:has-text("Apply"), ' +
-    'a:has-text("Start application"), button:has-text("Start application"), ' +
-    'a:has-text("Start Application"), button:has-text("Start Application")'
-  );
-}
+async function findApplyEntryPoint(page) { return applicationFlow.findApplyEntryPoint(page); }
 
 // Decides what to click to move forward on the current step. A Next/
 // Continue button means there's more of the form still to come (loop
 // again after clicking); a Submit/Apply/Send button means this is the last
 // step (return success after clicking it).
-async function findStepButton(page) {
-  const nextBtn = await page.$(
-    'button:has-text("Next"), a:has-text("Next"), button:has-text("Continue"), a:has-text("Continue"), ' +
-    'button:has-text("Proceed"), a:has-text("Proceed"), button:has-text("Continue application"), ' +
-    '[role="button"]:has-text("Next"), [role="button"]:has-text("Continue")'
-  );
-  if (nextBtn) return { el: nextBtn, isFinal: false };
-  const submitBtn = await page.$(
-    'button[type="submit"], input[type="submit"], ' +
-    // input[type="button"] carrying an apply/submit-like value is a common
-    // hand-rolled submit control that the previous selector missed entirely.
-    'input[type="button"][value*="Submit" i], input[type="button"][value*="Apply" i], ' +
-    'input[type="button"][value*="Send" i], input[type="button"][value*="Finish" i], ' +
-    // A <button> inside a <form> with NO type attribute is an IMPLICIT
-    // submit button per the HTML spec — the selector above only matched an
-    // explicit type="submit", so plenty of real forms (anything hand-rolled
-    // or built without setting type= on its button) were silently invisible
-    // to this function, surfacing as "couldn't find a Next or Submit
-    // button" even though a perfectly normal submit button was right there.
-    // Back/Previous/Cancel buttons are excluded so a multi-step form's
-    // "back" control (also often untyped) doesn't get misidentified as the
-    // final submit action.
-    'form button:not([type="button"]):not([type="reset"]):not(:has-text("Back")):not(:has-text("Previous")):not(:has-text("Cancel")), ' +
-    'button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send"), ' +
-    'button:has-text("Finish"), button:has-text("Complete"), button:has-text("Confirm"), ' +
-    'button:has-text("Save and continue"), button:has-text("Review application"), ' +
-    // Match on accessibility labels too — icon-only or styled buttons often
-    // carry their meaning in aria-label rather than visible text.
-    '[role="button"]:has-text("Submit"), [role="button"]:has-text("Apply"), ' +
-    '[aria-label*="Submit" i], [aria-label*="Apply" i], ' +
-    'a:has-text("Submit application"), a:has-text("Submit Application")'
-  );
-  if (submitBtn) {
-    // Styled/custom buttons are often off-screen until scrolled to; make sure
-    // the element is in view so the subsequent click actually lands.
-    await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
-    return { el: submitBtn, isFinal: true };
-  }
-  return null;
-}
+async function findStepButton(page) { return applicationFlow.findStepButton(page); }
 
-// Loose-selector guess used within a single step of the loop below, when AI
-// mapping isn't configured or comes back empty for that particular page —
-// fills what it can find rather than aborting the whole multi-step flow
-// over one page's worth of trouble. Only fills; the loop itself decides
-// what to click next.
 async function fillGenericStep(page, seeker) {
-  const nameField = await page.$('input[name*="name" i]:not([name*="user" i]):not([type="email"]), input[id*="name" i]:not([id*="user" i]), input[placeholder*="full name" i], input[placeholder*="your name" i]');
-  const emailField = await page.$('input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]');
-  const phoneField = await page.$('input[type="tel"], input[name*="phone" i], input[id*="phone" i], input[placeholder*="phone" i]');
-  const resumeInput = await page.$('input[type="file"]');
+  const nameField = await firstFieldAcrossFrames(page, 'input[name*="name" i]:not([name*="user" i]):not([type="email"]), input[id*="name" i]:not([id*="user" i]), input[placeholder*="full name" i], input[placeholder*="your name" i]');
+  const emailField = await firstFieldAcrossFrames(page, 'input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]');
+  const phoneField = await firstFieldAcrossFrames(page, 'input[type="tel"], input[name*="phone" i], input[id*="phone" i], input[placeholder*="phone" i]');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"]');
 
   if (!nameField && !emailField && !resumeInput) {
     return { ok: false, reason: 'could not find recognizable name/email/resume fields on this step', filledEls: [] };
@@ -822,10 +687,10 @@ async function fillGenericStep(page, seeker) {
 async function applyOnGreenhouse(page, seeker, match) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
-  const firstName = await page.$('#first_name, input[name="job_application[first_name]"]');
-  const lastName = await page.$('#last_name, input[name="job_application[last_name]"]');
-  const email = await page.$('#email, input[name="job_application[email]"]');
-  const resumeInput = await page.$('input[type="file"]');
+  const firstName = await firstFieldAcrossFrames(page, '#first_name, input[name="job_application[first_name]"]');
+  const lastName = await firstFieldAcrossFrames(page, '#last_name, input[name="job_application[last_name]"]');
+  const email = await firstFieldAcrossFrames(page, '#email, input[name="job_application[email]"]');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"]');
 
   if (!firstName || !lastName || !email) {
     return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
@@ -847,7 +712,9 @@ async function applyOnGreenhouse(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
+  const stepBtn=await findStepButton(page);
+  if(stepBtn&&!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn?.el;
   if (!submitBtn) {
     return { ok: false, reason: 'Could not find a submit button on this form.' };
   }
@@ -862,9 +729,9 @@ async function applyOnGreenhouse(page, seeker, match) {
 async function applyOnLever(page, seeker, match) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
-  const nameField = await page.$('input[name="name"]');
-  const emailField = await page.$('input[name="email"]');
-  const resumeInput = await page.$('input[type="file"][name="resume"], input[type="file"]');
+  const nameField = await firstFieldAcrossFrames(page, 'input[name="name"]');
+  const emailField = await firstFieldAcrossFrames(page, 'input[name="email"]');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"][name="resume"], input[type="file"]');
 
   if (!nameField || !emailField) {
     return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
@@ -875,7 +742,7 @@ async function applyOnLever(page, seeker, match) {
   await emailField.fill(seeker.dedicated_email || '');
   await humanDelay();
 
-  const phoneField = await page.$('input[name="phone"]');
+  const phoneField = await firstFieldAcrossFrames(page, 'input[name="phone"]');
   if (phoneField && seeker.phone) {
     await phoneField.fill(seeker.phone);
     await humanDelay();
@@ -887,7 +754,9 @@ async function applyOnLever(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$('button[type="submit"]');
+  const stepBtn=await findStepButton(page);
+  if(stepBtn&&!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn?.el;
   if (!submitBtn) {
     return { ok: false, reason: 'Could not find a submit button on this form.' };
   }
@@ -902,10 +771,10 @@ async function applyOnLever(page, seeker, match) {
 async function applyOnSmartRecruiters(page, seeker, match) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
-  const firstName = await page.$('input[name="firstName"], #firstName');
-  const lastName = await page.$('input[name="lastName"], #lastName');
-  const email = await page.$('input[name="email"], #email');
-  const resumeInput = await page.$('input[type="file"]');
+  const firstName = await firstFieldAcrossFrames(page, 'input[name="firstName"], #firstName');
+  const lastName = await firstFieldAcrossFrames(page, 'input[name="lastName"], #lastName');
+  const email = await firstFieldAcrossFrames(page, 'input[name="email"], #email');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"]');
 
   if (!firstName || !lastName || !email) {
     return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
@@ -921,7 +790,7 @@ async function applyOnSmartRecruiters(page, seeker, match) {
   await email.fill(seeker.dedicated_email || '');
   await humanDelay();
 
-  const phoneField = await page.$('input[name="phoneNumber"], input[name="phone"]');
+  const phoneField = await firstFieldAcrossFrames(page, 'input[name="phoneNumber"], input[name="phone"]');
   if (phoneField && seeker.phone) {
     await phoneField.fill(seeker.phone);
     await humanDelay();
@@ -933,7 +802,9 @@ async function applyOnSmartRecruiters(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$('button[type="submit"]');
+  const stepBtn=await findStepButton(page);
+  if(stepBtn&&!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn?.el;
   if (!submitBtn) {
     return { ok: false, reason: 'Could not find a submit button on this form.' };
   }
@@ -948,9 +819,9 @@ async function applyOnSmartRecruiters(page, seeker, match) {
 async function applyOnAshby(page, seeker, match) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
-  const nameField = await page.$('input[name*="name" i], input[id*="name" i]');
-  const emailField = await page.$('input[type="email"], input[name*="email" i]');
-  const resumeInput = await page.$('input[type="file"]');
+  const nameField = await firstFieldAcrossFrames(page, 'input[name*="name" i], input[id*="name" i]');
+  const emailField = await firstFieldAcrossFrames(page, 'input[type="email"], input[name*="email" i]');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"]');
 
   if (!nameField || !emailField) {
     return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
@@ -967,7 +838,9 @@ async function applyOnAshby(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$('button[type="submit"]');
+  const stepBtn=await findStepButton(page);
+  if(stepBtn&&!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn?.el;
   if (!submitBtn) {
     return { ok: false, reason: 'Could not find a submit button on this form.' };
   }
@@ -982,11 +855,11 @@ async function applyOnAshby(page, seeker, match) {
 async function applyOnWorkable(page, seeker, match) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
-  const fullNameField = await page.$('input[name="candidate[name]"]');
-  const firstName = await page.$('input[name="candidate[firstname]"]');
-  const lastName = await page.$('input[name="candidate[lastname]"]');
-  const emailField = await page.$('input[name="candidate[email]"], input[type="email"]');
-  const resumeInput = await page.$('input[type="file"]');
+  const fullNameField = await firstFieldAcrossFrames(page, 'input[name="candidate[name]"]');
+  const firstName = await firstFieldAcrossFrames(page, 'input[name="candidate[firstname]"]');
+  const lastName = await firstFieldAcrossFrames(page, 'input[name="candidate[lastname]"]');
+  const emailField = await firstFieldAcrossFrames(page, 'input[name="candidate[email]"], input[type="email"]');
+  const resumeInput = await firstFieldAcrossFrames(page, 'input[type="file"]');
 
   if (!emailField || (!fullNameField && (!firstName || !lastName))) {
     return { ok: false, reason: 'Could not find standard name/email fields — form layout may differ from expected.' };
@@ -1013,7 +886,9 @@ async function applyOnWorkable(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await page.$('button[type="submit"]');
+  const stepBtn=await findStepButton(page);
+  if(stepBtn&&!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn?.el;
   if (!submitBtn) {
     return { ok: false, reason: 'Could not find a submit button on this form.' };
   }
@@ -1030,30 +905,14 @@ async function applyOnWorkable(page, seeker, match) {
 // First matching element for `selector` anywhere in the document — main frame
 // first, then child iframes. Some ATS forms live inside an iframe (Pinpoint,
 // BambooHR, JazzHR), so a main-page-only lookup always fails for those.
-async function firstFieldAcrossFrames(page, selector) {
-  const main = await page.$(selector).catch(() => null);
-  if (main) return main;
-  for (const frame of page.frames()) {
-    if (frame === page.mainFrame()) continue;
-    try {
-      const el = await frame.$(selector);
-      if (el) return el;
-    } catch (_) { /* cross-frame lookup failures are fine */ }
-  }
-  return null;
-}
+async function firstFieldAcrossFrames(page, selector) { return applicationFlow.firstUsableAcrossFrames(page,selector); }
 
 // Clicks an element only if it is actually visible, scrolling it into view
 // first. Hidden duplicate buttons (mobile copies, overlays) are never clicked.
 async function clickVisible(el) {
-  if (!el) return false;
-  try {
-    const visible = await el.isVisible().catch(() => false);
-    if (!visible) return false;
-    await el.scrollIntoViewIfNeeded().catch(() => {});
-    await el.click({ timeout: 8000 }).catch(() => {});
-    return true;
-  } catch (_) { return false; }
+  if(!await applicationFlow.usable(el))return false;
+  try {await el.scrollIntoViewIfNeeded();await el.click({timeout:8000});return true;}
+  catch(_){return false;}
 }
 
 // Closes the common cookie/consent banners and overlays that otherwise sit on
@@ -1096,15 +955,16 @@ async function applyOnSimpleAts(page, seeker, match) {
   // clicking their "Apply" button. Click a visible one, then re-scan.
   if ((!fullName && (!firstName || !lastName)) || !email) {
     const entry = await findApplyEntryPoint(page);
-    if (entry && await clickVisible(entry)) {
+    if (entry) {
+      page=await applicationFlow.clickAndFollow(page,entry);
       await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
       await page.waitForTimeout(800).catch(() => {});
-      fullName = fullName || await firstFieldAcrossFrames(page, NAME_SEL);
-      firstName = firstName || await firstFieldAcrossFrames(page, FIRST_SEL);
-      lastName = lastName || await firstFieldAcrossFrames(page, LAST_SEL);
-      email = email || await firstFieldAcrossFrames(page, EMAIL_SEL);
-      phone = phone || await firstFieldAcrossFrames(page, PHONE_SEL);
-      resumeInput = resumeInput || await firstFieldAcrossFrames(page, RESUME_SEL);
+      fullName = await firstFieldAcrossFrames(page, NAME_SEL);
+      firstName = await firstFieldAcrossFrames(page, FIRST_SEL);
+      lastName = await firstFieldAcrossFrames(page, LAST_SEL);
+      email = await firstFieldAcrossFrames(page, EMAIL_SEL);
+      phone = await firstFieldAcrossFrames(page, PHONE_SEL);
+      resumeInput = await firstFieldAcrossFrames(page, RESUME_SEL);
     }
   }
 
@@ -1134,9 +994,10 @@ async function applyOnSimpleAts(page, seeker, match) {
   const captchaBlock = await handleCaptcha(page);
   if (captchaBlock) return captchaBlock;
 
-  const submitBtn = await firstFieldAcrossFrames(page,
-    'button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")');
-  if (!submitBtn) return { ok: false, reason: "Could not find a submit button on this form." };
+  const stepBtn=await findStepButton(page);
+  if(!stepBtn)return {ok:false,reason:'Could not find a usable application Next or Submit button.'};
+  if(!stepBtn.isFinal)return applyAI(page,seeker,match);
+  const submitBtn=stepBtn.el;
 
   const missingFields = await findMissingRequiredFields(page, [fullName, firstName, lastName, email, phone, resumeInput]);
   return submitAndVerify(page, submitBtn, missingFields, match, seeker);
@@ -1161,11 +1022,13 @@ async function applyAI(page, seeker, match) {
   const documentsByType = await loadSeekerDocuments(seeker);
 
   for (let step = 0; step < MAX_FORM_STEPS; step++) {
-    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForLoadState('networkidle', {timeout:8000}).catch(() => {});
 
     const captchaBlock = await handleCaptcha(page);
     if (captchaBlock) return captchaBlock;
 
+    const barrier=await applicationFlow.loginBarrier(page);
+    if(barrier)return {ok:false,reason:barrier};
     const fields = await extractFormFields(page);
 
     if (!fields.length) {
@@ -1180,12 +1043,13 @@ async function applyAI(page, seeker, match) {
             : `Got ${step} step(s) into this application, then reached a page with no form and no "Apply" button to continue — needs a human to finish.`
         };
       }
-      if (!(await clickVisible(entry))) {
+      if (!await applicationFlow.usable(entry)) {
         return {
           ok: false,
           reason: 'Found an "Apply" button but it was not visible/clickable — the form may be behind a modal, overlay, or a hidden duplicate control.'
         };
       }
+      page=await applicationFlow.clickAndFollow(page,entry);
       await humanDelay();
       continue; // re-scan whatever we land on next
     }
@@ -1214,7 +1078,7 @@ async function applyAI(page, seeker, match) {
       // ask for them.
       const fileFieldMaps = mapping.filter(m => m && m.action === 'file');
       for (const fileMap of fileFieldMaps) {
-        const fileEl = await page.$(`[data-agent-idx="${fileMap.idx}"]`);
+        const fileEl = await firstFieldAcrossFrames(page,`[data-agent-idx="${fileMap.idx}"]`);
         const attachResult = await attachDocument(fileEl, seeker, fileMap.docType, documentsByType);
         // Only a missing/failed RESUME sinks the application — a missing or
         // failed optional document (ID/certificate/qualification) doesn't,
@@ -1249,15 +1113,17 @@ async function applyAI(page, seeker, match) {
     }
     earlierFields.push(...(await snapshotSubmittedFields(page)));
     await humanDelay();
-    await clickVisible(stepBtn.el);
-    await page.waitForLoadState('networkidle').catch(() => {});
+    const missing=await applicationFlow.requiredErrors(page);
+    if(missing.length)return {ok:false,reason:'Required fields must be completed before continuing: '+missing.join(', ')};
+    page=await applicationFlow.clickAndFollow(page,stepBtn.el);
+    await page.waitForLoadState('networkidle', {timeout:8000}).catch(() => {});
     // else: a Next/Continue step — loop back around and handle whatever it reveals
   }
 
   return { ok: false, reason: `This application needed more than ${MAX_FORM_STEPS} steps to complete — handed off for manual review rather than risk submitting something wrong halfway through.` };
 }
 
-async function run() {
+async function runOnce() {
   console.log(`[apply] starting run at ${new Date().toISOString()}`);
 
   await aiMatch.loadSettings(supabase);
@@ -1379,7 +1245,7 @@ async function run() {
     let attempted = false;
     for (let attempt = 1; attempt <= 2; attempt++) {
       const context = await browser.newContext();
-      const page = await context.newPage();
+      let page = await context.newPage();
       try {
         // ADMIN-CREDENTIAL LOGIN (watched pages only)
         // -----------------------------------------
@@ -1421,6 +1287,11 @@ async function run() {
         // redirect. Route the ATS filler by that FINAL host, not the
         // adzuna.com wrapper, so Adzuna-discovered jobs auto-apply with the
         // same purpose-built handlers as the direct ATS feeds.
+        const reached=await applicationFlow.reachApplicationPage(page);
+        page=reached.page;
+        if(!reached.ok){await logResult(match,'needs_manual_action',reached.reason);attempted=true;break;}
+        const barrier=await applicationFlow.loginBarrier(page);
+        if(barrier){await logResult(match,'needs_manual_action',barrier);attempted=true;break;}
         const landingUrl = page.url();
 
         // REQUIREMENTS CHECK: read the ad and skip it if it clearly asks for
@@ -1451,9 +1322,10 @@ async function run() {
         // Route by posting host: dedicated ATS handlers (fixed forms, no AI)
         // first, generic AI-driven filler for everything else.
         const atsApply = atsHandlerForUrl(landingUrl) || atsHandlerForUrl(match.job_url);
-        const result = atsApply
+        let result = atsApply
           ? await atsApply(page, seeker, match)
           : await applyAI(page, seeker, match);
+        if(atsApply&&!result.ok&&!result.unverified&&!result.captcha&&(result.safeToFill||/Could not find standard name\/email|form layout may differ/i.test(result.reason||'')))result=await applyAI(page,seeker,match);
 
         const formLabel = atsApply ? 'ats' : (match.is_custom_source ? 'watched-page' : 'job-board');
 
@@ -1478,12 +1350,9 @@ async function run() {
         if (isCrash && attempt === 1) {
           console.warn(`[apply]  ⚠ browser tab crashed on attempt 1 (${err.message}) — retrying once with a fresh page`);
         } else {
-          const isNetworkIssue = /net::|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION|ERR_TIMED_OUT|ENOTFOUND|EAI_AGAIN|NS_ERROR_OFFLINE|NS_BINDING_ABORTED/i.test(err.message || '');
-          const note = isNetworkIssue
-            ? `This posting's link appears broken, mistyped, or no longer exists (${err.message}).`
-            : (isCrash ? `The browser crashed twice trying to load/process this posting (${err.message}).` : err.message);
-          console.error(`[apply]  ✖ ${isNetworkIssue ? 'broken link' : (isCrash ? 'repeated crash' : 'error')}:`, err.message);
-          await logResult(match, isNetworkIssue ? 'needs_manual_action' : 'failed', note);
+          const note=applicationFlow.actionableError(err);
+          console.error('[apply] application failure: '+note);
+          await logResult(match,'needs_manual_action',note);
           attempted = true;
         }
       } finally {
@@ -1499,6 +1368,12 @@ async function run() {
   console.log('[apply] run complete');
 }
 
+let applyRunInProgress=false;
+async function run() {
+  if(applyRunInProgress){console.log('[apply] previous run still active; overlapping run skipped');return;}
+  applyRunInProgress=true;
+  try {return await runOnce();} finally {applyRunInProgress=false;}
+}
 module.exports = { run };
 
 if (require.main === module) {
