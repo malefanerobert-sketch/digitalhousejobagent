@@ -1,4 +1,5 @@
 const zaScope=require('./zaJobScope');
+const jobDetails=require('./jobDetails');
 require('dotenv').config();
 // Stealth-wrapped chromium (see apply.js for the full rationale) — this file
 // also drives a real browser against arbitrary third-party pages, so it
@@ -227,7 +228,7 @@ function descriptionFromJsonLd(html) {
       for (const it of items) {
         if (it && it.description && (it.hiringOrganization || /JobPosting/i.test(JSON.stringify(it['@type'] || '')))) {
           const txt = cleanHtml(it.description);
-          if (txt) return txt.slice(0, 8000);
+          if (txt) return txt;
         }
       }
     }
@@ -476,6 +477,7 @@ async function run() {
   const optedOut = new Set((optOuts || []).map(o => `${o.job_seeker_id}|${o.job_custom_source_id}`));
 
   const browser = await chromium.launch({ headless: true });
+  await jobDetails.refreshSavedDescriptions(supabase,{browser,limit:8});
   // Caches the real employer per posting URL for this run, so a detail-page
   // lookup happens at most once per URL even if several seekers match it.
   const employerCache = new Map();
@@ -648,7 +650,12 @@ async function run() {
         if (employerCache.has(absoluteUrl)) {
           detail = employerCache.get(absoluteUrl);
         } else {
-          detail = await fetchJobDetail(browser, absoluteUrl);
+          detail = await jobDetails.captureJobDetails(absoluteUrl,{browser,title:job.title,employer:job.company||''});
+          if(!detail.description){
+            // Preserve an available summary when the full advert could not be captured.
+            const fallback=await fetchJobDetail(browser,absoluteUrl);
+            if(fallback?.description)detail={employer:detail.employer||fallback.employer,description:jobDetails.privateText(fallback.description),status:'limited'};
+          }
           employerCache.set(absoluteUrl, detail);
         }
         let employer = (job.company && String(job.company).trim())
@@ -668,6 +675,8 @@ async function run() {
           // detail page. Null only when neither shows a company.
           employer_name: employer,
           job_description: description,
+          job_description_status: detail?.status || 'unavailable',
+          job_description_checked_at: new Date().toISOString(),
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source

@@ -1715,12 +1715,12 @@ function renderDashboard(){
 
   // Derived activity feed — merges recent matches + applications, no separate activity table exists
   const feed=[];
-  matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+m.job_title+(coLabel(m.company_name)?' at '+coLabel(m.company_name):'')}));
+  matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+privateJobText(m.job_title)+(employerLabel(m)?' at '+employerLabel(m):'')}));
   // Only show successful applications in the user's activity feed. Problem
   // results (needs_manual_action, failed, captcha_blocked, submission_unverified)
   // are an admin responsibility and live in the admin Application Report — users
   // never need to see "Application needs_manual_action" style noise on their dashboard.
-  applications.filter(isConfirmedApplication).slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
+  applications.filter(isConfirmedApplication).slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(employerLabel(a.job_matches||{})?' at '+employerLabel(a.job_matches||{}):'')}));
   feed.sort((a,b)=>new Date(b.t)-new Date(a.t));
   const actEl=$('#actList');
   actEl.innerHTML = feed.length
@@ -1796,12 +1796,10 @@ const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices14
   'ikhokha','jobjack','sparkschools','kontakrecruitment','ozow','offerzen']);
 
 // Job-board / aggregator names (CareerJunction, Pnet, Job Mail, "Via Jobmail"…)
-// are shown on cards as the source of the posting, so the user knows where the
-// agent found the job. Hidden only on the Watched pages view (that list shows
-// the pages the user themselves added).
-const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
+// must never appear as the hiring company in applicant-facing job details.
+const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobbi|jobrapido|talent\.com|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
 function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
-function coLabel(n){ return n||''; }
+function coLabel(n){ return isSourceName(n)?'':privateJobText(n); }
 // The REAL hiring company for a match. Watched-page discovery stores the job
 // board / recruitment site in company_name (kept for block-lists, filtering and
 // SA-scope logic) and the actual employer in employer_name; feeds already store
@@ -1813,9 +1811,9 @@ function employerLabel(m){
   // employer_name, so it is screened too — not just company_name. Falls back to
   // a neutral label only when nothing real is known.
   const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
-  if(emp && !isSourceName(emp)) return emp;
+  if(emp && !isSourceName(emp)) return privateJobText(emp);
   const src = String((m && m.company_name) || '').trim();
-  if(src && !isSourceName(src)) return src;
+  if(src && !isSourceName(src)) return privateJobText(src);
   return 'Company not listed';
 }
 function isSouthAfricanMatch(m){
@@ -1934,6 +1932,14 @@ function noteBox(cls, id, text, btnHtml){
 // why an out-of-area "Discovered" match wasn't auto-applied, and offer Apply) ----
 const _locNorm = (s) => String(s||'').toLowerCase().replace(/&#x2013;|&ndash;/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 // Normalize equivalent province labels without changing stored locations or collapsing cities.
+const SOURCE_PATTERN=String.raw`\b(?:adzuna|job\s*mail|pnet|career\s*junction|careers?\s*24|executive\s*placements|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter|remote\s*ok|talent\.com)\b`;
+function privateJobText(value){
+  return cleanJobText(value).replace(/https?:\/\/[^\s<>]+|www\.[^\s<>]+/gi,'')
+    .replace(/[\w.+-]+@(?:[\w.-]*\.)?(?:pnet|jobmail|careerjunction|careers24|adzuna|jobbi)\.[a-z.]+/gi,'')
+    .replace(/\b(?:[a-z0-9-]+\.)*(?:adzuna|jobmail|pnet|careerjunction|careers24|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter)\.[a-z.]+\b/gi,'')
+ .replace(/#?J-\d+-Ljbffr/gi,'').replace(new RegExp(SOURCE_PATTERN,'gi'),'the application platform')
+    .replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+}
 function canonicalLocationLabel(value){
   const raw=String(value||'').trim();
   const key=_locNorm(raw).replace(/\s+(?:za|south africa)$/,'');
@@ -2032,12 +2038,12 @@ function renderMatches(){
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
-      '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
+      '<div><h4>'+esc(privateJobText(m.job_title))+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
-      (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+m.skip_reason,'') : '')+
+      (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+privateJobText(m.skip_reason),'') : '')+
       (requested ? '<p class="sub2">Your request is in the admin application queue. No automatic submission will occur.</p>' : '')+
       (uncertain ? '<p class="sub2">An earlier submission is uncertain. Admin will check before applying again.</p>' : '')+
-      (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
+      (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
       (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Ask an admin to apply for this job">▶ Apply</button>' : '')+
@@ -2140,7 +2146,7 @@ async function loadApplications(){
   const all=[];const size=500;
   for(let offset=0;;offset+=size){
     const {data,error}=await sb.from('application_log')
-      .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, salary_text, match_reason, match_score, discovered_at, status)')
+      .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, salary_text, match_reason, match_score, discovered_at, status)')
       .eq('job_seeker_id',currentSeeker.id).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
     if(error){toast('Could not load applied matches: '+error.message,'err');return;}
     const rows=data||[];all.push(...rows);if(rows.length<size)break;
@@ -2513,14 +2519,14 @@ function closeModal(id){ $('#'+id).classList.add('hidden'); }
    we do have instead of hiding it behind an "unavailable" fallback. */
 function openJobView(j){
   j = j || {};
-  const title   = cleanJobText(j.job_title || 'Job details');
+  const title   = privateJobText(j.job_title || 'Job details');
   const company = cleanJobText((typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||''));
   const loc     = canonicalLocationLabel(cleanJobText(j.location || ''));
-  const salary  = j.salary_text ? cleanJobText(j.salary_text).trim() : '';
-  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? cleanJobText(j.match_reason).trim() : '';
+  const salary  = j.salary_text ? privateJobText(j.salary_text).trim() : '';
+  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? privateJobText(j.match_reason).trim() : '';
   const score   = (j.match_score!=null && !isNaN(j.match_score)) ? Math.round(j.match_score)+'% match' : '';
   const found   = j.discovered_at ? ('Found '+timeAgo(j.discovered_at)) : '';
-  const desc    = (j.job_description && String(j.job_description).trim()) ? cleanJobText(j.job_description).trim() : '';
+  const desc    = (j.job_description && String(j.job_description).trim()) ? privateJobText(j.job_description).trim() : '';
 
   $('#jmTitle').textContent = title;
 
@@ -2550,11 +2556,15 @@ function openJobView(j){
     : '';
 
   // Full job description — the primary content when we have it
+  const detailsStatus=j.job_description_status||'legacy';
+  const summaryOnly=detailsStatus!=='captured';
+  const detailHeading=summaryOnly?'Available job summary':'Job description';
+  const summaryNotice=summaryOnly&&desc?'<div class="sub2" style="margin-bottom:8px">The complete advert has not been retrieved yet. These are the available saved details.</div>':'';
   const descBlock = desc
-    ? '<div><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Job description</b>'+
-        '<div style="margin-top:8px;white-space:pre-wrap;line-height:1.6;font-size:14px">'+esc(desc)+'</div>'+
+    ? '<div><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">'+detailHeading+'</b>'+summaryNotice+
+        '<div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(desc)+'</div>'+
       '</div>'
-    : '<div class="sub2" style="font-size:13px">The full description for this role hasn’t been captured yet — your agent will add it on its next scan.</div>';
+    : '<div class="sub2" style="font-size:13px">Job details are not available yet. The agent will retry retrieving them on a later scan.</div>';
 
   $('#jmBody').innerHTML = header + chipRow + reasonBlock + descBlock;
   $('#jobModal').classList.remove('hidden');

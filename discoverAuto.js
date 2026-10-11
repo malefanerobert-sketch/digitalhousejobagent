@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const zaScope=require('./zaJobScope');
+const jobDetails=require('./jobDetails');
 /**
  * discoverAuto.js - Autonomous Job Discovery Worker
  * Queries ALL enabled job sources for each user
@@ -749,7 +750,7 @@ function descriptionFromJsonLd(html) {
       for (const it of items) {
         if (it && it.description && (it.hiringOrganization || /JobPosting/i.test(JSON.stringify(it['@type'] || '')))) {
           const txt = cleanHtml(it.description);
-          if (txt) return txt.slice(0, 8000);
+          if (txt) return txt;
         }
       }
     }
@@ -945,21 +946,14 @@ async function saveMatches(userId, matches, override) {
   // we read the hiring company off the posting's detail page. A placeholder
   // never becomes the stored employer (it would show as the company name).
   for (const job of matches) {
-    // Prefer a substantial feed-provided description; otherwise read the
-    // posting's own page (which also yields the real employer when the feed
-    // only gave a placeholder like "Via Jobmail").
-    const feedDesc = cleanHtml(job.description);
-    const feedGood = feedDesc && feedDesc.length > 300 &&
-      feedDesc.toLowerCase() !== String(job.title || '').toLowerCase();
-    const needEmployer = isPlaceholderCompany(job.company);
-    if (needEmployer || !feedGood) {
-      const detail = await resolveDetailFromPostingUrl(job.url, override) || {};
-      job._employer = needEmployer ? (detail.employer || null) : String(job.company).trim();
-      job._description = feedGood ? feedDesc : (detail.description || feedDesc || null);
-    } else {
-      job._employer = String(job.company).trim();
-      job._description = feedDesc || null;
-    }
+    // Listing summaries are never treated as complete because of their length.
+    // Capture the actual advert first, following vacancy links privately when needed.
+    const feedDesc=jobDetails.privateText(cleanHtml(job.description));
+    const detail=await jobDetails.captureJobDetails(job.url,{title:job.title,employer:isPlaceholderCompany(job.company)?'':job.company});
+    job._employer=detail.employer || (isPlaceholderCompany(job.company)?null:String(job.company).trim());
+    job._description=detail.description || feedDesc || null;
+    job._descriptionStatus=detail.status;
+
   }
 
   // DEDUP ACROSS FEEDS: the same posting is often syndicated to several feeds
@@ -999,6 +993,8 @@ async function saveMatches(userId, matches, override) {
     // nor the posting page named a real company (UI then falls back gracefully).
     employer_name: job._employer || null,
     job_description: job._description || null,
+    job_description_status: job._descriptionStatus || 'unavailable',
+    job_description_checked_at: new Date().toISOString(),
     location: job.location,
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,
@@ -1043,6 +1039,8 @@ async function run() {
     console.log(`⏰ [discoverAuto] Outside configured time window (${shape} ${tz}). Skipping this run.`);
     return;
   }
+
+  await jobDetails.refreshSavedDescriptions(sb,{limit:8});
 
   // Get all active users with auto-search enabled. discovery_mode 'both'
   // means "watched pages AND autonomous search" — it must be included here,
