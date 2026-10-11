@@ -17,6 +17,7 @@ console.log('=================================================');
 console.log(' Dispatch Agent Worker — starting up');
 console.log(' watched-pages schedule:  ', WATCH_CRON);
 console.log(' autonomous-search sched.:', DISCOVER_CRON);
+console.log(' discovery country: United States only — all 50 states and DC');
 console.log(' application mode: admin only — automatic submissions disabled');
 console.log('=================================================');
 

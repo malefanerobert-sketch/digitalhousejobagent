@@ -1,0 +1,11 @@
+# United States nationwide discovery
+- New autonomous and watched-page discoveries must pass `usJobScope.isUSJob` before saving. Autonomous jobs are also filtered before paid AI scoring.
+- Covers US-labelled jobs across all 50 states and Washington, DC, including Alaska/Hawaii. No Adzuna city `where` restriction is added.
+- Adzuna always uses its US endpoint, even if a stale source configuration points elsewhere. US-endpoint metadata can establish country where a city label omits it, but not override a clearly foreign location.
+- ATS structured country/state data is preserved during normalization. Foreign country codes in structured JSON (including Canada CA versus California CA) do not turn into US matches.
+- US-eligible remote positions qualify when explicit location or eligible-country metadata supports the United States. Worldwide/Remote/Anywhere alone is not evidence. Job description mentions and employer headquarters are not treated as location evidence.
+- Missing/ambiguous locations are skipped rather than guessed. Ambiguous labels may require better provider data or admin review; this is not a global geocoding service.
+- South-African-only Jobmail/Jnet/CareerJunction automatic fetches are disabled. Existing source enablement is otherwise preserved; RemoteOK remains disabled if it was disabled.
+- Saved international discoveries and their original dates remain intact until the user deletes them. The user location options now list all US states and major metros; saved older preferences can still be shown for review.
+- Admin-only applications remain unchanged: Railway does not submit applications.
+- `node test-us-scope.js` verifies states/DC, representative foreign countries, structured locations, remote eligibility, all save gates, and a mocked US Adzuna request. `node test-admin-workflow.js` verifies the persistent lists and disabled application worker.

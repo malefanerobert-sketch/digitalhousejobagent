@@ -1,3 +1,4 @@
+const usScope=require('./usJobScope');
 require('dotenv').config();
 // Stealth-wrapped chromium (see apply.js for the full rationale) — this file
 // also drives a real browser against arbitrary third-party pages, so it
@@ -613,6 +614,8 @@ async function run() {
         if (!relevantIdx.has(ji)) continue;
         const job = jobs[ji];
         if (!job.title || !job.url) continue;
+        if(!usScope.isUSJob(job)){console.log('[discoverWatched] US-only: foreign/unknown-location posting not saved');continue;}
+        job.location=usScope.locationText(job.location);
 
         let absoluteUrl;
         try { absoluteUrl = new URL(job.url, source.career_page_url).href; }
