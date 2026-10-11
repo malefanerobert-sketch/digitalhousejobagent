@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const usScope=require('./usJobScope');
+const zaScope=require('./zaJobScope');
 /**
  * discoverAuto.js - Autonomous Job Discovery Worker
  * Queries ALL enabled job sources for each user
@@ -159,13 +159,13 @@ async function fetchJobsFromSource(source, query = 'software') {
       case 'remoteok':
         return await fetchRemoteOKJobs(source, query);
       case 'jobmail':
-        console.log('    US-only discovery: Jobmail is South Africa scoped; skipped'); return [];
+        return await fetchJobmailJobs(source, query);
       case 'jnet':
-        console.log('    US-only discovery: Jnet is South Africa scoped; skipped'); return [];
+        return await fetchJnetJobs(source, query);
       case 'careerjunction':
-        console.log('    US-only discovery: CareerJunction is South Africa scoped; skipped'); return [];
+        return await fetchCareerJunctionJobs(source, query);
       case 'ats':
-        return await fetchAtsBoards(source, query);
+        console.log('    Global/US company ATS pool is frozen; ZA watched-company discovery remains enabled'); return [];
       default:
         console.warn(`⚠ Unknown source type: ${source.source_type}`);
         return [];
@@ -251,7 +251,7 @@ async function fetchAtsBoards(source, query = 'software'){
             source: 'smartrecruiters', job_id: `sr_${company}_${j.id}`, title: j.name,
             company: (j.company && j.company.name) || company,
             url: `https://jobs.smartrecruiters.com/${company}/${j.id}`,
-            location: usScope.locationText(j.location), description: j.summary || '',
+            location: zaScope.locationText(j.location), description: j.summary || '',
             posted_at: j.releasedDate || ''
           }));
         } else if (type === 'ashby') {
@@ -259,7 +259,7 @@ async function fetchAtsBoards(source, query = 'software'){
           items = (data.jobs || []).map(j => ({
             source: 'ashby', job_id: `ashby_${company}_${j.id}`, title: j.title, company,
             url: j.jobUrl || `https://jobs.ashbyhq.com/${company}/${j.id}`,
-            location: usScope.locationText(j.location), description: '', posted_at: j.publishedAt || ''
+            location: zaScope.locationText(j.location), description: '', posted_at: j.publishedAt || ''
           }));
         } else if (type === 'workable') {
           const data = await _fetchJson(`https://apply.workable.com/api/v1/widget/accounts/${company}`);
@@ -274,7 +274,7 @@ async function fetchAtsBoards(source, query = 'software'){
           items = (data.offers || []).map(j => ({
             source: 'recruitee', job_id: `recruitee_${company}_${j.id}`, title: j.title,
             company: j.company_name || company, url: j.careers_url || `https://${company}.recruitee.com/o/${j.slug || j.id}`,
-            location: usScope.locationText(j.location), description: '', posted_at: j.published_at || ''
+            location: zaScope.locationText(j.location), description: '', posted_at: j.published_at || ''
           })).filter(j => j.title);
         } else if (type === 'teamtailor') {
           const data = await _fetchJson(`https://${company}.teamtailor.com/jobs.json`);
@@ -318,7 +318,7 @@ async function fetchAtsBoards(source, query = 'software'){
           items = arr.map(j => ({
             source: 'breezy', job_id: `breezy_${company}_${j.id || j.friendly_id || j.name}`,
             title: j.name || '', company: (j.company && j.company.name) || company,
-            url: j.url || `https://${company}.breezy.hr`, location: usScope.locationText(j.location),
+            url: j.url || `https://${company}.breezy.hr`, location: zaScope.locationText(j.location),
             description: '', posted_at: j.published_date || ''
           })).filter(j => j.title);
         } else if (type === 'comeet') {
@@ -356,7 +356,7 @@ async function fetchAtsBoards(source, query = 'software'){
           items = (data.data || []).map(j => ({
             source: 'pinpoint', job_id: `pinpoint_${company}_${j.id}`, title: j.title || '',
             company, url: j.url || (j.path ? `https://${company}.pinpointhq.com${j.path}` : ''),
-            location: usScope.locationText(j.location),
+            location: zaScope.locationText(j.location),
             description: '', posted_at: ''
           })).filter(j => j.title);
         } else if (type === 'fountain') {
@@ -398,8 +398,8 @@ async function fetchAdzunaJobs(source, query = 'software') {
 
   try {
     // Use the source's configured endpoint (country switch is driven by the
-    // database, e.g. .../jobs/us/search) rather than a hardcoded country path.
-    const endpoint = 'https://api.adzuna.com/v1/api/jobs/us/search'; // country cannot be overridden by a stale source setting
+    // database, e.g. .../jobs/za/search) rather than a hardcoded country path.
+    const endpoint = 'https://api.adzuna.com/v1/api/jobs/za/search'; // country cannot be overridden by a stale source setting
     const url = new URL(`${endpoint}/1`);
     url.searchParams.append('app_id', appId);
     url.searchParams.append('app_key', appKey);
@@ -414,11 +414,11 @@ async function fetchAdzunaJobs(source, query = 'software') {
     console.log(`    ✓ Adzuna: ${data.results?.length || 0} jobs`);
 
     return (data.results || []).map(job => ({
-      source: 'adzuna', country_code:'US',
+      source: 'adzuna', country_code:'ZA',
       job_id: `adzuna_${job.id}`,
       title: job.title,
       company: job.company?.display_name || 'N/A',
-      location: job.location?.display_name || 'US',
+      location: job.location?.display_name || 'South Africa',
       description: job.description || '',
       // Use Adzuna's official redirect_url — it forwards to the EMPLOYER's real
       // application page, which is where the agent can actually apply. The
@@ -443,7 +443,7 @@ async function fetchAdzunaJobs(source, query = 'software') {
   }
 }
 
-/** Fetch US-eligible RemoteOK jobs. Worldwide alone is not US evidence. */
+/** Fetch ZA-eligible RemoteOK jobs. Worldwide alone is not ZA evidence. */
 async function fetchRemoteOKJobs(source, query = 'software') {
   try {
     const res = await fetch('https://remoteok.com/api', {
@@ -459,20 +459,20 @@ async function fetchRemoteOKJobs(source, query = 'software') {
 
     const filtered = jobs.filter(j => {
       const blob = `${j.location || ''} ${j.position || ''} ${j.description || ''} ${(j.tags || []).join(' ')} ${(j.region || []).join?.(' ') || j.region || ''}`;
-      if (!usScope.isUSJob({location:j.location,remote:true,eligible_countries:Array.isArray(j.region)?j.region:(typeof j.region==='string'?[j.region]:[])})) return false;
+      if (!zaScope.isZAJob({location:j.location,remote:true,eligible_countries:Array.isArray(j.region)?j.region:(typeof j.region==='string'?[j.region]:[])})) return false;
       if (!queryTerms.length) return true;
       const lower = blob.toLowerCase();
       return queryTerms.some(t => lower.includes(t));
     }).slice(0, 50);
 
-    console.log(`    ✓ RemoteOK: ${filtered.length} US-eligible jobs (of ${jobs.length} total)`);
+    console.log(`    ✓ RemoteOK: ${filtered.length} ZA-eligible jobs (of ${jobs.length} total)`);
 
     return filtered.map(job => ({
       source: 'remoteok',
       job_id: `remoteok_${job.id}`,
       title: job.position || 'Untitled',
       company: job.company || 'N/A',
-      location: usScope.locationText(job.location) || 'Remote (US eligible)',
+      location: zaScope.locationText(job.location) || 'Remote (US eligible)',
       eligible_countries:Array.isArray(job.region)?job.region:(typeof job.region==='string'?[job.region]:[]),
       description: (job.description || '').replace(/<[^>]+>/g, ' ').substring(0, 500),
       url: job.url || `https://remoteok.com/remote-jobs/${job.id}`,
@@ -934,7 +934,7 @@ No explanation, no markdown, just the array.`;
  * Note: Uses job_seeker_id to match actual schema
  */
 async function saveMatches(userId, matches, override) {
-  matches=matches.filter(usScope.isUSJob).map(j=>({...j,location:usScope.locationText(j.location)})); // final US-only save backstop
+  matches=matches.filter(zaScope.isZAJob).map(j=>({...j,location:zaScope.locationText(j.location)})); // final ZA-only save backstop
   if (matches.length === 0) {
     console.log(`  No matches to save for user ${userId}`);
     return 0;
@@ -1098,7 +1098,8 @@ async function run() {
     // ATS boards are pulled straight from their public APIs (no DB row needed),
     // so every job we save points at the employer's real apply page and the
     // matching ATS form-filler can auto-apply to it.
-    enabledSources.push({ name: 'ATS boards (US)', source_type: 'ats', id: null });
+    // Frozen: keep ATS_BOARDS configuration intact but do not fetch the global/US company pool.
+    console.log('[discovery] US/global ATS companies are frozen for now');
 
     console.log(`  Sources enabled: ${enabledSources.map(s => s.name).join(', ')}`);
 
@@ -1132,10 +1133,10 @@ async function run() {
       continue;
     }
 
-    const beforeUS=allJobs.length;
-    allJobs=allJobs.filter(usScope.isUSJob);
-    console.log(`[discovery scope] United States only: ${allJobs.length} eligible / ${beforeUS} fetched; foreign or unknown locations not saved`);
-    console.log(`  📊 Total US jobs fetched: ${allJobs.length}`);
+    const beforeZA=allJobs.length;
+    allJobs=allJobs.filter(zaScope.isZAJob);
+    console.log(`[discovery scope] South Africa only: ${allJobs.length} eligible / ${beforeZA} fetched; foreign or unknown locations not saved`);
+    console.log(`  📊 Total ZA jobs fetched: ${allJobs.length}`);
 
     // Apply filters
     if (user.remote_only) {

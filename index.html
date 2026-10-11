@@ -726,12 +726,12 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
                 <span class="loc-ms-caret">▾</span>
               </button>
               <div id="pfLocsMenu" class="loc-ms-menu hidden">
-                <label class="loc-ms-opt all-opt"><input type="checkbox" id="pfLocAll" onchange="onPfLocAllChange()"> 🌍 Discover across the United States</label>
+                <label class="loc-ms-opt all-opt"><input type="checkbox" id="pfLocAll" onchange="onPfLocAllChange()"> 🌍 Discover across South Africa</label>
                 <div class="loc-ms-sep"></div>
                 <div id="pfLocsList"></div>
               </div>
               <p style="color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5">
-                New discovery covers the entire United States. Previously saved international jobs remain in <b>Discovered matches</b> until you delete them. Location preferences help classify jobs for admin review. Railway does not apply; click Apply to request admin handling of a skipped job.
+                New discovery covers South Africa only. US company feeds are frozen for now. Previously saved international jobs remain in <b>Discovered matches</b> until you delete them. Location preferences help classify jobs for admin review. Railway does not apply; click Apply to request admin handling of a skipped job.
               </p>
             </div>
             <div class="field"><label>Salary range</label>
@@ -1177,7 +1177,7 @@ async function refreshAll(){
 }
 
 /* ================= VIEWS / NAV ================= */
-const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches','Future discovery: United States only. Previously saved international jobs remain until you delete them'], skipped:['Skipped by agent','Request Apply to send a skipped job to the admin queue'],
+const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches','Future discovery: South Africa only. US feeds are frozen; saved discoveries remain until you delete them'], skipped:['Skipped by agent','Request Apply to send a skipped job to the admin queue'],
   applications:['Applied matches','Completed applications recorded with confirmation'],
   docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
@@ -1712,7 +1712,7 @@ function renderDashboard(){
     && currentSeeker.apply_experience_ranges?.length);
   $('#setupBanner').classList.toggle('hidden', done);
   if(done){
-    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Railway discovers US jobs nationwide every few hours. Admins handle all applications.';
+    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Railway discovers South African jobs nationwide every few hours. Admins handle all applications.';
   } else {
     $('#agentSummary').textContent='Set up your profile to activate the agent.';
   }
@@ -1842,6 +1842,7 @@ function isSouthAfricanMatch(m){
 const SA_LOCATIONS=['Bloemfontein','Cape Town','Centurion','Durban','East London','George',
   'Gqeberha','Johannesburg','Kimberley','Midrand','Nelspruit','Pietermaritzburg','Polokwane',
   'Pretoria','Rustenburg','Sandton','Soweto','Stellenbosch','Remote'];
+const ZA_PROVINCES=['Eastern Cape','Free State','Gauteng','KwaZulu-Natal','Limpopo','Mpumalanga','Northern Cape','North West','Western Cape'];
 const US_LOCATIONS=["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "Washington DC", "New York City", "Los Angeles", "Chicago", "San Francisco", "Seattle", "Austin", "Boston", "Dallas", "Denver", "Atlanta", "Miami", "Phoenix", "Remote (US)"];
 
 // Preferred-locations multiselect (Profile view) — a tick-box dropdown built
@@ -1866,7 +1867,7 @@ document.addEventListener('click', e=>{
 function renderLocMenu(selected){
   const isAll = selected.length===1 && selected[0]==='All locations';
   const picked = isAll ? [] : selected;
-  const opts = [...new Set([...US_LOCATIONS, ...picked])].sort();
+  const opts = [...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...picked])].sort();
   $('#pfLocsList').innerHTML = opts.map(l=>
     '<label class="loc-ms-opt'+(isAll?' disabled':'')+'"><input type="checkbox" value="'+esc(l)+'" '+
     (picked.includes(l)?'checked':'')+' onchange="onPfLocOptChange()"> '+esc(l)+'</label>'
@@ -1896,7 +1897,7 @@ function updatePfLocsLabel(){
   const sel=getSelectedLocs();
   if(!sel.length){ label.textContent='Select locations…'; label.classList.add('placeholder'); return; }
   label.classList.remove('placeholder');
-  label.textContent = sel[0]==='All locations' ? '🌍 Discovering across the United States'
+  label.textContent = sel[0]==='All locations' ? '🌍 Discovering across South Africa'
     : (sel.length<=2 ? sel.join(', ') : sel[0]+', '+sel[1]+' +'+(sel.length-2)+' more');
 }
 
@@ -1965,7 +1966,7 @@ function renderMatches(){
   // still appears once the agent finds a job there).
   const locSel=$('#mLoc'); const cur=state.mLoc;
   const matchLocs=matches.map(m=>m.location).filter(Boolean);
-  const locs=[...new Set([...US_LOCATIONS, ...matchLocs])].sort();
+  const locs=[...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs])].sort();
   locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
   if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
 
