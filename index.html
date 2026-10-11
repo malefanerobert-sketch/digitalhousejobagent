@@ -1725,7 +1725,7 @@ function renderDashboard(){
   // results (needs_manual_action, failed, captcha_blocked, submission_unverified)
   // are an admin responsibility and live in the admin Application Report — users
   // never need to see "Application needs_manual_action" style noise on their dashboard.
-  applications.filter(a=>a.result==='success').slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
+  applications.filter(isConfirmedApplication).slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(coLabel(a.job_matches?.company_name)?' at '+coLabel(a.job_matches.company_name):'')}));
   feed.sort((a,b)=>new Date(b.t)-new Date(a.t));
   const actEl=$('#actList');
   actEl.innerHTML = feed.length
@@ -1904,13 +1904,9 @@ function updatePfLocsLabel(){
 
 async function loadMatches(){
   if(!currentSeeker){ matches=[]; return; }
-  // Matches is for the AGENT's own pipeline only: pending (discovered) and
-  // applied (already applied by the agent). In automatic mode jobs go straight
-  // from pending -> applied, so those are the only two states that occur here.
-  // needs_manual_action is deliberately EXCLUDED — those jobs need a human,
-  // so they live only in the Applications tab (Application report), never here.
-  // 'skipped' = discovered but the agent held it back (above the user's level input) — still
-  // shown with the reason.
+  // Keep ordinary discoveries private to the agent queue until an outcome.
+  // Out-of-preference discoveries are visible so users may explicitly Apply.
+  // Failed / manual / unverified outcomes remain in Application history/admin.
   const {data, error} = await sb.from('job_matches').select('*')
     .eq('job_seeker_id', currentSeeker.id)
     .in('status', ['pending','applied','skipped','approved'])
@@ -1918,7 +1914,7 @@ async function loadMatches(){
   // v1 scope: South Africa only. The classifyLocationCountry() function above
   // supports the full country list already — when international expansion
   // is ready, just remove this filter line and restore the #mLoc dropdown.
-  matches = error ? [] : (data||[]).filter(isSouthAfricanMatch);
+  matches = error ? [] : (data||[]).filter(isSouthAfricanMatch).filter(isVisibleMatch);
 }
 
 var openNotes = new Set();   // ids of Matches cards whose skipped/queued note is expanded
@@ -1962,6 +1958,10 @@ function isOutOfPreferredLocation(m){
   if(scopeAll) return false;
   return !locationInScope(m.location, prefs);
 }
+function isVisibleMatch(m){
+  if(m.status==='applied' || m.status==='skipped' || m.status==='approved') return true;
+  return m.status==='pending' && isOutOfPreferredLocation(m);
+}
 function renderMatches(){
   // Location dropdown = a fixed list of major South African metros (always
   // usable, even with zero matches yet) merged with any location that
@@ -1975,6 +1975,7 @@ function renderMatches(){
 
   const q=state.mQ.toLowerCase();
   let list = matches.filter(m=>{
+    if(!isVisibleMatch(m)) return false;
     if(isBlocked('companies',m.company_name) || isBlocked('locations',m.location)) return false;
     if(state.mLoc!=='all' && m.location!==state.mLoc) return false;
     if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
@@ -1995,12 +1996,11 @@ function renderMatches(){
   const g=$('#matchGrid');
   if(!list.length){
     g.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="big">📡</div>'+
-      (matches.length ? 'No matches fit these filters. Try clearing them.' : 'No matches yet. Your agent is scanning — check back after the next run.')+'</div>';
+      (matches.length ? 'No matches fit these filters. Try clearing them.' : 'The agent processes new discoveries in the background. Applied, skipped and outside-preference jobs appear here; application problems are in Application history.')+'</div>';
     updateBulkBar();
     return;
   }
-  // Status → pill mapping. loadMatches() only ever loads pending + applied
-  // (needs_manual_action lives in Applications; approved isn't used in automatic mode).
+  // Queued is an explicit user choice, not a confirmed application.
   const statusPill = (s) => {
     if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
     if (s === 'approved') return '<span class="pill green">⏳ Queued for agent</span>';
@@ -2022,12 +2022,13 @@ function renderMatches(){
       (m.status==='skipped' && m.skip_reason ? noteBox('skip-note', m.id, '⚠️ '+m.skip_reason,
         '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
       (m.status==='pending' && isOutOfPreferredLocation(m) ? noteBox('skip-note', m.id, '📍 Found in '+(m.location||'another area')+' — outside your preferred locations, so the agent didn\u2019t auto-apply. Press Apply to send it anyway.',
-        '<button type="button" class="note-btn" data-action="apply" data-id="'+m.id+'" title="Queue this job so the agent applies for you">▶ Apply</button>') : '')+
+        '') : '')+
       (m.status==='approved' ? noteBox('queued-note', m.id, 'You chose to apply — the agent will submit this application on its next run.',
         '<button type="button" class="note-btn" data-action="unqueue" data-id="'+m.id+'" title="Take this job out of the agent queue">Cancel</button>') : '')+
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(m.match_reason)+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
+      (m.status==='pending' && isOutOfPreferredLocation(m) ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Apply outside your preferred locations">▶ Apply</button>' : '')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
@@ -2116,6 +2117,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
     const {error} = await sb.from('job_matches').update({status:back}).eq('id', id);
     if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
     if(mm) mm.status=back;
+    matches=matches.filter(isVisibleMatch);
     toast('Removed from the agent queue'); renderMatches(); renderDashboard();
     return;
   }

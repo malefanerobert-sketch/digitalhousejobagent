@@ -24,7 +24,7 @@ const aiMatch = require('./aiMatch');
 const jobFit = require('./jobFit');
 const captchaSolver = require('./captchaSolver');
 const applicationFlow = require('./applicationFlow');
-console.log('[apply] application flow v2 loaded: employer navigation, strict receipts, overlap guard');
+console.log('[apply] application flow v3 loaded: outcome visibility, location override, CAPTCHA diagnostics');
 
 const MIN_DELAY = Number(process.env.MIN_ACTION_DELAY_MS || 4000);
 const MAX_DELAY = Number(process.env.MAX_ACTION_DELAY_MS || 11000);
@@ -157,6 +157,8 @@ async function verifySubmission(page, match, seeker, submittedFields, before) {
 
 async function submitAndVerify(page, submitBtn, missingFields, match, seeker, earlierFields = []) {
   if(applicationFlow.isAggregatorUrl(page.url()))return {ok:false,reason:'Still on a job-board advert, not an employer application form. No submission attempted.'};
+  const captchaBlock=await handleCaptcha(page);
+  if(captchaBlock)return captchaBlock;
   const missing=await applicationFlow.requiredErrors(page);
   if(missing.length)return {ok:false,safeToFill:true,missingFields:missing,reason:'Required application fields are missing or invalid: '+missing.join(', ')};
   const before=await applicationFlow.snapshotReceiptPage(page);
@@ -170,21 +172,16 @@ async function submitAndVerify(page, submitBtn, missingFields, match, seeker, ea
   return verifySubmission(page,match,seeker,submittedFields,before);
 }
 
-async function detectCaptcha(page) {
-  return await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha"]');
-}
+async function detectCaptcha(page) { return captchaSolver.detectCaptcha(page); }
 
-// If a CAPTCHA is present, try to actually solve it via captchaSolver.js.
-// That module only attempts a real solve when CAPTCHA_API_KEY is set (see
-// its own ENABLED flag) — with no key configured this behaves exactly as
-// before: detect, then hand off as "needs manual action". Returns null to
-// mean "keep going" (no CAPTCHA found, or it was solved and injected), or
-// the failure result object to return immediately when it still blocks.
 async function handleCaptcha(page) {
-  if (!(await detectCaptcha(page))) return null;
-  const solved = await captchaSolver.solveCaptchaOnPage(page).catch(() => false);
-  if (solved) return null;
-  return { ok: false, reason: 'CAPTCHA detected — needs a human to solve. Handed off.', captcha: true };
+  try {
+    const outcome=await captchaSolver.solveCaptchaOnPageDetailed(page);
+    if(outcome.ok)return null;
+    return {ok:false,captcha:true,reason:'CAPTCHA blocked: '+outcome.reason+' Handed to admin for manual review.'};
+  } catch (_) {
+    return {ok:false,captcha:true,reason:'CAPTCHA inspection failed. Handed to admin for manual review; no successful solve is claimed.'};
+  }
 }
 
 // Figures out a human-readable label for a form field, so a missing-field
@@ -1215,7 +1212,7 @@ async function runOnce() {
       if (why) { titleSkips.push({ id: m.id, msg: jobFit.skipMessage(why) }); return false; }
     }
 
-    if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false;
+    if (alreadyTerminal.has(`${m.job_seeker_id}|${m.job_url}`)) return false; // do not repeat known human-only forms
     return m.status === 'approved' || (m.status === 'pending' && m.job_seekers?.application_mode === 'automatic');
   }).slice(0, MAX_PER_RUN);
 

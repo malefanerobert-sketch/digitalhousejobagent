@@ -238,6 +238,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
               <option value="failed">Failed</option>
               <option value="needs_manual_action">Needs manual action</option>
               <option value="captcha_blocked">CAPTCHA blocked</option>
+              <option value="submission_unverified">Submission not verified</option>
             </select>
             <button class="btn" onclick="loadReport()">🔄 Refresh</button>
           </div>
@@ -870,7 +871,7 @@ async function loadHealth(){
     const ls = lBy[s.id] || [];
     const applied = ls.filter(l => l.result === 'success' || l.verification_status === 'confirmed' || l.verification_status === 'user_confirmed').length;
     const problems = ls.filter(l => ['failed','captcha_blocked','needs_manual_action','submission_unverified'].includes(l.result)).length;
-    const openIssues = ms.filter(m => ['failed','needs_manual_action','captcha_blocked'].includes(m.status)).length;
+    const openIssues = ms.filter(m => ['failed','needs_manual_action','captcha_blocked','submission_unverified'].includes(m.status)).length;
     const matched = ms.length;
 
     const profileFilled = PROFILE_FIELDS.filter(f => s[f] && String(s[f]).trim()).length;
@@ -1003,12 +1004,13 @@ function renderReport(){
   }
 
   // Stats line at the top: quick totals so eng sees the shape of the problems
-  const counts = { failed:0, needs_manual_action:0, captcha_blocked:0 };
+  const counts = { failed:0, needs_manual_action:0, captcha_blocked:0, submission_unverified:0 };
   for(const r of reportRows) if(counts[r.status] !== undefined) counts[r.status]++;
   if(stats) stats.innerHTML = 'Totals in system: '+
     '<b style="color:#ff8f8f">'+counts.failed+'</b> failed · '+
     '<b style="color:var(--accent)">'+counts.needs_manual_action+'</b> needs manual · '+
     '<b style="color:#f6c66c">'+counts.captcha_blocked+'</b> captcha blocked · '+
+    '<b style="color:#f6c66c">'+counts.submission_unverified+'</b> unverified · '+
     'showing <b>'+rows.length+'</b>';
 
   if(!rows.length){
@@ -1024,6 +1026,7 @@ function renderReport(){
     const when = r.decided_at || r.discovered_at;
     const statusPill = r.status === 'failed' ? '<span class="pill red">Failed</span>'
       : r.status === 'captcha_blocked' ? '<span class="pill amber">CAPTCHA</span>'
+      : r.status === 'submission_unverified' ? '<span class="pill amber">Unverified — check before resubmitting</span>'
       : '<span class="pill amber">Manual action</span>';
     const seeker = r.job_seekers?.full_name || '(unknown user)';
     return '<div style="padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
@@ -1043,7 +1046,7 @@ function renderReport(){
         '</div>'+
         '<div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
           '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
-          '<button class="btn btn-primary btn-sm" data-apply-report="'+esc(r.id)+'">▶ Apply</button>'+
+          '<button class="btn btn-primary btn-sm" data-apply-report="'+esc(r.id)+'">▶ Review / apply manually</button>'+
         '</div>'+
       '</div>'+
     '</div>';

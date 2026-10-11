@@ -74,7 +74,7 @@ async function main(){
   assert((await flow.waitForReceipt(page,baseline,{timeoutMs:80,pollMs:10})).ok);
   console.log('PASS fresh explicit receipt on the application site is accepted');
   const src=fs.readFileSync(__dirname+'/apply.js','utf8');const begin=src.indexOf('async function verifySubmission('),end=src.indexOf('async function detectCaptcha(',begin);
-  const sandbox=vm.createContext({applicationFlow:flow,humanDelay:async()=>{},snapshotSubmittedFields:async()=>[],storeConfirmationScreenshot:async()=>null,extractReference:()=>null});
+  const sandbox=vm.createContext({applicationFlow:flow,handleCaptcha:async()=>null,humanDelay:async()=>{},snapshotSubmittedFields:async()=>[],storeConfirmationScreenshot:async()=>null,extractReference:()=>null});
   vm.runInContext(src.slice(begin,end),sandbox);
   await page.setContent('<form><input name="name" required><input type="email" required><button type="submit" onclick="document.body.innerHTML=\'Your application has been submitted.\';return false;">Submit application</button></form>');
   let result=await sandbox.submitAndVerify(page,await page.$('button'),[],{},{});assert.equal(result.safeToFill,true);assert(!result.ok);
