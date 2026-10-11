@@ -1862,7 +1862,7 @@ document.addEventListener('click', e=>{
 });
 function renderLocMenu(selected){
   const isAll = selected.length===1 && selected[0]==='All locations';
-  const picked = isAll ? [] : selected;
+  const picked = isAll ? [] : [...new Set(selected.map(canonicalLocationLabel))];
   const opts = [...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...picked])].sort();
   $('#pfLocsList').innerHTML = opts.map(l=>
     '<label class="loc-ms-opt'+(isAll?' disabled':'')+'"><input type="checkbox" value="'+esc(l)+'" '+
@@ -1933,6 +1933,26 @@ function noteBox(cls, id, text, btnHtml){
 // ---- Location scope (mirrors jobFit.locationInScope so the UI can explain
 // why an out-of-area "Discovered" match wasn't auto-applied, and offer Apply) ----
 const _locNorm = (s) => String(s||'').toLowerCase().replace(/&#x2013;|&ndash;/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+// Normalize equivalent province labels without changing stored locations or collapsing cities.
+function canonicalLocationLabel(value){
+  const raw=String(value||'').trim();
+  const key=_locNorm(raw).replace(/\s+(?:za|south africa)$/,'');
+  const province=ZA_PROVINCES.find(p=>_locNorm(p)===key);
+  return province||raw;
+}
+function locationKey(value){return _locNorm(canonicalLocationLabel(value));}
+// Decode named/numeric HTML entities as text only, including escaped and double-encoded source text.
+function cleanJobText(value){
+  let text=String(value??'');
+  const decoder=document.createElement('textarea');
+  for(let pass=0;pass<4;pass++){
+    const next=text.replace(/\\+(?=&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);)/gi,'')
+      .replace(/&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);/gi,entity=>{decoder.innerHTML=entity;return decoder.value;});
+    if(next===text)break;
+    text=next;
+  }
+  return text;
+}
 const _JHB_METRO=['johannesburg','joburg','jhb','jozi','sandton','midrand','randburg','roodepoort','soweto','rosebank','fourways','bryanston','sandringham','braamfontein','bedfordview','edenvale','germiston','kempton park','boksburg','benoni','alberton','brakpan','springs','krugersdorp','ekurhuleni','lonehill','northriding','melrose','illovo','parktown','houghton','linden'];
 const _TSHWANE_METRO=['pretoria','tshwane','centurion','clubview','silverton','menlyn','hatfield','brooklyn'];
 const _GAUTENG_OTHER=['vereeniging','vanderbijlpark','westonaria','randfontein','heidelberg'];
@@ -1940,7 +1960,7 @@ const _GAUTENG_ALL=['gauteng',..._JHB_METRO,..._TSHWANE_METRO,..._GAUTENG_OTHER]
 const _JHB_ALIASES=['gauteng',..._JHB_METRO];
 const _PTA_ALIASES=['gauteng',..._TSHWANE_METRO];
 function _aliasesFor(pref){
-  const p=_locNorm(pref); if(!p) return [];
+  const p=locationKey(pref); if(!p) return [];
   if(p==='gauteng') return _GAUTENG_ALL;
   if(_JHB_ALIASES.includes(p) && p!=='gauteng'){
     if(['johannesburg','joburg','jhb','jozi'].includes(p)) return _JHB_ALIASES;
@@ -1953,8 +1973,8 @@ function _containsPhrase(h,p){ return (' '+h+' ').includes(' '+p+' '); }
 function locationInScope(jobLocation, prefs){
   prefs=Array.isArray(prefs)?prefs:[];
   if(prefs.length===0 || (prefs.length===1 && prefs[0]==='All locations')) return true;
-  const loc=_locNorm(jobLocation); if(!loc) return false;
-  return prefs.some(p=>_aliasesFor(p).some(a=>_containsPhrase(loc,a)) || loc.includes(_locNorm(p)));
+  const loc=locationKey(jobLocation); if(!loc) return false;
+  return prefs.some(p=>_aliasesFor(p).some(a=>_containsPhrase(loc,a)) || _containsPhrase(loc,locationKey(p)));
 }
 function isOutOfPreferredLocation(m){
   const prefs=currentSeeker?.preferred_locations||[];
@@ -1968,9 +1988,10 @@ function renderMatches(){
   // usable, even with zero matches yet) merged with any location that
   // actually shows up in this user's real matches (so an unlisted town
   // still appears once the agent finds a job there).
-  const locSel=$('#mLoc'); const cur=state.mLoc;
-  const matchLocs=matches.map(m=>m.location).filter(Boolean);
-  const locs=[...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs])].sort();
+  const locSel=$('#mLoc'); const cur=state.mLoc==='all'?'all':canonicalLocationLabel(state.mLoc);
+  state.mLoc=cur;
+  const matchLocs=matches.map(m=>canonicalLocationLabel(m.location)).filter(Boolean);
+  const locs=[...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs].map(canonicalLocationLabel))].sort();
   locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
   if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
 
@@ -1978,7 +1999,7 @@ function renderMatches(){
   let list = matches.filter(m=>{
     if(!isVisibleMatch(m)) return false;
     // Saved discoveries remain visible even if a later block prevents future work.
-    if(state.mLoc!=='all' && m.location!==state.mLoc) return false;
+    if(state.mLoc!=='all' && locationKey(m.location)!==locationKey(state.mLoc)) return false;
     if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
     return true;
   });
@@ -2012,7 +2033,7 @@ function renderMatches(){
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
       scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
       '<div><h4>'+esc(m.job_title)+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
-      '<div class="meta">'+(m.location?'<span>📍 '+esc(m.location)+'</span>':'')+'</div>'+
+      '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
       (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+m.skip_reason,'') : '')+
       (requested ? '<p class="sub2">Your request is in the admin application queue. No automatic submission will occur.</p>' : '')+
       (uncertain ? '<p class="sub2">An earlier submission is uncertain. Admin will check before applying again.</p>' : '')+
@@ -2492,14 +2513,14 @@ function closeModal(id){ $('#'+id).classList.add('hidden'); }
    we do have instead of hiding it behind an "unavailable" fallback. */
 function openJobView(j){
   j = j || {};
-  const title   = j.job_title || 'Job details';
-  const company = (typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||'');
-  const loc     = j.location || '';
-  const salary  = j.salary_text ? String(j.salary_text).trim() : '';
-  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? String(j.match_reason).trim() : '';
+  const title   = cleanJobText(j.job_title || 'Job details');
+  const company = cleanJobText((typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||''));
+  const loc     = canonicalLocationLabel(cleanJobText(j.location || ''));
+  const salary  = j.salary_text ? cleanJobText(j.salary_text).trim() : '';
+  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? cleanJobText(j.match_reason).trim() : '';
   const score   = (j.match_score!=null && !isNaN(j.match_score)) ? Math.round(j.match_score)+'% match' : '';
   const found   = j.discovered_at ? ('Found '+timeAgo(j.discovered_at)) : '';
-  const desc    = (j.job_description && String(j.job_description).trim()) ? String(j.job_description).trim() : '';
+  const desc    = (j.job_description && String(j.job_description).trim()) ? cleanJobText(j.job_description).trim() : '';
 
   $('#jmTitle').textContent = title;
 

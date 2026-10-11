@@ -21,6 +21,12 @@ const norm = (s) => String(s || '').toLowerCase()
   .replace(/\s+/g, ' ')
   .trim();
 
+// Country suffixes on SA province labels do not create a different preference.
+function locationNorm(value){
+  const key=norm(value).replace(/\s+(?:za|south africa)$/,'');
+  return key;
+}
+
 // ---------- Locations ----------
 const JHB_METRO = [
   'johannesburg', 'joburg', 'jhb', 'jozi', 'sandton', 'midrand', 'randburg',
@@ -41,7 +47,7 @@ const JHB_ALIASES = ['gauteng', ...JHB_METRO];
 const PTA_ALIASES = ['gauteng', ...TSHWANE_METRO];
 
 function aliasesFor(pref) {
-  const p = norm(pref);
+  const p = locationNorm(pref);
   if (!p) return [];
   if (p === 'gauteng') return GAUTENG_ALL;
   if (JHB_ALIASES.includes(p) && p !== 'gauteng') {
@@ -63,9 +69,9 @@ function containsPhrase(haystackNorm, phrase) {
 function locationInScope(jobLocation, preferredLocations) {
   const prefs = Array.isArray(preferredLocations) ? preferredLocations : [];
   if (prefs.length === 0 || (prefs.length === 1 && prefs[0] === 'All locations')) return true;
-  const loc = norm(jobLocation);
+  const loc = locationNorm(jobLocation);
   if (!loc) return false;
-  return prefs.some(p => aliasesFor(p).some(a => containsPhrase(loc, a)) || loc.includes(norm(p)));
+  return prefs.some(p => aliasesFor(p).some(a => containsPhrase(loc, a)) || containsPhrase(loc, locationNorm(p)));
 }
 
 // ---------- Keyword matching ----------
