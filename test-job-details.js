@@ -4,7 +4,7 @@ const {captureJobDetails,privateText,refreshSavedDescriptions}=require('./jobDet
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:'/usr/local/bin/chromium',args:['--no-sandbox']});
  try{
-  const full='Responsibilities\n'+Array.from({length:1200},(_,i)=>'• Duty '+i+' — preserved verbatim.').join('\n')+'\nRequirements\nMatric and 1–2 years’ experience.\nClosing date: 30 October 2026.\nSALARY END MARKER';
+  const full='Responsibilities\n'+Array.from({length:1200},(_,i)=>'• Duty '+i+' — preserved verbatim.').join('\n')+'\nRequirements\nMatric and 1–2 years’ experience.\nClosing date: 30 October 2026.\nSalary\nSALARY END MARKER';
   const template=(desc,title='Office Administrator',links='')=>'<meta charset="utf-8"><h1>'+title+'</h1><script type="application/ld+json">'+JSON.stringify({'@type':'JobPosting',title,hiringOrganization:{name:'Verified Employer'},description:desc})+'</script>'+links;
   const pages={'https://fixture.test/long':template(full),'https://fixture.test/summary':template('Short role summary from JobMail. https://www.pnet.co.za/jobs/abc #J-18808-Ljbffr'),'https://fixture.test/redirect':template('Brief role summary','Office Administrator','<a href="https://fixture.test/original">Apply for this job</a>'),'https://fixture.test/original':template(full)};
   await browser.newContext();const context=browser.contexts()[0];await context.route('https://fixture.test/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:pages[route.request().url()]||'<h1>Not found</h1>'}));
@@ -16,7 +16,7 @@ const {captureJobDetails,privateText,refreshSavedDescriptions}=require('./jobDet
   console.log('PASS source text >30k characters and final salary/closing sections retained; original vacancy route followed without submission; summaries preserved and classified; provider names/URLs stripped');
   const web=fs.readFileSync(__dirname+'/index.html','utf8');const p=await browser.newPage();await p.setContent('<div id="jmTitle"></div><div id="jmBody"></div><div id="jobModal" class="hidden"></div>');
   const helpers=web.slice(web.indexOf('const _locNorm ='),web.indexOf('const _JHB_METRO='));
-  const viewer=web.slice(web.indexOf('function openJobView(j){'),web.indexOf("$$('.modal').forEach"));
+  const viewer=web.slice(web.indexOf('function scopeJobSections(value){'),web.indexOf("$$('.modal').forEach"));
   const employers=web.slice(web.indexOf('const SOURCE_NAME_RE'),web.indexOf('function isSouthAfricanMatch'));
   await p.addScriptTag({content:`var $=s=>document.querySelector(s);var ZA_PROVINCES=['Gauteng'];var esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');var timeAgo=()=>'';`+helpers+employers+viewer});
   await p.evaluate(desc=>openJobView({job_description:desc,job_description_status:'captured',job_title:'Office Administrator',employer_name:'Verified Employer',company_name:'PNet'}),full);assert((await p.locator('#jmBody').innerText()).includes('SALARY END MARKER'));assert(!(await p.locator('#jmBody').innerText()).includes('PNet'));assert.equal(await p.locator('#jmBody a').count(),0);
