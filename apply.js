@@ -1134,6 +1134,7 @@ async function runOnce() {
     .from('job_matches')
     .select('*, job_seekers(*), job_sources(*), job_custom_sources(*)')
     .in('status', ['approved', 'pending'])
+    .is('admin_queue_deleted_at',null)
     // watched/custom-source postings now go through the same auto-apply
     // attempt as any other source — they only land in the user's
     // application report if the agent actually can't submit them.

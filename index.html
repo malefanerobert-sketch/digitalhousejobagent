@@ -1677,7 +1677,7 @@ function isBlocked(kind,val){
 function renderDashboard(){
   // "Matches" is the agent's own pipeline (discovered, queued, applied).
   // "Applications sent" counts the jobs the agent has actually applied to.
-  const appliedCount = new Set(applications.filter(isConfirmedApplication).map(a=>a.job_match_id||a.id)).size;
+  const appliedCount = new Set(applications.filter(isVisibleAppliedApplication).map(a=>a.job_match_id||a.id)).size;
   const viewCounts=matchViewCounts();
   $$('.nav-badge-sync').forEach(b=>{ b.textContent=viewCounts.discovered; b.classList.toggle('hidden',viewCounts.discovered===0); });
   $('#stNew').textContent=viewCounts.discovered;
@@ -2140,7 +2140,7 @@ async function loadApplications(){
   const all=[];const size=500;
   for(let offset=0;;offset+=size){
     const {data,error}=await sb.from('application_log')
-      .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, salary_text, match_reason, match_score, discovered_at, status)')
+      .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
       .eq('job_seeker_id',currentSeeker.id).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
     if(error){toast('Could not load applied matches: '+error.message,'err');return;}
     const rows=data||[];all.push(...rows);if(rows.length<size)break;
@@ -2168,12 +2168,16 @@ const ATTENTION_META = {
 // Windows/Chrome font setups (same class of bug as the earlier 🪪 ID icon).
 const TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
 
+function isVisibleAppliedApplication(a){
+  return isConfirmedApplication(a)&&!a.job_matches?.user_applied_deleted_at&&
+    !(typeof matches!=='undefined'&&matches.find(m=>m.id===a.job_match_id)?.user_applied_deleted_at);
+}
 function renderApplications(){
   const byJob=new Map();
-  applications.filter(isConfirmedApplication).forEach(a=>{if(!byJob.has(a.job_match_id||a.id))byJob.set(a.job_match_id||a.id,a);});
+  applications.filter(isVisibleAppliedApplication).forEach(a=>{if(!byJob.has(a.job_match_id||a.id))byJob.set(a.job_match_id||a.id,a);});
   const applied=[...byJob.values()];
   $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Application completed</p>'+
-    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
+    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button><button class="btn btn-danger btn-xs" data-del-app="'+esc(a.id)+'">Delete</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
 }
 
 function safeApplicationDetailUrl(value){
@@ -2219,22 +2223,20 @@ $('#appList').addEventListener('click', (e)=>{
   if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap) openJobView(ap.job_matches||{},ap); return; }
   const btn=e.target.closest('button[data-del-app]');
   if(!btn) return;
-  const id=btn.dataset.delApp;
-  askConfirm('Delete this application record? This can’t be undone.', async ()=>{
+  const record=applications.find(a=>a.id===btn.dataset.delApp);
+  if(!record?.job_match_id)return;
+  askConfirm('Remove this job from your Applied matches list? Your saved job and completion record will be kept, and other users are not affected.', async ()=>{
     btn.disabled=true;
-    // Ask Supabase to return the deleted row. A successful request with zero
-    // rows means RLS blocked it, and must not be presented as a deletion.
-    const {data: deleted, error} = await sb.from('application_log').delete().eq('id', id).select('id');
-    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
-    if(!deleted?.length){
-      toast('⚠ Application was not deleted. Please refresh and try again.','err');
-      btn.disabled=false;
-      return;
-    }
-    applications = applications.filter(a=>a.id!==id);
-    toast('Deleted');
-    renderApplications();
-    renderDashboard();
+    try{
+      const {data,error}=await sb.rpc('user_delete_applied_match',{p_match_id:record.job_match_id});
+      if(error)throw error;
+      if(data?.id!==record.job_match_id||data?.user_applied_deleted!==true)throw new Error('The server did not confirm removal. Please refresh and check before retrying.');
+      const removedAt=new Date().toISOString();
+      applications.filter(a=>a.job_match_id===record.job_match_id).forEach(a=>{a.job_matches={...(a.job_matches||{}),user_applied_deleted_at:removedAt};});
+      const match=matches.find(m=>m.id===record.job_match_id);if(match)match.user_applied_deleted_at=removedAt;
+      toast('Removed from Applied matches','ok');renderApplications();renderDashboard();
+    }catch(error){toast('Could not delete: '+(error.message||'Connection error'),'err');}
+    finally{btn.disabled=false;}
   });
 });
 

@@ -969,7 +969,7 @@ async function loadReport(){
   const all=[];const size=300;
   for(let offset=0;;offset+=size){
     const {data,error}=await sb.from('job_matches').select('id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)')
-      .order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
+      .is('admin_queue_deleted_at',null).order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
     if(error){if(el)el.innerHTML='<div class="empty">⚠ '+esc(error.message)+'</div>';return;}
     const rows=data||[];all.push(...rows);if(rows.length<size)break;
   }
@@ -1049,6 +1049,7 @@ function renderReport(){
         '<div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
           '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
           '<button class="btn btn-primary btn-sm" data-apply-report="'+esc(r.id)+'">'+(r.status==='applied'?'View completion':'▶ Review / apply manually')+'</button>'+
+          '<button class="btn btn-danger btn-sm" data-delete-report="'+esc(r.id)+'">Delete</button>'+
         '</div>'+
       '</div>'+
     '</div>';
@@ -1238,8 +1239,24 @@ function closeApplyModal(){
   if(m) m.classList.add('hidden');
 }
 
+async function deleteAdminQueueMatch(id,button){
+  const row=reportRows.find(r=>r.id===id);
+  if(!row)return;
+  if(!confirm('Remove "'+(row.job_title||'this job')+'" from the admin queue for '+(row.job_seekers?.full_name||'this applicant')+'?\n\nThe applicant keeps their saved job and any completed-application history. Other applicants are not affected.'))return;
+  button.disabled=true;
+  try{
+    const {data,error}=await sb.rpc('admin_delete_queue_match',{p_match_id:id});
+    if(error)throw error;
+    if(data?.id!==id||data?.admin_queue_deleted!==true)throw new Error('The server did not confirm removal. Refresh the queue before retrying.');
+    reportRows=reportRows.filter(r=>r.id!==id);renderReport();toast('Removed from admin queue','ok');
+  }catch(error){toast('Could not delete: '+(error.message||'Connection error'),'err');}
+  finally{button.disabled=false;}
+}
+
 // Delegate the Apply button clicks (buttons are re-rendered on every filter/search)
 document.addEventListener('click', (e)=>{
+  const del=e.target.closest('button[data-delete-report]');
+  if(del){deleteAdminQueueMatch(del.dataset.deleteReport,del);return;}
   const btn = e.target.closest('button[data-apply-report]');
   if(btn){ openApplyOnBehalf(btn.dataset.applyReport); return; }
   const sup = e.target.closest('button[data-support-thread]');
