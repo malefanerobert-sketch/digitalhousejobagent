@@ -1911,7 +1911,15 @@ async function loadMatches(){
   matches=all.filter(m=>m.job_title!=='⚠ Watched page could not be read (not a job)'&&m.job_title!=='(watched page)');
 }
 function isSkippedMatch(m){return m.status!=='applied' && !!(m.status==='skipped'||m.agent_skipped_at||m.skip_reason);}
-function discoveryDate(value){const d=new Date(value);return Number.isNaN(d.getTime())?'Date unavailable':d.toLocaleDateString('en-ZA',{year:'numeric',month:'short',day:'numeric'});}
+// Display the saved event timestamp, not the current clock. SAST is UTC+02:00 year-round.
+function discoveryDate(value){
+  if(!value)return 'Date and time unavailable';
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return 'Date and time unavailable';
+  const date=d.toLocaleDateString('en-ZA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'short',day:'numeric'});
+  const time=d.toLocaleTimeString('en-ZA',{timeZone:'Africa/Johannesburg',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  return date+' · '+time+' SAST';
+}
 
 var openNotes = new Set();   // ids of Matches cards whose skipped/queued note is expanded
 function noteBox(cls, id, text, btnHtml){
