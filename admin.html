@@ -1061,7 +1061,7 @@ function renderReport(){
    company login credentials the agent uses (from job_custom_sources), and
    the seeker's profile fields with click-to-copy chips. Nothing is stored
    or sent — this is a read-only convenience surface. */
-async function openApplyOnBehalf(reportId){
+function openApplyOnBehalf(reportId){
   const r = reportRows.find(x => x.id === reportId);
   if(!r){ alert('Row not found — try refreshing the report.'); return; }
   const seeker = r.job_seekers || {};
@@ -1093,7 +1093,6 @@ async function openApplyOnBehalf(reportId){
     credsBlock =
       '<div style="border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--muted)">'+
         'No stored login for this source. Open the employer posting and use the correct employer account if required.'+
-        (creds?.login_notes ? '<div style="margin-top:10px;white-space:pre-wrap"><b>Application instructions:</b> '+esc(creds.login_notes)+'</div>' : '')+
       '</div>';
   }
 
@@ -1127,12 +1126,7 @@ async function openApplyOnBehalf(reportId){
       (seeker.resume_url ? '<div style="margin-top:10px"><a class="btn btn-sm" href="'+esc(seeker.resume_url)+'" target="_blank" rel="noopener">📄 Download CV / resume</a></div>' : '<div style="margin-top:10px;font-size:12.5px;color:var(--muted)">No CV uploaded — check whether the employer needs one before applying.</div>')+
     '</div>';
 
-  let readinessBlock='<div class="sub" style="margin-bottom:14px">Applicant readiness could not be verified. Do not infer missing personal answers.</div>';
-  if(seeker.id){
-    const {data:ready,error}=await sb.rpc('get_application_readiness',{p_seeker_id:seeker.id});
-    if(!error&&ready){readinessBlock='<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px"><b>'+(ready.ready?'✓ Basic applicant readiness confirmed':'Awaiting applicant information')+'</b>'+(ready.ready?'<div class="sub">Check this employer’s documents, declarations and account requirements separately.</div>':'<ul style="padding-left:20px;line-height:1.6">'+(ready.missing||[]).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>')+'</div>';}
-  }
-  document.getElementById('applyBody').innerHTML = header + readinessBlock + credsBlock + seekerBlock + adminOutcomeForm(r);
+  document.getElementById('applyBody').innerHTML = header + credsBlock + seekerBlock + adminOutcomeForm(r);
   document.getElementById('applyModal').classList.remove('hidden');
 }
 

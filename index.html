@@ -524,7 +524,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <p>⚙️ <b>Finish your profile</b> to unlock your agent — titles, locations and a CV summary power your matches.</p>
           <button class="btn btn-primary btn-sm" onclick="setView('profile')">Open profile</button>
         </div>
-        <div class="card" id="applicationReadinessCard" style="margin-bottom:14px" aria-live="polite"></div>
         <div class="stats">
           <div class="stat" style="cursor:pointer" onclick="setView('matches')" title="View matched jobs"><div class="num" id="stNew">0</div><div class="lbl">Discovered matches</div></div>
           <div class="stat" style="cursor:pointer" onclick="setView('skipped')" title="View skipped jobs"><div class="num" id="stSkipped">0</div><div class="lbl">Skipped by agent</div></div>
@@ -642,11 +641,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
                     background:linear-gradient(90deg,rgba(192,132,252,.16),transparent), #0c1226;
                     box-shadow:inset 4px 0 0 #c084fc">
           <p style="font-size:13.5px;line-height:1.55;color:#ffffff;margin:0">
-            <b>Application readiness:</b> save your genuine information, complete the readiness checklist and confirm it below. Discovery can continue while applications await your information. Never use demo names, invented ID numbers or test addresses.
+            <b>Help employers get to know you:</b> add your current CV, work history, qualifications and supporting documents when available. A more complete profile can make applications easier. You can add more details later.
           </p>
         </div>
-
-        <div class="card" id="profileReadiness" style="margin-bottom:14px" aria-live="polite"></div>
 
         <!-- ============= 1. PERSONAL (REQUIRED) ============= -->
         <div class="card" style="margin-bottom:14px">
@@ -688,7 +685,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
             <div class="field"><label>Province</label>
               <select id="pfProvince"><option value="">— Select —</option>
                 <option>Gauteng</option><option>Western Cape</option><option>KwaZulu-Natal</option><option>Eastern Cape</option>
-                <option>Free State</option><option>Limpopo</option><option>Mpumalanga</option><option>North West</option><option>Northern Cape</option><option>Outside South Africa</option>
+                <option>Free State</option><option>Limpopo</option><option>Mpumalanga</option><option>North West</option><option>Northern Cape</option>
               </select>
             </div>
           </div>
@@ -698,7 +695,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         <!-- ============= 3. RIGHT TO WORK & AVAILABILITY ============= -->
         <div class="card" style="margin-bottom:14px">
           <h3 style="margin-bottom:12px">3&nbsp;· Availability &amp; logistics</h3>
-          <div class="field"><label>Do you currently have the legal right to work in South Africa? <span style="color:var(--accent)">*</span></label><select id="pfRightToWork"><option value="">— Select an accurate answer —</option><option value="true">Yes</option><option value="false">No</option></select><div class="hint">This records your answer; it does not establish eligibility for every job or assume citizenship.</div></div>
           <div class="row2">
             <div class="field"><label>Notice period (days)</label><input type="number" id="pfNoticeDays" min="0" placeholder="e.g. 30"></div>
             <div class="field"><label>Available from</label><input type="date" id="pfAvailableFrom"></div>
@@ -733,9 +729,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
                 <div class="loc-ms-sep"></div>
                 <div id="pfLocsList"></div>
               </div>
-              <p style="color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5">
-                New discovery covers South Africa only. US company feeds are frozen for now. Previously saved international jobs remain in <b>Discovered matches</b> until you delete them. Location preferences help classify jobs for admin review. Railway does not apply; click Apply to request admin handling of a skipped job.
-              </p>
+
             </div>
             <div class="field"><label>Salary range</label>
               <div style="display:flex;gap:8px"><input type="number" id="pfSalaryMin" placeholder="Min"><input type="number" id="pfSalaryMax" placeholder="Max"></div>
@@ -790,7 +784,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
                 <option>Matric / Grade 12</option><option>Certificate</option><option>Diploma</option>
                 <option>Higher Certificate</option><option>Advanced Certificate</option>
                 <option>Bachelor's Degree</option><option>Honours Degree</option><option>Master's Degree</option><option>Doctorate</option>
-                <option>Other</option><option>No formal qualification</option>
+                <option>Other</option>
               </select>
             </div>
           </div>
@@ -801,7 +795,6 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
               <label style="margin:0">Employment history</label>
               <button type="button" class="btn btn-ghost btn-sm" onclick="addEmpRow()">+ Add job</button>
             </div>
-            <div class="hint" style="margin-bottom:8px">For each job, supply the employer, position and actual start date, plus an end date or Currently work here. If you have never worked, enter 0 years and leave employment history blank.</div>
             <div id="pfEmpList" style="display:grid;gap:12px"></div>
           </div>
         </div>
@@ -861,12 +854,11 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
           <h3 style="margin-bottom:12px">12&nbsp;· CV upload <span class="pill gray" style="font-size:10px">optional</span></h3>
           <input type="file" id="pfResume" accept=".pdf,.doc,.docx">
           <div class="hint" id="pfResumeName"></div>
-          <div class="hint" style="margin-top:6px">Upload a current CV, or complete your factual work/education history, skills and a genuine bio so the application worker can generate one. A demo CV is not application ready.</div>
+          <div class="hint" style="margin-top:6px">If you don't upload a CV, admins can use your profile details, but some employers require a CV file. Upload a current CV to help them apply.</div>
         </div>
 
         <!-- ============= SAVE ============= -->
         <div class="card" style="margin-bottom:14px;text-align:center">
-          <label style="display:flex;gap:10px;align-items:flex-start;text-align:left;margin-bottom:16px"><input type="checkbox" id="pfConfirmReal" style="width:auto;margin-top:4px"><span>I confirm that my saved information and documents are real, current and belong to me—not test data. I understand that missing employer-specific requirements can still pause an application.</span></label>
           <button class="btn btn-primary" id="pfSaveBtn" onclick="saveProfile()" style="min-width:220px;padding:12px 24px;font-size:15px">💾 Save profile</button>
           <div class="hint" id="pfSaveStatus" style="color:var(--muted);font-size:12.5px;margin-top:10px"></div>
         </div>
@@ -1184,7 +1176,7 @@ async function refreshAll(){
 /* ================= VIEWS / NAV ================= */
 const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches','Future discovery: South Africa only. US feeds are frozen; saved discoveries remain until you delete them'], skipped:['Skipped by agent','Request Apply to send a skipped job to the admin queue'],
   applications:['Applied matches','Completed applications recorded with confirmation'],
-  docs:['Documents','Supporting documents — upload when a vacancy requires them'],
+  docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
   help:['Contact us','Send a message to the JobAgent team']};
 
@@ -1220,30 +1212,6 @@ function toggleDrawer(){
   $('#sidebar').classList.contains('open') ? closeDrawer() : openDrawer();
 }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDrawer(); });
-
-let applicationReadiness=null;
-async function refreshApplicationReadiness(){
-  if(!currentSeeker?.id){applicationReadiness={ready:false,status:'awaiting_applicant_information',missing:['Save your applicant profile']};renderApplicationReadiness();return applicationReadiness;}
-  try{
-    const {data,error}=await sb.rpc('get_application_readiness',{p_seeker_id:currentSeeker.id});
-    if(error)throw error;
-    applicationReadiness=data&&typeof data.ready==='boolean'?data:{ready:false,missing:['Readiness check unavailable — refresh before applying']};
-  }catch(error){applicationReadiness={ready:false,status:'awaiting_applicant_information',missing:['Readiness could not be verified: '+error.message]};}
-  renderApplicationReadiness();return applicationReadiness;
-}
-function renderApplicationReadiness(){
-  const r=applicationReadiness||{ready:false,missing:['Checking saved applicant information…']};
-  const title=r.ready?'✓ Basic application readiness confirmed':'Awaiting applicant information';
-  const body=r.ready?'Your saved profile is complete and applicant-confirmed. A vacancy may still need additional documents, declarations or candidate account access.'
-    :'Discovery can continue, but applications cannot be queued until these items are completed:';
-  const list=r.ready?'':'<ul style="padding-left:22px;margin:10px 0;line-height:1.7">'+(r.missing||[]).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>';
-  const html='<h3 style="margin-bottom:8px">'+title+'</h3><div class="sub2">'+body+'</div>'+list;
-  const profile=document.getElementById('profileReadiness'),dash=document.getElementById('applicationReadinessCard');
-  if(profile)profile.innerHTML=html;
-  if(dash)dash.innerHTML=html+'<button class="btn btn-sm" onclick="setView(\'profile\')">Review profile</button>';
-}
-document.getElementById('view-profile').addEventListener('input',e=>{if(e.target.id!=='pfConfirmReal')document.getElementById('pfConfirmReal').checked=false;});
-document.getElementById('view-profile').addEventListener('change',e=>{if(e.target.id!=='pfConfirmReal')document.getElementById('pfConfirmReal').checked=false;});
 
 /* ================= PROFILE ================= */
 
@@ -1340,7 +1308,6 @@ const PF_FIELDS = [
   ['pfIdType',         'id_type',              'str'],
   ['pfIdNumber',       'id_number',            'str'],
   ['pfNationality',    'nationality',          'str'],
-  ['pfRightToWork',    'right_to_work_sa',     'bool'],
   ['pfAddress',        'physical_address',     'str'],
   ['pfCity',           'city',                 'str'],
   ['pfProvince',       'province',             'str'],
@@ -1414,7 +1381,7 @@ async function loadProfile(){
 
   const {data} = await sb.from('job_seekers').select('*').eq('user_id', currentUser.id).maybeSingle();
   currentSeeker = data;
-  if(!data){await refreshApplicationReadiness();return;}
+  if(!data) return;
   PF_FIELDS.forEach(([id, col, kind]) => pfSetVal(id, data[col], kind));
   renderLocMenu(data.preferred_locations || []);
   setApplyScope(data.apply_qualifications || [], data.apply_experience_ranges || []);
@@ -1428,8 +1395,6 @@ async function loadProfile(){
   ]);
   emp = e || []; edu = d || []; refs = r || [];
   renderEmpList(); renderEduList(); renderRefList();
-  await refreshApplicationReadiness();
-  $('#pfConfirmReal').checked = applicationReadiness?.ready === true;
 }
 
 /* ================= PROFILE — SAVE ================= */
@@ -1474,8 +1439,6 @@ async function saveProfile(){
     let resumeUrl = currentSeeker?.resume_url || null;
     const file = $('#pfResume').files[0];
     if (file) {
-      if(!file.size||file.size>6*1024*1024||! /\.(pdf|doc|docx)$/i.test(file.name))throw new Error('Upload a non-empty PDF, DOC or DOCX CV no larger than 6 MB.');
-      if(/(^|[ _-])(demo|test|sample)([._ -]|$)/i.test(file.name))throw new Error('A demo/test CV cannot be used for real applications.');
       const path = `${currentUser.id}/resume-${Date.now()}-${file.name}`;
       const {error: upErr} = await sb.storage.from('resumes').upload(path, file, {upsert:true});
       if (upErr) throw upErr;
@@ -1521,12 +1484,11 @@ async function saveProfile(){
     // Save sub-tables in parallel — replace-mode: wipe existing rows for this
     // seeker then insert the current arrays. Simpler + fewer edge cases than
     // per-row diff, and these tables are small.
-    const deleteResults=await Promise.all([
+    await Promise.all([
       sb.from('job_seeker_employment').delete().eq('job_seeker_id', data.id),
       sb.from('job_seeker_education').delete().eq('job_seeker_id', data.id),
       sb.from('job_seeker_references').delete().eq('job_seeker_id', data.id),
     ]);
-    for(const result of deleteResults)if(result.error)throw result.error;
     const insEmp  = emp.filter(r => r.company || r.position).map((r,i) => ({
       job_seeker_id: data.id, company: r.company||'', position: r.position||'',
       start_date: r.start_date||null, end_date: r.end_date||null,
@@ -1543,29 +1505,33 @@ async function saveProfile(){
       company: r.company||null, relationship: r.relationship||null,
       phone: r.phone||null, email: r.email||null, sort_order: i,
     }));
-    for(const [table,rows] of [['job_seeker_employment',insEmp],['job_seeker_education',insEdu],['job_seeker_references',insRefs]]){
-      if(rows.length){const {error}=await sb.from(table).insert(rows);if(error)throw error;}
-    }
+    if (insEmp.length)  await sb.from('job_seeker_employment').insert(insEmp);
+    if (insEdu.length)  await sb.from('job_seeker_education').insert(insEdu);
+    if (insRefs.length) await sb.from('job_seeker_references').insert(insRefs);
 
-    let confirmationError=null;
-    if($('#pfConfirmReal').checked){
-      const {error}=await sb.rpc('confirm_application_profile');
-      confirmationError=error;
+    // Completeness feedback — the "incomplete but saved" branch
+    const optionalMissing = [];
+    if (!payload.physical_address) optionalMissing.push('address');
+    if (!payload.years_experience && !insEmp.length) optionalMissing.push('work history');
+    if (!insEdu.length) optionalMissing.push('education');
+    if (!insRefs.length) optionalMissing.push('references');
+    if (!payload.skills || !payload.skills.length) optionalMissing.push('skills');
+    if (optionalMissing.length) {
+      statusEl.style.color = 'var(--accent)';
+      statusEl.textContent = 'Saved ✓ Consider adding: ' + optionalMissing.join(', ') + '. You can add these details whenever you are ready.';
+      toast('Profile saved ✓ You can add more details later','ok');
+    } else {
+      statusEl.style.color = 'var(--ok)';
+      statusEl.textContent = 'Saved ✓ Thank you for completing your profile.';
+      toast('Profile saved ✓','ok');
     }
-    const readiness=await refreshApplicationReadiness();
-    statusEl.style.color=readiness?.ready?'var(--ok)':'var(--accent)';
-    statusEl.textContent=readiness?.ready
-      ? 'Saved ✓ Basic application readiness confirmed. Employer-specific requirements still apply.'
-      : 'Saved ✓ Discovery can continue. Applications await applicant information: '+(readiness?.missing||[]).join('; ');
-    toast(readiness?.ready?'Profile saved — application ready ✓':'Profile saved — complete the application readiness checklist',readiness?.ready?'ok':'warn');
-    if(confirmationError)toast('Confirmation not accepted: '+confirmationError.message,'warn');
     $('#pfResumeName').textContent = resumeUrl ? '✓ CV on file' : '';
     renderDashboard();
   } catch (err) {
     toast('⚠ ' + err.message, 'err');
     statusEl.style.color = 'var(--danger)';
     statusEl.textContent = 'Save failed: ' + err.message;
-  } finally { await refreshApplicationReadiness();btn.disabled = false; btn.textContent = '💾 Save profile'; }
+  } finally { btn.disabled = false; btn.textContent = '💾 Save profile'; }
 }
 
 /* ================= PROFILE — SUB-TABLE HELPERS ================= */
@@ -1729,12 +1695,24 @@ function renderDashboard(){
   $$('.skipped-badge-sync').forEach(b=>{const n=matches.filter(isSkippedMatch).length;b.textContent=n;b.classList.toggle('hidden',n===0);});
 
   // Top-right "Last …" label removed — per-card timestamps carry the truth.
-  const discoveryConfigured=!!(currentSeeker?.job_title_keywords?.length&&currentSeeker?.preferred_locations?.length);
-  $('#setupBanner').classList.toggle('hidden',discoveryConfigured);
-  if(discoveryConfigured){
-    $('#agentSummary').innerHTML='Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>South African job discovery continues while application readiness is completed. Applications currently remain admin-controlled.';
-  }else $('#agentSummary').textContent='Set your target job titles and South African locations to configure discovery.';
-  renderApplicationReadiness();
+  // Profile is "complete" when the strengthened required fields are filled — CV upload is now optional.
+  const done = !!(currentSeeker
+    && currentSeeker.job_title_keywords?.length
+    && currentSeeker.preferred_locations?.length
+    && currentSeeker.full_name
+    && currentSeeker.phone
+    && currentSeeker.id_number
+    && currentSeeker.gender
+    && currentSeeker.date_of_birth
+    && currentSeeker.nationality
+    && currentSeeker.apply_qualifications?.length
+    && currentSeeker.apply_experience_ranges?.length);
+  $('#setupBanner').classList.toggle('hidden', done);
+  if(done){
+    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Railway discovers South African jobs nationwide every few hours. Admins handle all applications.';
+  } else {
+    $('#agentSummary').textContent='Set up your profile to activate the agent.';
+  }
 
   // Derived activity feed — merges recent matches + applications, no separate activity table exists
   const feed=[];
@@ -2109,8 +2087,6 @@ $('#matchGrid').addEventListener('click', async (e)=>{
   if(action==='view'){ if(mm) openJobView(mm); return; }
   if(action==='apply'){
     btn.disabled=true;
-    const readiness=await refreshApplicationReadiness();
-    if(readiness?.ready!==true){toast('Awaiting applicant information: '+(readiness?.missing||['Readiness check unavailable']).join('; '),'warn');btn.disabled=false;setView('profile');return;}
     const {error}=await sb.rpc('request_job_application',{p_match_id:id});
     if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
     if(mm){mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
@@ -2271,7 +2247,7 @@ async function loadDocuments(){
 }
 function renderDocuments(){
   const el=$('#docList');
-  if(!documents.length){ el.innerHTML='<div class="empty"><div class="big">🗂️</div>No supporting documents yet. ID copies, certificates, photographs and payslips are needed only where the selected employer requires them.</div>'; return; }
+  if(!documents.length){ el.innerHTML='<div class="empty"><div class="big">🗂️</div>No documents yet — optional, add them anytime.</div>'; return; }
   el.innerHTML = documents.map(d=>'<div class="lrow">'+
     '<span style="font-size:22px">'+(DOC_TYPE_ICON[d.doc_type]||'📎')+'</span>'+
     '<div class="grow"><b>'+esc(DOC_TYPE_LABEL[d.doc_type]||d.doc_type)+'</b><div class="sub2"><a href="'+esc(d.file_url)+'" target="_blank" rel="noopener">'+esc(d.file_name)+'</a></div></div>'+
@@ -2296,7 +2272,7 @@ async function addDoc(){
     if(insErr) throw insErr;
     $('#docFile').value='';
     toast('Document added ✓','ok');
-    await loadDocuments(); renderDocuments(); await refreshApplicationReadiness();renderDashboard();
+    await loadDocuments(); renderDocuments(); renderDashboard();
   }catch(err){
     toast('⚠ '+err.message,'err');
   }finally{ btn.disabled=false; btn.textContent='⬆ Upload'; }
@@ -2305,7 +2281,7 @@ $('#docList').addEventListener('click', async (e)=>{
   const btn=e.target.closest('button[data-remove-doc-id]');
   if(!btn) return;
   await sb.from('job_seeker_documents').delete().eq('id', btn.dataset.removeDocId);
-  await loadDocuments(); renderDocuments(); await refreshApplicationReadiness();
+  await loadDocuments(); renderDocuments();
 });
 
 /* ================= BLOCK LIST ================= */
