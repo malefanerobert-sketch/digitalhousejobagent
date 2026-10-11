@@ -2178,8 +2178,8 @@ function renderApplications(){
   const byJob=new Map();
   applications.filter(isConfirmedApplication).forEach(a=>{if(!byJob.has(a.job_match_id||a.id))byJob.set(a.job_match_id||a.id,a);});
   const applied=[...byJob.values()];
-  $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Completed applications only. Admin confirmation is labelled separately from an automated website receipt.</p>'+
-    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'✓ Admin confirmed':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button><button class="btn btn-ghost btn-xs" data-view-application="'+esc(a.id)+'">Confirmation</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
+  $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Application completed</p>'+
+    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button><button class="btn btn-ghost btn-xs" data-view-application="'+esc(a.id)+'">Confirmation</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
 }
 
 function applicationDetails(id){
@@ -2204,10 +2204,8 @@ function applicationDetails(id){
         '<div class="sub2" style="margin-top:6px">The agent found a submission receipt after sending the form.</div>'+
       '</div>';
   } else if(manual){
-    proofBlock =
-      '<div style="border:1px solid rgba(125,211,252,.35);background:rgba(125,211,252,.07);border-radius:12px;padding:14px;margin-bottom:16px">'+
-        '<b>✓ '+(a.verification_status==='admin_confirmed'?'Recorded by admin':'Marked applied by you')+'</b><div class="sub2" style="margin-top:6px">Human-confirmed completion, not an automated website verification.</div>'+
-      '</div>';
+    // Preserve the saved confirmation details without the attribution banner.
+    proofBlock = '';
   } else if(a.result==='submission_unverified'){
     proofBlock =
       '<div class="danger-box" style="margin-bottom:16px"><b>❔ Submission not verified</b><div class="sub2" style="margin-top:6px">The agent clicked Submit, but the website did not show a receipt. This job is not marked Applied.</div></div>';
