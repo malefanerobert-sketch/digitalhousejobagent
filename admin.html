@@ -1136,29 +1136,63 @@ function adminOutcomeForm(r){
   if(r.status==='applied')return '<div class="card"><b>Completed application</b>'+prior+'</div>';
   return '<div class="card" style="margin-top:16px"><h3>Record the admin outcome</h3><p class="sub">Opening a posting or filling a form does not count as Applied. Record success only after actual employer confirmation.</p>'+
     (r.status==='submission_unverified'?'<p class="danger-box">Check the earlier submission first. Do not send a duplicate just because its receipt was not captured.</p>':'')+
-    '<form id="adminOutcomeForm" data-match-id="'+esc(r.id)+'">'+
+    '<form id="adminOutcomeForm" novalidate data-match-id="'+esc(r.id)+'">'+
     '<label>Outcome<select id="adminOutcome"><option value="success">Applied — employer receipt checked</option><option value="needs_manual_action">Still needs action</option><option value="captcha_blocked">CAPTCHA blocked</option><option value="failed">Failed</option><option value="submission_unverified">Submission uncertain</option></select></label>'+
     '<label>Outcome notes<textarea id="adminOutcomeNotes" rows="3" placeholder="What was completed or what prevented completion?"></textarea></label>'+
     '<label>Employer confirmation text<textarea id="adminReceiptText" rows="3" placeholder="Copy the actual receipt or describe the confirmation you checked"></textarea></label>'+
     '<label>Employer / confirmation URL<input id="adminReceiptUrl" type="url" placeholder="https://employer.example/confirmation"></label>'+
     '<label>Application reference (optional)<input id="adminReceiptReference"></label>'+
     '<label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input id="adminReceiptChecked" type="checkbox" style="width:auto">I checked actual employer confirmation. Opening the form alone is not confirmation.</label>'+
-    '<button class="btn btn-primary" id="adminOutcomeSave" type="submit">Save outcome</button><p id="adminOutcomeStatus" class="sub"></p></form>'+
+    '<button class="btn btn-primary" id="adminOutcomeSave" type="submit">Save outcome</button><p id="adminOutcomeStatus" class="sub" role="alert" aria-live="polite" style="margin-top:10px;white-space:pre-wrap"></p></form>'+
     '<h4 style="margin-top:16px">Previous attempts</h4>'+prior+'</div>';
+}
+function outcomeError(message){
+  const msg=document.getElementById('adminOutcomeStatus');
+  if(msg){msg.style.color='var(--danger, #ff8f8f)';msg.textContent=message;msg.scrollIntoView({behavior:'smooth',block:'nearest'});}
+}
+function validateEmployerReceiptUrl(value){
+  try{
+    const url=new URL(value);
+    if(url.protocol!=='https:'||!url.hostname||url.username||url.password)return null;
+    if(/(^|\.)adzuna\.[a-z.]+$/i.test(url.hostname))return null;
+    return url.href;
+  }catch{return null;}
 }
 document.getElementById('applyBody').addEventListener('submit',async e=>{
   if(e.target.id!=='adminOutcomeForm')return;e.preventDefault();
-  const btn=document.getElementById('adminOutcomeSave'),msg=document.getElementById('adminOutcomeStatus');
+  const form=e.target,btn=document.getElementById('adminOutcomeSave'),msg=document.getElementById('adminOutcomeStatus');
+  if(btn.disabled)return;
   const outcome=document.getElementById('adminOutcome').value;
   const checked=document.getElementById('adminReceiptChecked').checked;
-  const text=document.getElementById('adminReceiptText').value.trim(),url=document.getElementById('adminReceiptUrl').value.trim();
+  const text=document.getElementById('adminReceiptText').value.trim(),rawUrl=document.getElementById('adminReceiptUrl').value.trim();
   const notes=document.getElementById('adminOutcomeNotes').value.trim();
-  if(outcome==='success'&&(!checked||text.length<8||!url.startsWith('https://'))){msg.textContent='Check the employer receipt and add confirmation details plus an HTTPS employer URL.';return;}
-  if(outcome!=='success'&&!notes){msg.textContent='Please describe what prevented completion.';return;}
-  btn.disabled=true;msg.textContent='Saving…';
-  const {error}=await sb.rpc('admin_record_application',{p_match_id:e.target.dataset.matchId,p_outcome:outcome,p_notes:notes,p_confirmation_text:text||null,p_confirmation_url:url||null,p_reference:document.getElementById('adminReceiptReference').value.trim()||null,p_receipt_checked:checked});
-  if(error){msg.textContent=error.message;btn.disabled=false;return;}
-  toast(outcome==='success'?'Application recorded — now visible in Applied matches':'Outcome saved for admin follow-up','ok');closeApplyModal();await loadReport();
+  let url=null;
+  if(outcome==='success'){
+    const missing=[];
+    if(!checked)missing.push('Tick the box confirming that you checked actual employer confirmation.');
+    if(text.length<8)missing.push('Enter the actual confirmation text or a description of the receipt you checked (at least 8 characters).');
+    url=validateEmployerReceiptUrl(rawUrl);
+    if(!url)missing.push('Enter a valid HTTPS employer/confirmation URL, not a discovery advert URL.');
+    if(missing.length){outcomeError('Not saved yet:\n• '+missing.join('\n• '));return;}
+  }else if(!notes){outcomeError('Not saved yet: enter outcome notes explaining what prevented completion.');return;}
+  btn.disabled=true;btn.textContent='Saving…';msg.style.color='';msg.textContent='Saving…';
+  let timer;
+  try{
+    const request=sb.rpc('admin_record_application',{
+      p_match_id:form.dataset.matchId,p_outcome:outcome,p_notes:notes||null,
+      p_confirmation_text:outcome==='success'?text:null,p_confirmation_url:outcome==='success'?url:null,
+      p_reference:document.getElementById('adminReceiptReference').value.trim()||null,
+      p_receipt_checked:outcome==='success'&&checked
+    });
+    const response=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('The save request timed out. Refresh the queue and check whether this outcome was recorded before retrying.')),30000);})]);
+    if(response.error)throw response.error;
+    if(!response.data||response.data.id!==form.dataset.matchId)throw new Error('The server did not confirm the saved outcome. Refresh the queue and check the job before retrying.');
+    msg.style.color='var(--ok)';msg.textContent='Outcome saved.';
+    toast(outcome==='success'?'Application recorded — now visible in Applied matches':'Outcome saved for admin follow-up','ok');
+    closeApplyModal();
+    try{await loadReport();}catch{toast('Outcome saved. Refresh the queue to see the updated record.','warn');}
+  }catch(error){outcomeError('Could not save: '+(error.message||'Connection error. Check your connection and try again.'));}
+  finally{clearTimeout(timer);btn.disabled=false;btn.textContent='Save outcome';}
 });
 
 // Compact "label : value : copy-button" row used inside the apply modal.

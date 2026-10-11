@@ -32,7 +32,7 @@ async function main(){
   // Test admin form without accessing any employer or real database.
   await page.setContent('<div id="applyBody"></div>');
   const fsx=admin.indexOf('function adminOutcomeForm'),fex=admin.indexOf('// Compact "label',fsx);
-  await page.addScriptTag({content:`var writes=[];var sb={rpc:async(n,a)=>{writes.push({name:n,args:a});return {error:null}}};var closeApplyModal=()=>{};var loadReport=async()=>{};`+admin.slice(fsx,fex)});
+  await page.addScriptTag({content:`var writes=[];var sb={rpc:async(n,a)=>{writes.push({name:n,args:a});return {data:{id:a.p_match_id,status:a.p_outcome==='success'?'applied':a.p_outcome},error:null}}};var closeApplyModal=()=>{};var loadReport=async()=>{};`+admin.slice(fsx,fex)});
   await page.evaluate(()=>document.getElementById('applyBody').innerHTML=adminOutcomeForm({id:'fixture',status:'pending',application_log:[]}));
   await page.fill('#adminReceiptText','Your application has been received.');await page.fill('#adminReceiptUrl','https://employer.example/receipt');await page.click('#adminOutcomeSave');assert.equal(await page.evaluate(()=>writes.length),0);
   await page.check('#adminReceiptChecked');await page.click('#adminOutcomeSave');assert.equal(await page.evaluate(()=>writes.length),1);assert.equal((await page.evaluate(()=>writes[0])).args.p_outcome,'success');assert.equal((await page.evaluate(()=>writes[0])).args.p_receipt_checked,true);
