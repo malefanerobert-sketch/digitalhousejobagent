@@ -23,4 +23,4 @@
 
 ## Validation
 Local fixture tests only: no paid solver calls, real employer submissions or automatic retries of uncertain applications.
-Run `node test-match-captcha.js` and `node test-application-flow.js` with Playwright/Chromium available.
+Run `node test-match-captcha.js`, `node test-match-render.js` and `node test-application-flow.js` with Playwright/Chromium available.
