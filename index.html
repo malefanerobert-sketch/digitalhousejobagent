@@ -1917,7 +1917,7 @@ function discoveryDate(value){
   const d=new Date(value);
   if(Number.isNaN(d.getTime()))return 'Date and time unavailable';
   const date=d.toLocaleDateString('en-ZA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'short',day:'numeric'});
-  const time=d.toLocaleTimeString('en-ZA',{timeZone:'Africa/Johannesburg',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const time=d.toLocaleTimeString('en-ZA',{timeZone:'Africa/Johannesburg',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   return date+' · '+time+' SAST';
 }
 
