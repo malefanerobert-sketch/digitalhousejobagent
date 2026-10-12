@@ -1,0 +1,2670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobAgent — your job agent working even while you sleep</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  color-scheme:dark;   /* keeps native controls (calendar picker, dropdown chevrons, spinners) light-on-dark */
+  /* Single built-in theme: Signal (blue + lime). The theme picker has been
+     removed — these values are the app's fixed palette. */
+  --bg:#0a0f1e; --panel:#111a33; --panel2:#0d1428; --line:#23305a;
+  --text:#e9edf9; --muted:#8b96b8; --accent:#4f9dff; --accent2:#a3e635;
+  --accent-rgb:79,157,255; --accent2-rgb:163,230,53; --accent-tint:#a8c8ff;
+  --btn-a:#4f9dff; --btn-b:#2f7de0; --btn-text:#071a33;
+  --btn-shadow:rgba(79,157,255,.25); --btn-shadow-hover:rgba(79,157,255,.4);
+  --danger:#ff6b6b; --ok:#34d399; --radius:14px;
+  --card-bg:linear-gradient(180deg,#121b38,#0f1730); --card-text:#e9edf9; --sidebar-bg:#0c1226;
+  --input-bg:#0d1428;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg); color:var(--text); min-height:100vh; font-size:15px; transition:.3s; font-weight:500;
+}
+#bgfx{position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 85% -10%, rgba(var(--accent-rgb),.10), transparent 60%),
+    radial-gradient(800px 500px at -10% 100%, rgba(var(--accent2-rgb),.08), transparent 60%),
+    radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size:auto,auto,26px 26px;
+}
+.hidden{display:none!important}
+a{color:var(--accent2)}
+::selection{background:rgba(var(--accent-rgb),.35)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#26335e;border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- buttons / inputs ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);
+  background:#182347;color:var(--text);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;
+  cursor:pointer;transition:.18s;font-family:inherit}
+.btn:hover{transform:translateY(-1px);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-primary{background:linear-gradient(135deg,var(--btn-a),var(--btn-b));color:var(--btn-text);border:none;
+  box-shadow:0 6px 18px var(--btn-shadow)}
+.btn-primary:hover{box-shadow:0 8px 24px var(--btn-shadow-hover)}
+.btn-ghost{background:transparent}
+.btn-danger{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.4);color:#ff8f8f}
+.btn-danger:hover{background:rgba(255,107,107,.22)}
+.btn-ok{background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.4);color:#5ee6b0}
+.btn-sm{padding:7px 12px;font-size:13px;border-radius:8px}
+.btn-xs{padding:4px 9px;font-size:12px;border-radius:7px}
+.btn-block{width:100%}
+.btn.spin::after{content:'';width:14px;height:14px;border:2px solid rgba(0,0,0,.35);border-top-color:var(--btn-text);
+  border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:6px}
+.field .hint{font-size:12px;color:var(--muted);margin-top:5px}
+input,select,textarea{width:100%;background:var(--input-bg);border:1px solid var(--line);color:var(--text);
+  padding:10px 12px;border-radius:10px;font-family:inherit;font-size:14px;transition:.15s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(var(--accent-rgb),.15)}
+textarea{min-height:96px;resize:vertical}
+input[type=file]{padding:8px}
+input[type=radio]{width:auto}
+/* Force the browser calendar / clock picker icons to render white.
+   We paint our own white SVG icon and hide Chrome's default indicator so that
+   :root's color-scheme:dark doesn't fight us. */
+input[type=date],input[type=datetime-local],input[type=time],input[type=month],input[type=week],input[type=number]{color-scheme:dark}
+input[type=date]::-webkit-datetime-edit,input[type=datetime-local]::-webkit-datetime-edit,
+input[type=time]::-webkit-datetime-edit,input[type=month]::-webkit-datetime-edit{color:var(--text)}
+input[type=date]::-webkit-calendar-picker-indicator,
+input[type=datetime-local]::-webkit-calendar-picker-indicator,
+input[type=month]::-webkit-calendar-picker-indicator,
+input[type=week]::-webkit-calendar-picker-indicator{
+  /* replace Chrome's tinted icon with a plain white one */
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='18' rx='2' ry='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg>");
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:18px 18px;
+  color:transparent;                 /* wipe out the built-in glyph */
+  width:22px;height:22px;padding:0;margin-right:2px;
+  opacity:1;filter:none;cursor:pointer;
+}
+input[type=time]::-webkit-calendar-picker-indicator{
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg>");
+  background-repeat:no-repeat;background-position:center;background-size:18px 18px;
+  color:transparent;width:22px;height:22px;padding:0;margin-right:2px;
+  opacity:1;filter:none;cursor:pointer;
+}
+select{cursor:pointer}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+
+/* apply-scope cards (qualifications / experience) */
+.scope-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.scope-card{display:flex;align-items:center;gap:12px;background:var(--input-bg);border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px;cursor:pointer;transition:.15s;position:relative;user-select:none;margin:0;
+  text-transform:none;letter-spacing:0;font-size:14px;font-weight:600;color:var(--text)}
+.scope-card:hover{border-color:var(--accent)}
+.scope-card.on{border-color:var(--accent);background:rgba(var(--accent-rgb),.10)}
+.scope-card input{width:18px;height:18px;flex:none;padding:0;accent-color:var(--accent);cursor:pointer}
+.scope-card .sc-x{margin-left:auto;width:24px;height:24px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(255,107,107,.15);color:#ff6b6b;border:1px solid rgba(255,107,107,.35);border-radius:8px;
+  cursor:pointer;font-size:13px;font-weight:700;line-height:1}
+.scope-card.yrs{font-size:18px;font-variant-numeric:tabular-nums}
+.scope-card.yrs small{font-size:12px;color:var(--muted);font-weight:600;margin-left:2px}
+.scope-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.scope-add input{width:auto;flex:1;min-width:160px}
+.scope-add input.num{flex:none !important;width:90px !important;text-align:center}
+.scope-err{border-radius:12px;outline:2px solid var(--danger);outline-offset:6px}
+
+/* preferred-locations multiselect (Profile) */
+.loc-multiselect{position:relative}
+.loc-ms-btn{width:100%;background:var(--input-bg);border:1px solid var(--line);color:var(--text);
+  padding:10px 12px;border-radius:10px;font-family:inherit;font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;transition:.15s}
+.loc-ms-btn:hover{border-color:var(--accent)}
+.loc-ms-btn.open{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.15)}
+.loc-ms-btn .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.loc-ms-btn .lbl.placeholder{color:var(--muted)}
+.loc-ms-caret{flex:none;color:var(--muted);font-size:11px;transition:.15s}
+.loc-ms-btn.open .loc-ms-caret{transform:rotate(180deg)}
+.loc-ms-menu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:40;background:var(--panel2);
+  border:1px solid var(--line);border-radius:12px;padding:6px;max-height:280px;overflow-y:auto;
+  box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.loc-ms-opt{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:14px}
+.loc-ms-opt:hover{background:var(--panel2)}
+.loc-ms-opt input{width:auto;accent-color:var(--accent);cursor:pointer}
+.loc-ms-opt.all-opt{font-weight:700;color:var(--accent)}
+.loc-ms-sep{height:1px;background:var(--line);margin:6px 2px}
+.loc-ms-opt.disabled{opacity:.4;pointer-events:none}
+.err{color:var(--danger);font-size:13px;min-height:18px;margin:4px 0 8px}
+.ok-msg{color:var(--ok);font-size:13px;margin:4px 0 8px}
+.radio-card{display:flex;gap:10px;align-items:flex-start;background:var(--input-bg);border:1px solid var(--line);
+  border-radius:10px;padding:12px;margin-bottom:10px;cursor:pointer;transition:.15s}
+.radio-card:hover{border-color:var(--accent)}
+.radio-card.active{border-color:var(--accent);background:rgba(var(--accent-rgb),.08)}
+.radio-card b{display:block;font-size:14px}
+.radio-card small{color:var(--muted);font-size:12.5px}
+
+/* password show/hide */
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:44px}
+.pw-toggle{position:absolute;right:8px;top:0;bottom:0;background:none;border:none;padding:0;margin:0;cursor:pointer;
+  color:var(--muted);display:flex;align-items:center;justify-content:center;width:26px}
+.pw-toggle:hover{color:var(--text);background:none;transform:none}
+.pw-toggle:focus{outline:none}
+
+/* ---------- auth ---------- */
+#authWrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-card{width:100%;max-width:440px;background:linear-gradient(180deg,#131d3a,#0e1630);
+  border:1px solid var(--line);border-radius:20px;padding:34px;box-shadow:0 30px 80px rgba(0,0,0,.5);transition:.3s}
+.brand{text-align:center;margin-bottom:26px}
+.brand .logo{font-size:34px}
+.brand h1{font-size:26px;font-weight:900;letter-spacing:-.02em}
+.brand p{color:var(--muted);font-size:13.5px;margin-top:4px}
+.pulse{position:relative;width:74px;height:74px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center}
+.pulse .dish{font-size:34px;z-index:2}
+.pulse::before,.pulse::after{content:'';position:absolute;inset:0;border-radius:50%;
+  border:2px solid rgba(255,180,84,.5);animation:ping 2.4s ease-out infinite}
+.pulse::after{animation-delay:1.2s}
+@keyframes ping{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.5);opacity:0}}
+.auth-links{display:flex;justify-content:space-between;margin-top:16px;font-size:13.5px;flex-wrap:wrap;gap:8px}
+.auth-links a{cursor:pointer;color:var(--accent2);text-decoration:none}
+.auth-links a:hover{text-decoration:underline}
+.divider{height:1px;background:var(--line);margin:18px 0}
+
+/* ---------- app shell ---------- */
+.shell{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+#sidebar{background:#0c1226;border-right:1px solid #23305a;padding:20px 14px;display:flex;
+  flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.side-brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;border-bottom:1px solid #23305a;margin-bottom:14px}
+.side-brand .logo{font-size:26px}
+.side-brand b{font-size:18px;font-weight:900}
+.side-brand small{display:block;color:#8b96b8;font-size:11px;font-weight:600}
+.nav-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;
+  color:#8b96b8;padding:10px 12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;
+  transition:.15s;font-family:inherit;margin-bottom:2px}
+.nav-btn:hover{background:#0d1428;color:#e9edf9}
+.nav-btn.active{background:linear-gradient(90deg,rgba(192,132,252,.16),transparent);color:#c084fc;
+  box-shadow:inset 3px 0 0 #c084fc}
+.nav-btn .ico{width:22px;text-align:center}
+.nav-badge{margin-left:auto;background:var(--accent);color:var(--btn-text);font-size:11px;font-weight:800;
+  border-radius:99px;padding:1px 8px}
+.side-foot{margin-top:auto;padding-top:14px;border-top:1px solid #23305a}
+.agent-pill{display:flex;align-items:center;gap:8px;background:var(--input-bg);border:1px solid var(--line);
+  border-radius:99px;padding:8px 12px;font-size:12px;color:var(--muted);margin-bottom:10px}
+
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.dot.busy{background:var(--accent);animation:blink 1s infinite}
+.dot.idle{background:var(--muted)}
+@keyframes blink{50%{opacity:.3}}
+main{padding:26px 30px 60px;max-width:1200px;width:100%}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.topbar h2{font-size:24px;font-weight:900;letter-spacing:-.02em}
+.topbar .sub{color:var(--muted);font-size:13.5px;margin-top:3px}
+.topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.lastscan{color:var(--muted);font-size:12.5px}
+
+/* ---------- cards / sections ---------- */
+.card{background:var(--card-bg);border:1px solid var(--line);
+  border-radius:var(--radius);padding:22px}
+.card h3{font-size:16px;font-weight:800;margin-bottom:14px}
+.card.dismissable{position:relative}
+.card.dismissable.hidden{display:none!important}
+.card-close{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;background:transparent;
+  border:1px solid transparent;color:var(--muted);font-size:14px;cursor:pointer;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;transition:background .15s,color .15s,border-color .15s}
+.card-close:hover{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.35);color:#ff8f8f}
+.msg-del{background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:3px 7px;border-radius:6px;opacity:.6;transition:opacity .15s,background .15s,color .15s}
+.msg-del:hover{opacity:1;background:rgba(255,107,107,.1);color:#ff8f8f}
+.section-note{color:var(--muted);font-size:13.5px;line-height:1.6;margin-bottom:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
+.stat{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;transition:.2s}
+.stat:hover{transform:translateY(-2px);border-color:var(--accent)}
+.stat .num{font-size:28px;font-weight:800;color:var(--accent)}
+.stat .lbl{color:var(--muted);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+.stat.teal .num{color:var(--accent2)}
+.stat.red .num{color:var(--danger)}
+.stat.green .num{color:var(--ok)}
+.banner{background:linear-gradient(90deg,rgba(var(--accent-rgb),.15),rgba(var(--accent2-rgb),.08));border:1px solid rgba(var(--accent-rgb),.35);
+  border-radius:var(--radius);padding:16px 20px;margin-bottom:22px;display:flex;align-items:center;
+  justify-content:space-between;gap:14px;flex-wrap:wrap}
+.banner p{font-size:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.activity{list-style:none}
+.activity li{display:flex;gap:10px;padding:9px 0;border-bottom:1px dashed #1c2848;font-size:13.5px;color:#c3cbe6}
+.activity li:last-child{border-bottom:none}
+.activity time{margin-left:auto;color:var(--muted);font-size:11.5px;flex:none}
+
+/* ---------- matches ---------- */
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+.toolbar input[type=search]{max-width:260px}
+.toolbar select{width:auto;min-width:150px}
+.match-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}
+.mcard{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;display:flex;flex-direction:column;gap:10px;transition:.2s}
+.mcard:hover{transform:translateY(-3px);border-color:#3a4c8f;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.mcard-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.score{background:linear-gradient(135deg,var(--btn-a),var(--btn-b));color:var(--btn-text);font-weight:800;font-size:13px;
+  border-radius:99px;padding:4px 11px;flex:none}
+.score.gray{background:#1a2444;color:var(--muted)}
+.mcard h4{font-size:16px;font-weight:800;line-height:1.3}
+.mcard .co{color:var(--accent2);font-size:13.5px;font-weight:600}
+.mcard .meta{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:#182347;border:1px solid var(--line);color:#aeb9dd;font-size:11.5px;font-weight:600;
+  border-radius:99px;padding:3px 10px}
+.mcard .blurb{color:#aeb9dd;font-size:13px;line-height:1.55;flex:1}
+.mcard .acts{margin-top:auto;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.mcard .acts-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0}
+.mcard .found{color:var(--muted);font-size:11.5px;margin-left:auto;white-space:nowrap;flex:none}
+.mcard .skip-note{background:rgba(255,184,77,.10);border:1px solid rgba(255,184,77,.35);color:#ffd08a;border-radius:10px;
+  padding:9px 11px;font-size:12.5px;line-height:1.5}
+.mcard .queued-note{background:rgba(var(--accent2-rgb),.08);border:1px solid rgba(var(--accent2-rgb),.3);color:var(--accent2);
+  border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.5}
+.mcard .sn-box{cursor:pointer;user-select:none}
+.mcard .sn-closed{padding:3px 9px;font-size:11px;border-radius:8px}
+.mcard .sn-head{display:flex;align-items:center;gap:6px;height:15px;line-height:15px}
+.mcard .sn-view{flex:1;min-width:0;overflow:hidden;white-space:nowrap;position:relative}
+.mcard .sn-track{display:inline-block;padding-left:100%;animation:sn-scroll 16s linear infinite;will-change:transform}
+.mcard .sn-box:hover .sn-track{animation-play-state:paused}
+@keyframes sn-scroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+.mcard .sn-caret{flex:none;font-size:10px;opacity:.8}
+.mcard .sn-full{position:relative;padding-right:14px}
+.mcard .sn-full .sn-caret{position:absolute;top:1px;right:0}
+.mcard .note-btn{display:inline-block;vertical-align:baseline;margin-left:6px;padding:1px 6px;font-size:9.5px;font-weight:700;line-height:1.35;
+  border-radius:5px;cursor:pointer;font-family:inherit;white-space:nowrap;background:rgba(255,120,120,.16);color:#ffa8a8;
+  border:1px solid rgba(255,120,120,.45);transition:.15s}
+.mcard .note-btn:hover{background:rgba(255,120,120,.32);color:#fff}
+.mcard .note-btn:disabled{opacity:.5;cursor:default}
+.pill.skip{background:rgba(255,184,77,.16);color:#ffc266}
+.empty{border:1px dashed #2c3b6e;border-radius:var(--radius);padding:48px 20px;text-align:center;color:var(--muted)}
+.empty .big{font-size:38px;margin-bottom:10px}
+
+/* ---------- tables / lists ---------- */
+.lrow{display:flex;align-items:center;gap:14px;padding:14px 6px;border-bottom:1px solid #1a2444;flex-wrap:wrap}
+.lrow:last-child{border-bottom:none}
+/* Keep Applied matches headings and job titles on the same left edge. */
+#appList .lrow{padding-inline:0}
+.lrow .grow{flex:1;min-width:180px}
+.lrow b{font-size:14.5px}
+.lrow .sub2{color:var(--muted);font-size:12.5px;margin-top:2px}
+.pill{font-size:11.5px;font-weight:700;border-radius:99px;padding:4px 11px}
+.pill.amber{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.pill.green{background:rgba(52,211,153,.14);color:var(--ok)}
+#jobApplicationDetails .completion-badge{display:inline-block;max-width:100%;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+#jobApplicationDetails .completion-heading{margin-bottom:10px}
+.pill.red{background:rgba(255,107,107,.14);color:#ff8f8f}
+.pill.teal{background:rgba(var(--accent2-rgb),.14);color:var(--accent2)}
+.pill.gray{background:#1a2444;color:var(--muted)}
+
+/* ---------- block chips ---------- */
+.block-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip-unblock{background:rgba(52,211,153,.14);border:1px solid rgba(52,211,153,.4);color:#5ee6b0;
+  border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;
+  transition:.15s;letter-spacing:.02em}
+.chip-unblock:hover{background:rgba(52,211,153,.28);color:#8ff2c8}
+.block-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(255,107,107,.1);
+  border:1px solid rgba(255,107,107,.35);color:#ffb0b0;border-radius:99px;padding:6px 8px 6px 14px;font-size:13px;font-weight:600}
+.block-chip button{background:none;border:none;color:#ff8f8f;cursor:pointer;font-size:15px;line-height:1;padding:0 4px}
+.block-chip button:hover{color:#fff}
+.block-chip.loc{background:rgba(var(--accent-rgb),.09);border-color:rgba(var(--accent-rgb),.35);color:var(--accent-tint)}
+.block-chip.loc button{color:var(--accent)}
+.addrow{display:flex;gap:10px}
+.addrow input{flex:1}
+
+/* ---------- outputs ---------- */
+.output{background:var(--input-bg);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-top:16px}
+.output textarea{white-space:pre-wrap;font-family:inherit;font-size:13.5px;line-height:1.65;color:#d5dbf0;
+  background:transparent;border:none;min-height:320px;padding:0}
+.output textarea:focus{box-shadow:none}
+.output-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.output-head b{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;background:rgba(5,8,18,.72);backdrop-filter:blur(4px);display:flex;
+  align-items:center;justify-content:center;z-index:100;padding:20px}
+.modal-card{background:var(--card-bg);border:1px solid var(--line);border-radius:18px;
+  padding:26px;max-width:600px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 30px 80px rgba(0,0,0,.6);
+  animation:pop .22s ease;transition:.3s}
+@keyframes pop{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+/* Keep job details scrolling inside the popup, but make the scrollbar handle
+   wider, clearer and easier to grab than the default app scrollbar. */
+#jobModal .modal-card{
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;
+  scrollbar-width:auto;scrollbar-color:#4f68aa rgba(9,14,30,.5);
+  -webkit-overflow-scrolling:touch
+}
+#jobModal .modal-card::-webkit-scrollbar{width:16px}
+#jobModal .modal-card::-webkit-scrollbar-track{background:rgba(9,14,30,.5);border-radius:12px}
+#jobModal .modal-card::-webkit-scrollbar-thumb{
+  background:#4f68aa;border:3px solid transparent;background-clip:padding-box;border-radius:12px
+}
+#jobModal .modal-card::-webkit-scrollbar-thumb:hover{background:#6682cf;background-clip:padding-box}
+.modal-head h3{font-size:18px;font-weight:800}
+.x-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
+.x-btn:hover{color:#fff}
+.danger-box{border:1px solid rgba(255,107,107,.4);background:rgba(255,107,107,.07);border-radius:12px;padding:18px}
+
+/* ---------- toasts ---------- */
+#toasts{position:fixed;bottom:22px;right:22px;display:flex;flex-direction:column;gap:10px;z-index:200}
+.toast{background:#141f40;border:1px solid var(--line);border-left:4px solid var(--accent2);color:var(--text);
+  padding:13px 18px;border-radius:12px;font-size:13.5px;font-weight:600;box-shadow:0 12px 30px rgba(0,0,0,.5);
+  animation:slidein .25s ease;max-width:340px}
+.toast.ok{border-left-color:var(--ok)}
+.queue-request-message,.toast.queue-success{color:var(--ok);font-size:12.5px;line-height:1.5}
+.queue-request-message{margin:0;font-weight:600}
+.toast.warn{border-left-color:var(--accent)}
+.toast.err{border-left-color:var(--danger)}
+.toast.out{opacity:0;transform:translateX(20px);transition:.35s}
+@keyframes slidein{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+
+/* ---------- mobile nav (off-canvas drawer + bottom tabs + hamburger) ---------- */
+#menuToggleBtn,#drawerBackdrop,#bottomTabs{display:none}
+
+@media(max-width:920px){
+  .shell{grid-template-columns:1fr}
+  main{padding:20px 16px 90px}
+  .row2,.grid2{grid-template-columns:1fr}
+  .topbar{padding-top:44px}
+
+  /* sidebar becomes a slide-in drawer instead of a squeezed wrapped bar */
+  #sidebar{
+    position:fixed;top:0;left:0;height:100vh;width:280px;max-width:82vw;z-index:150;
+    transform:translateX(-100%);transition:transform .25s ease;box-shadow:0 0 50px rgba(0,0,0,.55);
+  }
+  #sidebar.open{transform:translateX(0)}
+  #sidebar nav{display:flex;flex-direction:column;flex-wrap:nowrap;gap:2px}
+  .nav-btn{width:100%}
+  .side-foot{margin-top:auto}
+
+  #menuToggleBtn{
+    display:flex;align-items:center;justify-content:center;position:fixed;top:14px;left:16px;
+    width:42px;height:42px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
+    color:var(--text);font-size:19px;z-index:120;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.4);
+  }
+
+  #drawerBackdrop{
+    display:none;position:fixed;inset:0;background:rgba(5,8,18,.6);z-index:140;
+  }
+  #drawerBackdrop.show{display:block}
+
+  #bottomTabs{
+    display:flex;position:fixed;left:0;right:0;bottom:0;height:66px;background:var(--sidebar-bg);
+    border-top:1px solid var(--line);z-index:110;padding:0 4px;
+  }
+  #bottomTabs .nav-btn,#bottomTabs .tab-more{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    background:none;border:none;color:var(--muted);font-size:10.5px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.02em;padding:6px 2px;margin:0;border-radius:0;
+    position:relative;font-family:inherit;cursor:pointer;transition:.15s;box-shadow:none;text-align:center;
+  }
+  #bottomTabs .nav-btn:hover,#bottomTabs .tab-more:hover{background:none;color:var(--muted)}
+  #bottomTabs .nav-btn .ico,#bottomTabs .tab-more .ico{font-size:19px;width:auto}
+  #bottomTabs .nav-btn.active,#bottomTabs .tab-more.active{color:var(--accent);box-shadow:none}
+  #bottomTabs .nav-btn .nav-badge{position:absolute;top:2px;right:calc(50% - 22px);margin-left:0;
+    font-size:10px;padding:1px 6px}
+}
+
+@media(min-width:921px){
+  #sidebar{transform:none!important}
+}
+
+</style>
+</head>
+<body>
+<div id="bgfx"></div>
+
+<!-- ======================= AUTH ======================= -->
+<div id="authWrap">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="pulse"><span class="dish">📡</span></div>
+      <h1 id="authH1"><span style="color:#FFB3D9">Job</span><span style="color:#4A90E2">Agent</span></h1>
+      <p>Your 24 hour agent is working even while you are busy or asleep</p>
+    </div>
+
+    <!-- sign in -->
+    <div id="p-signin">
+      <div class="field"><label>Email</label><input type="email" id="siEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="field"><label>Password</label>
+        <div class="pw-wrap"><input type="password" id="siPass" placeholder="••••••••" autocomplete="current-password">
+        <button type="button" class="pw-toggle" data-target="siPass" aria-label="Show password"></button></div>
+      </div>
+      <div class="err" id="siErr"></div>
+      <button class="btn btn-primary btn-block" id="siBtn" onclick="doSignin()">Sign in</button>
+      <div class="auth-links">
+        <a id="createAccountLink" onclick="showAuth('signup')">Create an account</a>
+        <a onclick="showAuth('forgot')">Forgot password?</a>
+      </div>
+    </div>
+
+    <!-- sign up -->
+    <div id="p-signup" class="hidden">
+      <div class="field"><label>Full name</label><input id="suName" placeholder="Your name"></div>
+      <div class="field"><label>Email</label><input type="email" id="suEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="field"><label>Confirm email</label><input type="email" id="suEmail2" placeholder="Repeat your email" autocomplete="email"></div>
+      <div class="field"><label>Password</label>
+        <div class="pw-wrap"><input type="password" id="suPass" placeholder="Min. 6 characters" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-target="suPass" aria-label="Show password"></button></div>
+      </div>
+      <div class="field"><label>Confirm password</label>
+        <div class="pw-wrap"><input type="password" id="suPass2" placeholder="Repeat password" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-target="suPass2" aria-label="Show password"></button></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted);cursor:pointer;margin:2px 0 16px">
+        <input type="checkbox" id="suRemember" style="width:auto" checked> Stay logged in
+      </label>
+      <div class="err" id="suErr"></div>
+      <button class="btn btn-primary btn-block" id="suBtn" onclick="doSignup()">Register</button>
+      <div class="auth-links"><a onclick="showAuth('signin')">← Back to sign in</a></div>
+    </div>
+
+    <!-- forgot -->
+    <div id="p-forgot" class="hidden">
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:18px">
+        Enter the email on your account and we'll send you a link to reset your password.</p>
+      <div class="field"><label>Email</label><input type="email" id="fpEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="err" id="fpErr"></div>
+      <div class="ok-msg hidden" id="fpOk"></div>
+      <button class="btn btn-primary btn-block" id="fpBtn" onclick="doForgot()">Send reset link</button>
+      <div class="auth-links"><a onclick="showAuth('signin')">← Back to sign in</a></div>
+    </div>
+
+    <!-- new password (landed on from the emailed link) -->
+    <div id="p-newpass" class="hidden">
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:18px" id="npIntro">
+        Enter a new password for your account below.</p>
+      <div class="err" id="npInvalid" style="display:none;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);border-radius:10px;padding:12px 14px;color:#ffb0b0"></div>
+      <div class="field"><label>New password</label>
+        <div class="pw-wrap"><input type="password" id="npPass" placeholder="Min. 6 characters" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-target="npPass" aria-label="Show password"></button></div>
+      </div>
+      <div class="field"><label>Confirm new password</label>
+        <div class="pw-wrap"><input type="password" id="npPass2" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-target="npPass2" aria-label="Show password"></button></div>
+      </div>
+      <div class="err" id="npErr"></div>
+      <button class="btn btn-primary btn-block" id="npBtn" onclick="doNewPass()">Update password</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= APP ======================= -->
+<div id="app" class="hidden">
+  <div class="shell">
+    <aside id="sidebar">
+      <div class="side-brand"><span class="logo">📡</span>
+        <div><b><span style="color:#FFB3D9">Job</span><span style="color:#4A90E2">Agent</span></b><small>working while you sleep</small></div>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-view="dashboard" onclick="setView('dashboard')"><span class="ico">📡</span>Dashboard</button>
+        <button class="nav-btn" data-view="matches" onclick="setView('matches')"><span class="ico">🎯</span>Discovered matches <span class="nav-badge hidden nav-badge-sync" id="navMatchCount">0</span></button>
+        <button class="nav-btn" data-view="skipped" onclick="setView('skipped')"><span class="ico">⏭</span>Skipped by agent <span class="nav-badge hidden skipped-badge-sync">0</span></button>
+        <button class="nav-btn" data-view="applications" onclick="setView('applications')"><span class="ico">📮</span>Applied matches</button>
+        <button class="nav-btn" data-view="docs" onclick="setView('docs')"><span class="ico">🗂️</span>Documents</button>
+        <button class="nav-btn" data-view="blocked" onclick="setView('blocked')"><span class="ico">🚫</span>Block list</button>
+        <button class="nav-btn" data-view="profile" onclick="setView('profile')"><span class="ico">⚙️</span>Profile</button>
+        <button class="nav-btn" data-view="help" onclick="setView('help')"><span class="ico">✉️</span>Contact us <span class="nav-badge hidden" id="navHelpCount">0</span></button>
+      </nav>
+      <div class="side-foot">
+        <div class="agent-pill"><span class="dot idle" id="agentDot"></span><span id="agentText">waking up…</span></div>
+        <button class="btn btn-ghost btn-sm btn-block" onclick="signOut()">Sign out</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div><h2 id="viewTitle">Dashboard</h2><div class="sub" id="viewSub"></div></div>
+        <div class="topbar-right"></div>
+      </div>
+
+      <!-- DASHBOARD -->
+      <section id="view-dashboard">
+        <div class="banner hidden" id="setupBanner">
+          <p>⚙️ <b>Finish your profile</b> to unlock your agent — titles, locations and a CV summary power your matches.</p>
+          <button class="btn btn-primary btn-sm" onclick="setView('profile')">Open profile</button>
+        </div>
+        <div class="stats">
+          <div class="stat" style="cursor:pointer" onclick="setView('matches')" title="View matched jobs"><div class="num" id="stNew">0</div><div class="lbl">Discovered matches</div></div>
+          <div class="stat" style="cursor:pointer" onclick="setView('skipped')" title="View skipped jobs"><div class="num" id="stSkipped">0</div><div class="lbl">Skipped by agent</div></div>
+          <div class="stat teal" style="cursor:pointer" onclick="setView('applications')" title="View applied jobs"><div class="num" id="stApps">0</div><div class="lbl">Applied matches</div></div>
+        </div>
+        <div class="grid2" id="dashCards">
+          <div class="card dismissable" data-card-id="dash-agent">
+            <button class="card-close" title="Hide this card" onclick="dismissCard('dash-agent')">✕</button>
+            <h3>📡 Your agent</h3>
+            <p class="section-note" id="agentSummary">Set up your profile to activate the agent.</p>
+            <button class="btn btn-primary btn-sm" onclick="refreshAll()">🔄 Refresh now</button>
+          </div>
+          <div class="card dismissable" data-card-id="dash-activity">
+            <button class="card-close" title="Hide this card" onclick="dismissCard('dash-activity')">✕</button>
+            <h3>🕐 Recent activity</h3>
+            <ul class="activity" id="actList"></ul>
+          </div>
+        </div>
+        <div id="dashRestore" style="margin-top:14px"></div>
+      </section>
+
+      <!-- MATCHES -->
+      <section id="view-matches" class="hidden">
+        <div class="toolbar">
+          <input type="search" id="mSearch" placeholder="🔍 Search title, company, skill…" oninput="state.mQ=this.value;renderMatches()">
+          <select id="mLoc" onchange="state.mLoc=this.value;renderMatches()"></select>
+          <button class="btn btn-ghost btn-sm" onclick="clearMatchFilters()">Clear</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--muted);cursor:pointer;margin-left:auto">
+            <input type="checkbox" id="mSelectAll" style="width:auto" onchange="toggleSelectAll(this.checked)"> Select all
+          </label>
+        </div>
+        <div class="banner hidden" id="bulkBar" style="margin-bottom:16px">
+          <p><b id="bulkCount">0</b> selected</p>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-danger btn-sm" onclick="bulkDelete()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>Delete selected</button>
+          </div>
+        </div>
+        <div class="match-grid" id="matchGrid"></div>
+      </section>
+
+      <!-- APPLICATIONS -->
+      <section id="view-applications" class="hidden">
+        <div class="card"><h3>Applied matches</h3><div id="appList"></div></div>
+      </section>
+
+      <!-- DOCUMENTS -->
+      <section id="view-docs" class="hidden">
+        <div class="card">
+          <h3>Other documents</h3>
+          <p class="section-note">Optional — ID, certificates, qualifications. Not required to use JobAgent, but having these on hand speeds up applications that ask for them.</p>
+          <div class="row2">
+            <div class="field"><label>Document type</label>
+              <select id="docType"><option value="id">ID document</option><option value="certificate">Certificate</option><option value="qualification">Qualification</option><option value="other">Other</option></select>
+            </div>
+            <div class="field"><label>File</label><input type="file" id="docFile"></div>
+          </div>
+          <button class="btn btn-primary" id="docUploadBtn" onclick="addDoc()">⬆ Upload</button>
+          <div class="divider"></div>
+          <div id="docList"></div>
+        </div>
+      </section>
+
+      <!-- BLOCK LIST -->
+      <section id="view-blocked" class="hidden">
+        <div class="grid2">
+          <div class="card">
+            <h3>🏢 Blocked companies</h3>
+            <p class="section-note">Your agent will never show you roles from these companies.
+              Made a mistake? Click the <b>Unblock</b> button on any chip below to remove the block —
+              future discoveries from the company can resume. Admins still handle every application.</p>
+            <div class="addrow"><input id="bcInput" placeholder="Company name" onkeydown="if(event.key==='Enter')addBlock('companies')">
+              <button class="btn btn-danger btn-sm" onclick="addBlock('companies')">🚫 Block</button></div>
+            <div class="block-chips" id="bcList"></div>
+          </div>
+          <div class="card">
+            <h3>📍 Blocked places</h3>
+            <p class="section-note">Stop posts from certain cities or regions. Add "Remote" to exclude remote-only roles too.
+              Click <b>Unblock</b> on any place below to remove the block and let the agent discover and flag there again.</p>
+            <div class="addrow"><input id="blInput" placeholder="City or region" onkeydown="if(event.key==='Enter')addBlock('locations')">
+              <button class="btn btn-danger btn-sm" onclick="addBlock('locations')">🚫 Block</button></div>
+            <div class="block-chips" id="blList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <!-- CONTACT US — direct line to the JobAgent team.
+           Threaded support messages, scoped to the signed-in seeker by RLS. -->
+      <section id="view-help" class="hidden">
+        <div class="card dismissable" data-card-id="help-compose">
+          <button class="card-close" title="Hide this card" onclick="dismissCard('help-compose')">✕</button>
+          <h3 style="margin-bottom:4px">✉️ Send us a message</h3>
+          <div class="sub2" style="margin-bottom:12px">Any issue, question or feedback — the agent, technical team or admin will respond here when they can. Replies appear in this thread.</div>
+          <div class="field" style="margin-bottom:10px">
+            <textarea id="helpInput" rows="4" maxlength="2000" placeholder="Describe what's happening — the more detail, the faster we can help." style="resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="helpSendBtn" onclick="sendHelpMessage()">Send message</button>
+            <span class="sub2" id="helpStatus" style="font-size:12.5px"></span>
+          </div>
+        </div>
+        <div class="card dismissable" data-card-id="help-thread" style="margin-top:16px">
+          <button class="card-close" title="Hide this card" onclick="dismissCard('help-thread')">✕</button>
+          <h3 style="margin-bottom:10px">Your conversation</h3>
+          <div id="helpThread"><div class="sub2">Loading…</div></div>
+        </div>
+        <div id="helpRestore" style="margin-top:14px"></div>
+      </section>
+
+      <section id="view-profile" class="hidden">
+        <!-- Notice at the top of the form — same recipe as the ⚙ Profile nav-active state:
+             #0c1226 base + rgba(192,132,252,.16) gradient overlay, #c084fc left bar.
+             Text stays white for readability. -->
+        <div style="margin-bottom:14px;border-radius:10px;padding:14px 16px;
+                    background:linear-gradient(90deg,rgba(192,132,252,.16),transparent), #0c1226;
+                    box-shadow:inset 4px 0 0 #c084fc">
+          <p style="font-size:12.5px;line-height:1.55;color:#ffffff;margin:0">
+            <b>Please note:</b> it is advisable to upload your current CV and add relevant documents, such as your ID and certificates, under Supporting documents. This helps the agent include them in your applications where employers require them. Please also double-check that your email address and contact details are correct and up to date.
+          </p>
+        </div>
+
+        <!-- ============= 1. PERSONAL (REQUIRED) ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">1&nbsp;· Personal details <span style="color:var(--accent);font-size:12px">* required</span></h3>
+          <div class="row2">
+            <div class="field"><label>Full name <span style="color:var(--accent)">*</span></label><input id="pfName"></div>
+            <div class="field"><label>Date of birth <span style="color:var(--accent)">*</span></label><input type="date" id="pfDob"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Gender <span style="color:var(--accent)">*</span></label>
+              <select id="pfGender"><option value="">— Select —</option><option>Male</option><option>Female</option><option>Non-binary</option></select>
+            </div>
+            <div class="field"><label>Race (Employment Equity)</label>
+              <select id="pfRace"><option value="">— Optional —</option><option>African</option><option>Coloured</option><option>Indian</option><option>White</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>ID type <span style="color:var(--accent)">*</span></label>
+              <select id="pfIdType"><option value="">— Select —</option><option value="sa_id">South African ID</option><option value="passport">Passport</option></select>
+            </div>
+            <div class="field"><label>ID / passport number <span style="color:var(--accent)">*</span></label><input id="pfIdNumber"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Nationality <span style="color:var(--accent)">*</span></label><input id="pfNationality"></div>
+            <div class="field"><label>Primary phone <span style="color:var(--accent)">*</span></label><input id="pfPhone"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Alternative phone</label><input id="pfPhoneAlt"></div>
+            <div class="field"><label>Application email</label><input id="pfEmail"></div>
+          </div>
+        </div>
+
+        <!-- ============= 2. ADDRESS ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">2&nbsp;· Address</h3>
+          <div class="field"><label>Street address</label><input id="pfAddress" placeholder="Street, suburb"></div>
+          <div class="row2">
+            <div class="field"><label>City</label><input id="pfCity" placeholder="e.g. Johannesburg"></div>
+            <div class="field"><label>Province</label>
+              <select id="pfProvince"><option value="">— Select —</option>
+                <option>Gauteng</option><option>Western Cape</option><option>KwaZulu-Natal</option><option>Eastern Cape</option>
+                <option>Free State</option><option>Limpopo</option><option>Mpumalanga</option><option>North West</option><option>Northern Cape</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label>Postal code</label><input id="pfPostal" placeholder="e.g. 2000" style="max-width:220px"></div>
+        </div>
+
+        <!-- ============= 3. RIGHT TO WORK & AVAILABILITY ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">3&nbsp;· Availability &amp; logistics</h3>
+          <div class="row2">
+            <div class="field"><label>Notice period (days)</label><input type="number" id="pfNoticeDays" min="0" placeholder="e.g. 30"></div>
+            <div class="field"><label>Available from</label><input type="date" id="pfAvailableFrom"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Own transport?</label>
+              <select id="pfOwnTransport"><option value="">— Select —</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+            <div class="field"><label>Willing to relocate?</label>
+              <select id="pfWillRelocate"><option value="">— Select —</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+          </div>
+          <div class="field"><label>Driver's licence codes</label>
+            <input id="pfLicense" placeholder="e.g. code 10">
+          </div>
+        </div>
+
+        <!-- ============= 4. JOB-SEARCH PREFERENCES ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">4&nbsp;· What you're looking for</h3>
+          <div class="field"><label>Job titles / keywords</label>
+            <input id="pfTitles" placeholder="e.g. Data Capturer, Data Entry, Administrator"></div>
+          <div class="row2">
+            <div class="field loc-multiselect">
+              <label>Preferred locations</label>
+              <button type="button" id="pfLocsBtn" class="loc-ms-btn" onclick="toggleLocMenu(event)">
+                <span class="lbl placeholder" id="pfLocsLabel">Select locations…</span>
+                <span class="loc-ms-caret">▾</span>
+              </button>
+              <div id="pfLocsMenu" class="loc-ms-menu hidden">
+                <label class="loc-ms-opt all-opt"><input type="checkbox" id="pfLocAll" onchange="onPfLocAllChange()"> 🌍 Discover across South Africa</label>
+                <div class="loc-ms-sep"></div>
+                <div id="pfLocsList"></div>
+              </div>
+
+            </div>
+            <div class="field"><label>Salary range</label>
+              <div style="display:flex;gap:8px"><input type="number" id="pfSalaryMin" placeholder="Min"><input type="number" id="pfSalaryMax" placeholder="Max"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============= 5. APPLY SCOPE: QUALIFICATIONS (REQUIRED) ============= -->
+        <div class="card" id="pfQualCard" style="margin-bottom:14px">
+          <h3 style="margin-bottom:6px">5&nbsp;· Qualification levels <span style="color:var(--accent);font-size:12px">* required</span></h3>
+          <p class="hint" style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:12px">
+            Guide discovery and admin review for jobs that may require the following qualifications.
+            Tick <b>one or more</b> (e.g. Diploma, Degree and Honours Degrees). These preferences help flag jobs for review; admins control applications.
+          </p>
+          <div class="scope-grid" id="pfQualGrid"></div>
+          <div class="scope-add">
+            <input id="pfQualNew" placeholder="Not listed? Add a qualification, e.g. Master's Degree" maxlength="60"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomQual();}">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addCustomQual()">+ Add card</button>
+          </div>
+        </div>
+
+        <!-- ============= 6. APPLY SCOPE: EXPERIENCE (REQUIRED) ============= -->
+        <div class="card" id="pfExpCard" style="margin-bottom:14px">
+          <h3 style="margin-bottom:6px">6&nbsp;· Experience ranges <span style="color:var(--accent);font-size:12px">* required</span></h3>
+          <p class="hint" style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:12px">
+            Guide discovery and admin review for jobs that may require experience of the ranges below (in years).
+            Tick <b>one or more</b>. The agent reads this together with your form, uploaded CV and other documents before it applies.
+          </p>
+          <div class="scope-grid" id="pfExpGrid"></div>
+          <div class="scope-add">
+            <span style="color:var(--muted);font-size:13px">Custom range:</span>
+            <input type="number" class="num" id="pfExpFrom" min="0" max="60" placeholder="From">
+            <span style="color:var(--muted)">to</span>
+            <input type="number" class="num" id="pfExpTo" min="1" max="60" placeholder="To">
+            <span style="color:var(--muted);font-size:13px">years</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addCustomExp()">+ Add range</button>
+          </div>
+        </div>
+
+        <!-- ============= 7. WORK EXPERIENCE ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">7&nbsp;· Work experience</h3>
+          <div class="row2">
+            <div class="field"><label>Current / most recent employer</label><input id="pfCurEmployer" placeholder="Company name"></div>
+            <div class="field"><label>Current / most recent position</label><input id="pfCurPosition" placeholder="Job title"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Total years of experience</label><input type="number" id="pfYearsExp" min="0" placeholder="e.g. 5"></div>
+            <div class="field"><label>Highest qualification</label>
+              <select id="pfHighestQual"><option value="">— Select —</option>
+                <option>Matric / Grade 12</option><option>Certificate</option><option>Diploma</option>
+                <option>Higher Certificate</option><option>Advanced Certificate</option>
+                <option>Bachelor's Degree</option><option>Honours Degree</option><option>Master's Degree</option><option>Doctorate</option>
+                <option>Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label>Field of study</label><input id="pfFieldOfStudy" placeholder="e.g. Business Administration"></div>
+
+          <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--line)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <label style="margin:0">Employment history</label>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="addEmpRow()">+ Add job</button>
+            </div>
+            <div id="pfEmpList" style="display:grid;gap:12px"></div>
+          </div>
+        </div>
+
+        <!-- ============= 8. EDUCATION ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">8&nbsp;· Education</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="hint" style="color:var(--muted);font-size:12px">Add each qualification separately</div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addEduRow()">+ Add qualification</button>
+          </div>
+          <div id="pfEduList" style="display:grid;gap:12px"></div>
+        </div>
+
+        <!-- ============= 9. SKILLS & LANGUAGES ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">9&nbsp;· Skills &amp; languages</h3>
+          <div class="field"><label>Skills (comma-separated)</label>
+            <input id="pfSkills" placeholder="e.g. Microsoft Excel, Data Entry, SAP, Sage Pastel">
+          </div>
+          <div class="field"><label>Languages (comma-separated)</label>
+            <input id="pfLanguages" placeholder="e.g. English, Zulu, Afrikaans">
+          </div>
+        </div>
+
+        <!-- ============= 10. ABOUT YOU ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">10&nbsp;· About you</h3>
+          <div class="field"><label>Short bio &nbsp;<span style="color:var(--muted);font-size:11px">"Tell us about yourself"</span></label>
+            <textarea id="pfBio" rows="4" placeholder="A few sentences about your background and what you're looking for."></textarea>
+          </div>
+          <div class="field"><label>Hobbies &amp; interests</label>
+            <input id="pfHobbies" placeholder="e.g. reading, running, community volunteering">
+          </div>
+          <div class="row2">
+            <div class="field"><label>Can you cope with pressure?</label>
+              <select id="pfPressure"><option value="">— Select —</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+            <div class="field"><label>Do you work well in a team?</label>
+              <select id="pfTeam"><option value="">— Select —</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============= 11. REFERENCES ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">11&nbsp;· References</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="hint" style="color:var(--muted);font-size:12px">Usually 2-3 professional references</div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addRefRow()">+ Add reference</button>
+          </div>
+          <div id="pfRefList" style="display:grid;gap:12px"></div>
+        </div>
+
+        <!-- ============= 12. CV UPLOAD (OPTIONAL) ============= -->
+        <div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:12px">12&nbsp;· CV upload <span class="pill gray" style="font-size:10px">optional</span></h3>
+          <input type="file" id="pfResume" accept=".pdf,.doc,.docx">
+          <div class="hint" id="pfResumeName"></div>
+        </div>
+
+        <!-- ============= SAVE ============= -->
+        <div class="card" style="margin-bottom:14px;text-align:center">
+          <button class="btn btn-primary" id="pfSaveBtn" onclick="saveProfile()" style="min-width:220px;padding:12px 24px;font-size:15px">💾 Save profile</button>
+          <div class="hint" id="pfSaveStatus" style="color:var(--muted);font-size:12.5px;margin-top:10px"></div>
+        </div>
+
+      </section>
+
+      <!-- Floating "back to top" button — only visible on the profile page -->
+      <button id="pfTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})"
+              style="position:fixed;right:22px;bottom:22px;display:none;z-index:60;
+                     background:linear-gradient(135deg,var(--btn-a),var(--btn-b));color:var(--btn-text);
+                     border:none;border-radius:50%;width:48px;height:48px;font-size:20px;font-weight:800;
+                     cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)"
+              title="Back to top">↑</button>
+    </main>
+  </div>
+
+  <!-- mobile-only: hamburger to open the drawer, backdrop, and bottom tab bar -->
+  <button id="menuToggleBtn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar" onclick="toggleDrawer()">☰</button>
+  <div id="drawerBackdrop" onclick="closeDrawer()"></div>
+  <nav id="bottomTabs" aria-label="Primary">
+    <button class="nav-btn" data-view="dashboard" onclick="setView('dashboard')"><span class="ico">📡</span>Dashboard</button>
+    <button class="nav-btn" data-view="matches" onclick="setView('matches')"><span class="ico">🎯</span>Discovered matches<span class="nav-badge hidden nav-badge-sync">0</span></button>
+        <button class="nav-btn" data-view="skipped" onclick="setView('skipped')"><span class="ico">⏭</span>Skipped by agent <span class="nav-badge hidden skipped-badge-sync">0</span></button>
+    <button class="nav-btn" data-view="applications" onclick="setView('applications')"><span class="ico">📮</span>Applied matches</button>
+    <button class="tab-more" type="button" onclick="toggleDrawer()"><span class="ico">☰</span>More</button>
+  </nav>
+</div>
+
+<!-- job details modal -->
+<div class="modal hidden" id="jobModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3 id="jmTitle"></h3><button class="x-btn" onclick="closeModal('jobModal')">✕</button></div>
+    <div id="jmBody"></div>
+  </div>
+</div>
+
+<!-- confirm modal -->
+<div class="modal hidden" id="confirmModal">
+  <div class="modal-card" style="max-width:440px">
+    <div class="modal-head"><h3>⚠️ Are you sure?</h3><button class="x-btn" onclick="closeModal('confirmModal')">✕</button></div>
+    <p id="cfMsg" style="color:#c3cbe6;font-size:14px;line-height:1.6;margin-bottom:20px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-sm" onclick="closeModal('confirmModal')">Cancel</button>
+      <button class="btn btn-danger btn-sm" id="cfYes">Yes, do it</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+/* Script sits at the end of <body> (after all elements are parsed) and the
+   Supabase CDN script above has no `defer`, so both are guaranteed ready by
+   the time this runs — no DOMContentLoaded wrapper needed. Functions are
+   declared at the top level deliberately, since the HTML uses inline
+   onclick="..." attributes that can only resolve global function names. */
+
+/* ================= SUPABASE ================= */
+const SUPABASE_URL = 'https://celylskveytdwvuvsuvx.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_QBseann9rrODgfZP9V0oXg_u9brFEVh';
+
+/* "Stay logged in": when checked, the session is written to localStorage
+   (survives closing the browser); when unchecked, it's written to
+   sessionStorage only (cleared once the tab/browser closes). The flag
+   itself always lives in localStorage so it persists across page loads. */
+const REMEMBER_KEY = 'dispatchRemember';
+function getRemember(){ try{ return localStorage.getItem(REMEMBER_KEY) !== '0'; }catch(e){ return true; } }
+function setRemember(v){ try{ localStorage.setItem(REMEMBER_KEY, v ? '1' : '0'); }catch(e){} }
+const authStorage = {
+  getItem: (key) => { try{ return (getRemember() ? localStorage : sessionStorage).getItem(key); }catch(e){ return null; } },
+  setItem: (key, value) => { try{
+      if(getRemember()){ localStorage.setItem(key, value); sessionStorage.removeItem(key); }
+      else { sessionStorage.setItem(key, value); localStorage.removeItem(key); }
+    }catch(e){} },
+  removeItem: (key) => { try{ localStorage.removeItem(key); sessionStorage.removeItem(key); }catch(e){} }
+};
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { storage: authStorage, persistSession: true, autoRefreshToken: true }
+});
+
+let currentUser=null, currentSeeker=null;
+let matches=[], applications=[], documents=[];
+let state={mQ:'',mLoc:'all',view:'dashboard',selected:new Set()};
+
+function $(s){return document.querySelector(s)}
+function $$(s){return document.querySelectorAll(s)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function splitList(s){return (s||'').split(',').map(x=>x.trim()).filter(Boolean)}
+function timeAgo(iso){
+  if(!iso) return 'never';
+  const s=(Date.now()-new Date(iso).getTime())/1000;
+  if(s<60) return 'just now';
+  if(s<3600) return Math.floor(s/60)+' min ago';
+  if(s<86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+// Full "DD Mon YYYY, HH:MM" stamp used in the Application report.
+function fmtStamp(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d)) return '';
+  const day = String(d.getDate()).padStart(2,'0');
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  const yr = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return day+' '+mon+' '+yr+', '+hh+':'+mm;
+}
+// For an applied Matches card, use the real submission time from application_log
+// when available; otherwise fall back to when the job was discovered.
+function matchDisplayTime(m){
+  if(m.status==='applied' && Array.isArray(applications)){
+    const rows = applications
+      .filter(a => a.job_match_id === m.id && isConfirmedApplication(a))
+      .sort((x,y)=> new Date(y.attempted_at) - new Date(x.attempted_at));
+    if(rows.length && rows[0].attempted_at) return rows[0].attempted_at;
+  }
+  return m.discovered_at;
+}
+function toast(msg,type){const t=document.createElement('div');t.className='toast'+(type?' '+type:'');
+  t.textContent=msg;$('#toasts').appendChild(t);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),400)},3400)}
+
+/* Theme picker removed — the app now ships only the built-in "Signal"
+   palette, baked into :root at the top of this file. */
+try { localStorage.removeItem('jobagentTheme'); } catch(e) {}
+
+/* ---------------- Password visibility toggles ---------------- */
+const EYE_OPEN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_CLOSED = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.9 21.9 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+$$('.pw-toggle').forEach(btn=>{
+  btn.innerHTML=EYE_OPEN;
+  btn.addEventListener('click',()=>{
+    const input=document.getElementById(btn.dataset.target);
+    const showing=input.type==='text';
+    input.type=showing?'password':'text';
+    btn.innerHTML=showing?EYE_OPEN:EYE_CLOSED;
+  });
+});
+
+/* ================= AUTH ================= */
+function showAuth(name){['signin','signup','forgot','newpass'].forEach(p=>$('#p-'+p).classList.add('hidden'));
+  $('#p-'+name).classList.remove('hidden');
+  $$('.err').forEach(e=>{e.textContent='';e.style.color=''})}
+
+async function doSignin(){
+  const errorEl=$('#siErr'); errorEl.textContent=''; errorEl.style.color='';
+  const email=$('#siEmail').value.trim(), password=$('#siPass').value;
+  if(!email||!password){ errorEl.textContent='Enter your email and password.'; return; }
+  const btn=$('#siBtn'); btn.disabled=true; btn.textContent='Signing in…';
+  try{
+    const {data,error} = await sb.auth.signInWithPassword({email,password});
+    if(error) throw error;
+    // Successful signin also counts as "this device has an account on it"
+    // — hide the Create-Account link from here on.
+    markAccountCreated();
+    await enterApp(data.session.user);
+  }catch(err){
+    errorEl.textContent = err.message || 'Wrong email or password.';
+  }finally{ btn.disabled=false; btn.textContent='Sign in'; }
+}
+
+/* ================= "SIGN IN CARD ONLY" GATE =================
+ * Once someone signs up or signs in on this browser, hide the
+ * "Create an account" link so returning users only see
+ * Sign in + Forgot password. Nothing prevents a new person from
+ * clearing storage and creating another account; the gate is UX
+ * safety, not access control (auth+RLS does the actual access work).
+ */
+const HAS_ACCOUNT_KEY = 'jobagent_account_exists';
+function markAccountCreated(){
+  try { localStorage.setItem(HAS_ACCOUNT_KEY, '1'); } catch(e) {}
+  hideCreateAccountLink();
+}
+function hideCreateAccountLink(){
+  const link = document.getElementById('createAccountLink');
+  if(link) link.style.display = 'none';
+  // If someone was on the signup panel when we hid it (e.g. arrived via
+  // the recovery link on a device that already has an account), route
+  // them to signin instead.
+  const suPanel = document.getElementById('p-signup');
+  if(suPanel && !suPanel.classList.contains('hidden')) showAuth('signin');
+}
+try { if(localStorage.getItem(HAS_ACCOUNT_KEY)) hideCreateAccountLink(); } catch(e) {}
+
+
+async function doSignup(){
+  const errorEl=$('#suErr'); errorEl.textContent=''; errorEl.style.color='';
+  const name=$('#suName').value.trim(), email=$('#suEmail').value.trim(), email2=$('#suEmail2').value.trim(),
+        password=$('#suPass').value, password2=$('#suPass2').value, remember=$('#suRemember').checked;
+  if(!name||!email||!email2||!password){ errorEl.textContent='Fill in all fields.'; return; }
+  if(!/^\S+@\S+\.\S+$/.test(email)){ errorEl.textContent='Enter a valid email address.'; return; }
+  if(email.toLowerCase()!==email2.toLowerCase()){ errorEl.textContent='Emails don\u2019t match.'; return; }
+  if(password.length<6){ errorEl.textContent='Password must be at least 6 characters.'; return; }
+  if(password!==password2){ errorEl.textContent='Passwords don\u2019t match.'; return; }
+  const btn=$('#suBtn'); btn.disabled=true; btn.textContent='Registering…';
+  try{
+    setRemember(remember);
+    const {data,error} = await sb.auth.signUp({email,password,options:{data:{full_name:name}}});
+    if(error) throw error;
+    if(!data.session){
+      // Email confirmation required before any session can exist - always lands on sign in.
+      showAuth('signin');
+      $('#siEmail').value=email;
+      const siErr=$('#siErr'); siErr.style.color='var(--ok)';
+      siErr.textContent='✔ Account created — check your inbox and click the confirmation link, then sign in below.';
+      return;
+    }
+    // First signup on this device — from now on the "Create an account"
+    // link is hidden and this browser only sees Sign in + Forgot password.
+    markAccountCreated();
+    if(remember){
+      await enterApp(data.session.user);
+      // Pre-fill their name into the profile field right away
+      $('#pfName').value = name;
+      toast('Welcome to JobAgent, '+name.split(' ')[0]+'! 🎉','ok');
+    }else{
+      // Registered, but "stay logged in" wasn't checked - sign back out and
+      // send them to the sign-in form to log in with email + password.
+      await sb.auth.signOut();
+      showAuth('signin');
+      $('#siEmail').value=email;
+      const siErr=$('#siErr'); siErr.style.color='var(--ok)';
+      siErr.textContent='✔ Account created — sign in below to continue.';
+    }
+  }catch(err){
+    errorEl.textContent = err.message || 'Something went wrong.';
+  }finally{ btn.disabled=false; btn.textContent='Register'; }
+}
+
+async function doForgot(){
+  const errorEl=$('#fpErr'), okEl=$('#fpOk'); errorEl.textContent=''; okEl.classList.add('hidden');
+  const email=$('#fpEmail').value.trim();
+  if(!email){ errorEl.textContent='Enter your email.'; return; }
+  const btn=$('#fpBtn'); btn.disabled=true; btn.textContent='Sending…';
+  try{
+    await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+    okEl.textContent='Check your inbox — if that email is registered, a reset link is on its way.';
+    okEl.classList.remove('hidden');
+    $('#fpEmail').closest('.field').classList.add('hidden');
+    btn.classList.add('hidden');
+  }catch(err){
+    errorEl.textContent='Something went wrong. Please try again.';
+  }finally{ btn.disabled=false; btn.textContent='Send reset link'; }
+}
+
+let resetSessionReady=false;
+sb.auth.onAuthStateChange((event, session)=>{
+  if(event==='PASSWORD_RECOVERY' || (event==='SIGNED_IN' && session && window.location.hash.includes('type=recovery'))){
+    resetSessionReady=true;
+    showAuth('newpass');
+  }
+});
+if(window.location.hash.includes('type=recovery')){ showAuth('newpass'); }
+
+async function doNewPass(){
+  const errorEl=$('#npErr'); errorEl.textContent='';
+  const password=$('#npPass').value, password2=$('#npPass2').value;
+  if(password.length<6){ errorEl.textContent='Password needs to be at least 6 characters.'; return; }
+  if(password!==password2){ errorEl.textContent='Passwords don\u2019t match.'; return; }
+  if(!resetSessionReady){ $('#npInvalid').style.display='block'; $('#npInvalid').textContent='This reset link is invalid or has expired. Please request a new one.'; return; }
+  const btn=$('#npBtn'); btn.disabled=true; btn.textContent='Updating…';
+  try{
+    const {error} = await sb.auth.updateUser({password});
+    if(error) throw error;
+    toast('Password updated ✓','ok');
+    window.location.hash='';
+    const {data:{session}} = await sb.auth.getSession();
+    if(session) await enterApp(session.user);
+    else showAuth('signin');
+  }catch(err){
+    errorEl.textContent = err.message || 'Something went wrong. Please try again.';
+  }finally{ btn.disabled=false; btn.textContent='Update password'; }
+}
+
+async function signOut(){
+  stopMatchLiveRefresh();
+  await sb.auth.signOut();
+  currentUser=null; currentSeeker=null;
+  $('#app').classList.add('hidden');
+  $('#authWrap').classList.remove('hidden');
+  showAuth('signin');
+}
+
+/* ================= APP ENTRY ================= */
+async function enterApp(user){
+  currentUser=user;
+  $('#authWrap').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  await refreshAll();
+  startMatchLiveRefresh();
+}
+
+async function refreshAll(){
+  $('#agentDot').className='dot busy';
+  $('#agentText').textContent='checking…';
+  await loadProfile();
+  await loadMatches();
+  await loadApplications();
+  await loadDocuments();
+  updateHelpBadge();
+  applyDismissedCards();
+  renderDashboard();
+  if(state.view==='matches'||state.view==='skipped') renderMatches();
+  updateAgentPill();
+  setView(state.view);
+}
+
+/* ================= LIVE MATCH REFRESH ================= */
+let matchRefreshTimer=null,matchRefreshController=null,matchRefreshBusy=false,matchRefreshEpoch=0;
+function stopMatchLiveRefresh(){
+  clearInterval(matchRefreshTimer);matchRefreshTimer=null;matchRefreshEpoch++;
+  if(matchRefreshController)matchRefreshController.abort();
+}
+function startMatchLiveRefresh(){
+  stopMatchLiveRefresh();
+  matchRefreshTimer=setInterval(refreshLiveMatchLists,60000);
+}
+async function refreshLiveMatchLists(){
+  if(matchRefreshBusy||document.hidden||!currentUser||!currentSeeker?.id)return;
+  const userId=currentUser.id,seekerId=currentSeeker.id,epoch=matchRefreshEpoch;
+  const controller=new AbortController();matchRefreshController=controller;matchRefreshBusy=true;
+  const timeout=setTimeout(()=>controller.abort(),30000);
+  try{
+    const results=await Promise.all([loadMatches({silent:true,signal:controller.signal}),loadApplications({silent:true,signal:controller.signal})]);
+    if(results.some(ok=>ok===false)||controller.signal.aborted||epoch!==matchRefreshEpoch||currentUser?.id!==userId||currentSeeker?.id!==seekerId)return;
+    // Refresh record views and counters only. Never reload or overwrite profile form edits.
+    renderDashboard();updateAgentPill();
+    if(state.view==='matches'||state.view==='skipped')renderMatches();
+    if(state.view==='applications')renderApplications();
+  }catch(error){console.warn('Match refresh unavailable; keeping displayed results.');}
+  finally{clearTimeout(timeout);if(matchRefreshController===controller)matchRefreshController=null;matchRefreshBusy=false;}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLiveMatchLists();});
+window.addEventListener('focus',()=>refreshLiveMatchLists());
+
+/* ================= VIEWS / NAV ================= */
+const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches',''], skipped:['Skipped by agent','Request Apply to send a skipped job for agent review'],
+  applications:['Applied matches','Completed applications recorded with confirmation'],
+  docs:['Documents','ID, certificates, qualifications — optional'],
+  blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
+  help:['Contact us','Send a message to the JobAgent team']};
+
+function setView(v){
+  state.view=v;
+  $$('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  Object.keys(VIEWS).forEach(k=>{const el=$('#view-'+k);if(el)el.classList.toggle('hidden',k!==v && !(k==='matches'&&v==='skipped'))});
+  $('#viewTitle').textContent=VIEWS[v][0];
+  $('#viewSub').textContent=VIEWS[v][1];
+  if(v==='matches'||v==='skipped') renderMatches();
+  if(v==='applications') renderApplications();
+  if(v==='blocked') renderBlocked();
+  if(v==='docs') renderDocuments();
+  if(v==='profile') loadProfile();
+  if(v==='help') loadHelpThread();
+  applyDismissedCards();
+  window.scrollTo(0,0);
+  closeDrawer();
+}
+
+/* ---------- mobile drawer (off-canvas nav) ---------- */
+function openDrawer(){
+  $('#sidebar').classList.add('open');
+  $('#drawerBackdrop').classList.add('show');
+  $('#menuToggleBtn').setAttribute('aria-expanded','true');
+}
+function closeDrawer(){
+  $('#sidebar').classList.remove('open');
+  $('#drawerBackdrop').classList.remove('show');
+  $('#menuToggleBtn').setAttribute('aria-expanded','false');
+}
+function toggleDrawer(){
+  $('#sidebar').classList.contains('open') ? closeDrawer() : openDrawer();
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDrawer(); });
+
+/* ================= PROFILE ================= */
+
+/* ================= PROFILE — APPLY SCOPE (qualifications + experience) ================= */
+// What the user allows the agent to apply for. Both are REQUIRED (>=1 pick each)
+// and saved to job_seekers.apply_qualifications / apply_experience_ranges (text[]).
+var PF_QUAL_PRESETS = ['Matric','Certificates','Advanced Certificate','Diploma','Advanced Diploma',
+  'Degree','Bachelor Degrees','Honours Degrees','Postgraduate Diplomas'];
+var PF_EXP_PRESETS  = ['0-1','1-4','4-8','8-12','12-16'];
+var pfQualSel = [];   // selected labels (presets + custom)
+var pfQualCustom = []; // custom labels added by the user
+var pfExpSel = [];    // selected ranges e.g. '1-4'
+var pfExpCustom = []; // custom ranges
+
+function renderQualGrid(){
+  const all = [...PF_QUAL_PRESETS, ...pfQualCustom];
+  $('#pfQualGrid').innerHTML = all.map((q,i)=>{
+    const on = pfQualSel.includes(q), custom = i >= PF_QUAL_PRESETS.length;
+    return '<label class="scope-card'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked ':'')+'data-q="'+esc(q)+'" onchange="onQualToggle(this)"> <span>'+esc(q)+'</span>'+
+      (custom?'<button type="button" class="sc-x" title="Remove" onclick="removeCustomQual(event,\''+esc(q).replace(/'/g,"\\'")+'\')">✕</button>':'')+'</label>';
+  }).join('');
+}
+function onQualToggle(cb){
+  const q = cb.getAttribute('data-q');
+  pfQualSel = cb.checked ? [...new Set([...pfQualSel,q])] : pfQualSel.filter(x=>x!==q);
+  cb.closest('.scope-card').classList.toggle('on', cb.checked);
+  $('#pfQualCard').classList.remove('scope-err');
+}
+function addCustomQual(){
+  const inp = $('#pfQualNew'); const v = inp.value.trim().replace(/\s+/g,' ');
+  if(!v) return;
+  const exists = [...PF_QUAL_PRESETS,...pfQualCustom].some(x=>x.toLowerCase()===v.toLowerCase());
+  if(exists){ toast('That qualification is already listed','warn'); inp.value=''; return; }
+  pfQualCustom.push(v); pfQualSel.push(v);       // a newly added card starts ticked
+  inp.value=''; renderQualGrid(); $('#pfQualCard').classList.remove('scope-err');
+}
+function removeCustomQual(e,q){
+  e.preventDefault(); e.stopPropagation();
+  pfQualCustom = pfQualCustom.filter(x=>x!==q); pfQualSel = pfQualSel.filter(x=>x!==q);
+  renderQualGrid();
+}
+
+function expLabel(r){ return r.replace('-',' – '); }
+function renderExpGrid(){
+  const all = [...PF_EXP_PRESETS, ...pfExpCustom];
+  $('#pfExpGrid').innerHTML = all.map((r,i)=>{
+    const on = pfExpSel.includes(r), custom = i >= PF_EXP_PRESETS.length;
+    return '<label class="scope-card yrs'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked ':'')+'data-r="'+esc(r)+'" onchange="onExpToggle(this)"> <span>'+esc(expLabel(r))+' <small>years</small></span>'+
+      (custom?'<button type="button" class="sc-x" title="Remove" onclick="removeCustomExp(event,\''+esc(r)+'\')">✕</button>':'')+'</label>';
+  }).join('');
+}
+function onExpToggle(cb){
+  const r = cb.getAttribute('data-r');
+  pfExpSel = cb.checked ? [...new Set([...pfExpSel,r])] : pfExpSel.filter(x=>x!==r);
+  cb.closest('.scope-card').classList.toggle('on', cb.checked);
+  $('#pfExpCard').classList.remove('scope-err');
+}
+function addCustomExp(){
+  const a = parseInt($('#pfExpFrom').value,10), b = parseInt($('#pfExpTo').value,10);
+  if(isNaN(a)||isNaN(b)||a<0||b<=a||b>60){ toast('Enter a valid range, e.g. 16 to 20','warn'); return; }
+  const r = a+'-'+b;
+  if([...PF_EXP_PRESETS,...pfExpCustom].includes(r)){ toast('That range is already listed','warn'); return; }
+  pfExpCustom.push(r); pfExpSel.push(r);
+  $('#pfExpFrom').value=''; $('#pfExpTo').value='';
+  renderExpGrid(); $('#pfExpCard').classList.remove('scope-err');
+}
+function removeCustomExp(e,r){
+  e.preventDefault(); e.stopPropagation();
+  pfExpCustom = pfExpCustom.filter(x=>x!==r); pfExpSel = pfExpSel.filter(x=>x!==r);
+  renderExpGrid();
+}
+// Restore from saved arrays: anything not in the presets becomes a custom card.
+function setApplyScope(quals, exps){
+  pfQualSel = Array.isArray(quals) ? [...quals] : [];
+  pfQualCustom = pfQualSel.filter(q=>!PF_QUAL_PRESETS.includes(q));
+  pfExpSel = Array.isArray(exps) ? [...exps] : [];
+  pfExpCustom = pfExpSel.filter(r=>!PF_EXP_PRESETS.includes(r));
+  renderQualGrid(); renderExpGrid();
+  $('#pfQualCard')?.classList.remove('scope-err'); $('#pfExpCard')?.classList.remove('scope-err');
+}
+
+/* ================= PROFILE — LOAD ================= */
+// The list of every simple <input> / <select> / <textarea> we round-trip
+// to a single column on job_seekers. Structure: [fieldId, columnName, kind].
+// kind = 'str' | 'num' | 'bool' | 'date' | 'csv' (comma-separated → text[])
+const PF_FIELDS = [
+  ['pfName',           'full_name',            'str'],
+  ['pfEmail',          'dedicated_email',      'str'],
+  ['pfPhone',          'phone',                'str'],
+  ['pfPhoneAlt',       'phone_alt',            'str'],
+  ['pfDob',            'date_of_birth',        'date'],
+  ['pfGender',         'gender',               'str'],
+  ['pfRace',           'race',                 'str'],
+  ['pfIdType',         'id_type',              'str'],
+  ['pfIdNumber',       'id_number',            'str'],
+  ['pfNationality',    'nationality',          'str'],
+  ['pfAddress',        'physical_address',     'str'],
+  ['pfCity',           'city',                 'str'],
+  ['pfProvince',       'province',             'str'],
+  ['pfPostal',         'postal_code',          'str'],
+  ['pfNoticeDays',     'notice_period_days',   'num'],
+  ['pfAvailableFrom',  'available_from',       'date'],
+  ['pfOwnTransport',   'own_transport',        'bool'],
+  ['pfWillRelocate',   'willing_to_relocate',  'bool'],
+  ['pfLicense',        'drivers_license',      'csv'],
+  ['pfTitles',         'job_title_keywords',   'csv'],
+  ['pfSalaryMin',      'salary_min',           'num'],
+  ['pfSalaryMax',      'salary_max',           'num'],
+  ['pfCurEmployer',    'current_employer',     'str'],
+  ['pfCurPosition',    'current_position',     'str'],
+  ['pfYearsExp',       'years_experience',     'num'],
+  ['pfHighestQual',    'highest_qualification','str'],
+  ['pfFieldOfStudy',   'field_of_study',       'str'],
+  ['pfSkills',         'skills',               'csv'],
+  ['pfLanguages',      'languages',            'csv'],
+  ['pfBio',            'bio',                  'str'],
+  ['pfHobbies',        'hobbies',              'str'],
+  ['pfPressure',       'pressure_ok',          'bool'],
+  ['pfTeam',           'team_player',          'bool'],
+];
+
+// Fields the form REFUSES to save without — the "strong security guard"
+// the user asked for. Empty means the save is blocked and the user gets
+// a specific alert naming what's missing.
+const PF_REQUIRED = [
+  ['pfName',        'Full name'],
+  ['pfDob',         'Date of birth'],
+  ['pfGender',      'Gender'],
+  ['pfIdType',      'ID type'],
+  ['pfIdNumber',    'ID / passport number'],
+  ['pfNationality', 'Nationality'],
+  ['pfPhone',       'Primary phone'],
+];
+
+function pfSetVal(id, v, kind){
+  const el = document.getElementById(id); if(!el) return;
+  if(v === null || v === undefined){ el.value = ''; return; }
+  if(kind === 'bool') el.value = (v === true || v === 'true') ? 'true' : (v === false ? 'false' : '');
+  else if(kind === 'csv') el.value = Array.isArray(v) ? v.join(', ') : (v || '');
+  else if(kind === 'date') el.value = v ? String(v).substring(0,10) : '';
+  else el.value = v;
+}
+function pfGetVal(id, kind){
+  const el = document.getElementById(id); if(!el) return null;
+  const raw = String(el.value ?? '').trim();
+  if(raw === '') return null;
+  if(kind === 'num')  return isNaN(Number(raw)) ? null : Number(raw);
+  if(kind === 'bool') return raw === 'true' ? true : raw === 'false' ? false : null;
+  if(kind === 'csv')  return raw.split(',').map(s=>s.trim()).filter(Boolean);
+  return raw;
+}
+
+async function loadProfile(){
+  // Reset every simple field
+  PF_FIELDS.forEach(([id,,kind]) => pfSetVal(id, null, kind));
+  renderLocMenu([]);
+  setApplyScope([], []);
+  $('#pfResumeName').textContent = '';
+  $('#pfResume').value = '';
+  $('#pfSaveStatus').textContent = '';
+  currentSeeker = null;
+  // Pre-fill email from auth on a brand-new profile
+  $('#pfEmail').value = currentUser.email;
+  // Blank sub-tables
+  emp = []; edu = []; refs = [];
+  renderEmpList(); renderEduList(); renderRefList();
+
+  const {data} = await sb.from('job_seekers').select('*').eq('user_id', currentUser.id).maybeSingle();
+  currentSeeker = data;
+  if(!data) return;
+  PF_FIELDS.forEach(([id, col, kind]) => pfSetVal(id, data[col], kind));
+  renderLocMenu(data.preferred_locations || []);
+  setApplyScope(data.apply_qualifications || [], data.apply_experience_ranges || []);
+  $('#pfResumeName').textContent = data.resume_url ? '✓ CV on file' : '';
+
+  // Sub-tables
+  const [{data:e},{data:d},{data:r}] = await Promise.all([
+    sb.from('job_seeker_employment').select('*').eq('job_seeker_id', data.id).order('sort_order'),
+    sb.from('job_seeker_education').select('*').eq('job_seeker_id', data.id).order('sort_order'),
+    sb.from('job_seeker_references').select('*').eq('job_seeker_id', data.id).order('sort_order'),
+  ]);
+  emp = e || []; edu = d || []; refs = r || [];
+  renderEmpList(); renderEduList(); renderRefList();
+}
+
+/* ================= PROFILE — SAVE ================= */
+// The "strong security guard" — hard-blocks save if any REQUIRED field is
+// empty and tells the user exactly which ones. Everything else may be blank
+// and the profile still saves ("incomplete but saved").
+async function saveProfile(){
+  const btn=$('#pfSaveBtn'); const statusEl=$('#pfSaveStatus');
+  statusEl.textContent=''; statusEl.style.color='';
+
+  // 1. Required-field guard
+  const missing = PF_REQUIRED
+    .filter(([id]) => !String(document.getElementById(id)?.value ?? '').trim())
+    .map(([, label]) => label);
+  if (missing.length) {
+    const msg = 'Cannot save yet — please fill in the required fields:\n\n• ' + missing.join('\n• ');
+    alert(msg);                             // hard alert like the user asked for
+    // Scroll to the first missing field and highlight it
+    const firstMissingId = PF_REQUIRED.find(([id]) => !document.getElementById(id)?.value)[0];
+    const firstEl = document.getElementById(firstMissingId);
+    if (firstEl) { firstEl.focus(); firstEl.scrollIntoView({behavior:'smooth', block:'center'}); }
+    return;
+  }
+
+
+  // 1b. Apply-scope guard — qualifications AND experience ranges are compulsory
+  const scopeMissing = [];
+  if (!pfQualSel.length) scopeMissing.push('Qualification levels (tick at least one)');
+  if (!pfExpSel.length)  scopeMissing.push('Experience ranges (tick at least one)');
+  if (scopeMissing.length) {
+    alert('Cannot save yet — please complete:\n\n• ' + scopeMissing.join('\n• '));
+    const target = !pfQualSel.length ? $('#pfQualCard') : $('#pfExpCard');
+    $('#pfQualCard').classList.toggle('scope-err', !pfQualSel.length);
+    $('#pfExpCard').classList.toggle('scope-err', !pfExpSel.length);
+    target.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    // Optional CV upload
+    let resumeUrl = currentSeeker?.resume_url || null;
+    const file = $('#pfResume').files[0];
+    if (file) {
+      const path = `${currentUser.id}/resume-${Date.now()}-${file.name}`;
+      const {error: upErr} = await sb.storage.from('resumes').upload(path, file, {upsert:true});
+      if (upErr) throw upErr;
+      const {data: signed, error: signErr} = await sb.storage.from('resumes').createSignedUrl(path, 315360000);
+      if (signErr) throw signErr;
+      resumeUrl = signed.signedUrl;
+    }
+
+    // Build the payload from PF_FIELDS
+    const payload = { user_id: currentUser.id };
+    PF_FIELDS.forEach(([id, col, kind]) => { payload[col] = pfGetVal(id, kind); });
+    const newLocs = getSelectedLocs();
+    payload.preferred_locations = newLocs;
+    payload.apply_qualifications = [...pfQualSel];
+    payload.apply_experience_ranges = [...pfExpSel];
+
+    // When the user widens their apply-scope back to "all locations" (either
+    // from a narrower set OR their very first save), signal the backend to
+    // revisit every match already discovered and try to apply the ones that
+    // were skipped for being outside the previously-selected locations. The
+    // backend apply worker reads apply_revisit_requested_at and, on seeing a
+    // value newer than the last revisit, re-queues past matches for apply.
+    const prevLocs = currentSeeker?.preferred_locations || [];
+    const wasAll   = prevLocs.length===1 && prevLocs[0]==='All locations';
+    const nowAll   = newLocs.length===1  && newLocs[0]==='All locations';
+    if (nowAll && !wasAll) {
+      payload.apply_revisit_requested_at = new Date().toISOString();
+    }
+
+    // Missing "soft" answers are filled in by the agent at apply-time by default.
+    payload.agent_can_autofill_soft = true;
+    payload.resume_url = resumeUrl;
+    payload.application_mode = 'approval'; // applications are admin-only
+    payload.status = 'active';
+
+    const {data, error} = await sb.from('job_seekers').upsert(payload, {onConflict:'user_id'}).select().single();
+    if (error) {
+      if (/apply_qualifications|apply_experience_ranges/.test(error.message||'')) throw new Error('Database is missing the new apply-scope columns — run the migration SQL in Supabase first.');
+      throw error;
+    }
+    currentSeeker = data;
+
+    // Save sub-tables in parallel — replace-mode: wipe existing rows for this
+    // seeker then insert the current arrays. Simpler + fewer edge cases than
+    // per-row diff, and these tables are small.
+    await Promise.all([
+      sb.from('job_seeker_employment').delete().eq('job_seeker_id', data.id),
+      sb.from('job_seeker_education').delete().eq('job_seeker_id', data.id),
+      sb.from('job_seeker_references').delete().eq('job_seeker_id', data.id),
+    ]);
+    const insEmp  = emp.filter(r => r.company || r.position).map((r,i) => ({
+      job_seeker_id: data.id, company: r.company||'', position: r.position||'',
+      start_date: r.start_date||null, end_date: r.end_date||null,
+      description: r.description||null, reason_for_leaving: r.reason_for_leaving||null,
+      is_current: !!r.is_current, sort_order: i,
+    }));
+    const insEdu  = edu.filter(r => r.institution || r.qualification).map((r,i) => ({
+      job_seeker_id: data.id, institution: r.institution||'', qualification: r.qualification||'',
+      field_of_study: r.field_of_study||null, start_year: r.start_year||null, end_year: r.end_year||null,
+      achieved: r.achieved !== false, sort_order: i,
+    }));
+    const insRefs = refs.filter(r => r.full_name).map((r,i) => ({
+      job_seeker_id: data.id, full_name: r.full_name, position: r.position||null,
+      company: r.company||null, relationship: r.relationship||null,
+      phone: r.phone||null, email: r.email||null, sort_order: i,
+    }));
+    if (insEmp.length)  await sb.from('job_seeker_employment').insert(insEmp);
+    if (insEdu.length)  await sb.from('job_seeker_education').insert(insEdu);
+    if (insRefs.length) await sb.from('job_seeker_references').insert(insRefs);
+
+    // Completeness feedback — the "incomplete but saved" branch
+    const optionalMissing = [];
+    if (!payload.physical_address) optionalMissing.push('address');
+    if (!payload.years_experience && !insEmp.length) optionalMissing.push('work history');
+    if (!insEdu.length) optionalMissing.push('education');
+    if (!insRefs.length) optionalMissing.push('references');
+    if (!payload.skills || !payload.skills.length) optionalMissing.push('skills');
+    if (optionalMissing.length) {
+      statusEl.style.color = 'var(--accent)';
+      statusEl.textContent = 'Saved ✓ Consider adding: ' + optionalMissing.join(', ') + '. You can add these details whenever you are ready.';
+      toast('Profile saved ✓ You can add more details later','ok');
+    } else {
+      statusEl.style.color = 'var(--ok)';
+      statusEl.textContent = 'Saved ✓ Thank you for completing your profile.';
+      toast('Profile saved ✓','ok');
+    }
+    $('#pfResumeName').textContent = resumeUrl ? '✓ CV on file' : '';
+    renderDashboard();
+  } catch (err) {
+    toast('⚠ ' + err.message, 'err');
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Save failed: ' + err.message;
+  } finally { btn.disabled = false; btn.textContent = '💾 Save profile'; }
+}
+
+/* ================= PROFILE — SUB-TABLE HELPERS ================= */
+let emp = [], edu = [], refs = [];
+function esc2(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _mkRow(inner, onRemove){
+  const w = document.createElement('div');
+  w.style.cssText='background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;padding-right:44px;position:relative';
+  w.innerHTML = inner +
+    '<button type="button" class="row-x" title="Remove" aria-label="Remove"'+
+    ' style="position:absolute;top:8px;right:8px;width:26px;height:26px;padding:0;'+
+    'display:inline-flex;align-items:center;justify-content:center;'+
+    'background:rgba(255,107,107,.15);color:#ff6b6b;border:1px solid rgba(255,107,107,.35);'+
+    'border-radius:8px;cursor:pointer;font-size:14px;line-height:1;font-weight:700">✕</button>';
+  w.querySelector('button.row-x').addEventListener('click', onRemove);
+  return w;
+}
+function _rowInput(v, cls, ph, type){
+  return '<input class="'+cls+'" placeholder="'+esc2(ph)+'" value="'+esc2(v||'')+'"'+(type?' type="'+type+'"':'')+'>';
+}
+
+function renderEmpList(){
+  const el = document.getElementById('pfEmpList'); el.innerHTML = '';
+  if (!emp.length) { el.innerHTML = '<div class="hint" style="color:var(--muted);font-size:12px">No jobs added yet.</div>'; return; }
+  emp.forEach((r, i) => {
+    const html =
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Company</label>'+_rowInput(r.company,'e-co','Company name')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Position</label>'+_rowInput(r.position,'e-po','Job title')+'</div>'+
+      '</div>'+
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Start</label>'+_rowInput(r.start_date,'e-st','',  'date')+'</div>'+
+      '  <div class="field" style="margin:0"><label>End</label>'+_rowInput(r.end_date,  'e-en','',  'date')+'</div>'+
+      '</div>'+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:8px;cursor:pointer">'+
+      '  <input type="checkbox" class="e-cur" '+(r.is_current?'checked':'')+' style="width:auto;accent-color:var(--accent)"> Currently work here'+
+      '</label>'+
+      '<div class="field" style="margin:0"><label>What you did</label><textarea class="e-desc" rows="2" placeholder="Short summary">'+esc2(r.description||'')+'</textarea></div>'+
+      '<div class="field" style="margin:0"><label>Reason for leaving</label>'+_rowInput(r.reason_for_leaving,'e-rea','')+'</div>';
+    const row = _mkRow(html, () => { emp.splice(i,1); renderEmpList(); });
+    // Wire inputs back to state
+    row.querySelector('.e-co').oninput   = e => emp[i].company = e.target.value;
+    row.querySelector('.e-po').oninput   = e => emp[i].position = e.target.value;
+    row.querySelector('.e-st').oninput   = e => emp[i].start_date = e.target.value;
+    row.querySelector('.e-en').oninput   = e => emp[i].end_date = e.target.value;
+    row.querySelector('.e-cur').onchange = e => emp[i].is_current = e.target.checked;
+    row.querySelector('.e-desc').oninput = e => emp[i].description = e.target.value;
+    row.querySelector('.e-rea').oninput  = e => emp[i].reason_for_leaving = e.target.value;
+    el.appendChild(row);
+  });
+}
+function addEmpRow(){ emp.push({}); renderEmpList(); }
+
+function renderEduList(){
+  const el = document.getElementById('pfEduList'); el.innerHTML = '';
+  if (!edu.length) { el.innerHTML = '<div class="hint" style="color:var(--muted);font-size:12px">No qualifications added yet.</div>'; return; }
+  edu.forEach((r, i) => {
+    const html =
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Institution</label>'+_rowInput(r.institution,'d-in','School / university')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Qualification</label>'+_rowInput(r.qualification,'d-q','e.g. Matric, BCom')+'</div>'+
+      '</div>'+
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Field of study</label>'+_rowInput(r.field_of_study,'d-f','Optional')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Start / End year</label>'+
+      '     <div style="display:flex;gap:8px">'+_rowInput(r.start_year,'d-sy','From', 'number')+_rowInput(r.end_year,'d-ey','To', 'number')+'</div>'+
+      '  </div>'+
+      '</div>'+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer">'+
+      '  <input type="checkbox" class="d-ach" '+(r.achieved !== false ? 'checked' : '')+' style="width:auto;accent-color:var(--accent)"> Achieved (uncheck if still studying)'+
+      '</label>';
+    const row = _mkRow(html, () => { edu.splice(i,1); renderEduList(); });
+    row.querySelector('.d-in').oninput = e => edu[i].institution = e.target.value;
+    row.querySelector('.d-q').oninput  = e => edu[i].qualification = e.target.value;
+    row.querySelector('.d-f').oninput  = e => edu[i].field_of_study = e.target.value;
+    row.querySelector('.d-sy').oninput = e => edu[i].start_year = e.target.value ? +e.target.value : null;
+    row.querySelector('.d-ey').oninput = e => edu[i].end_year   = e.target.value ? +e.target.value : null;
+    row.querySelector('.d-ach').onchange = e => edu[i].achieved = e.target.checked;
+    el.appendChild(row);
+  });
+}
+function addEduRow(){ edu.push({achieved:true}); renderEduList(); }
+
+function renderRefList(){
+  const el = document.getElementById('pfRefList'); el.innerHTML = '';
+  if (!refs.length) { el.innerHTML = '<div class="hint" style="color:var(--muted);font-size:12px">No references added yet.</div>'; return; }
+  refs.forEach((r, i) => {
+    const html =
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Full name</label>'+_rowInput(r.full_name,'r-n','')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Position</label>'+_rowInput(r.position,'r-p','Job title')+'</div>'+
+      '</div>'+
+      '<div class="row2" style="margin-bottom:8px">'+
+      '  <div class="field" style="margin:0"><label>Company</label>'+_rowInput(r.company,'r-c','')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Relationship</label>'+_rowInput(r.relationship,'r-rel','e.g. Direct manager')+'</div>'+
+      '</div>'+
+      '<div class="row2">'+
+      '  <div class="field" style="margin:0"><label>Phone</label>'+_rowInput(r.phone,'r-ph','')+'</div>'+
+      '  <div class="field" style="margin:0"><label>Email</label>'+_rowInput(r.email,'r-em','', 'email')+'</div>'+
+      '</div>';
+    const row = _mkRow(html, () => { refs.splice(i,1); renderRefList(); });
+    row.querySelector('.r-n').oninput  = e => refs[i].full_name = e.target.value;
+    row.querySelector('.r-p').oninput  = e => refs[i].position = e.target.value;
+    row.querySelector('.r-c').oninput  = e => refs[i].company = e.target.value;
+    row.querySelector('.r-rel').oninput= e => refs[i].relationship = e.target.value;
+    row.querySelector('.r-ph').oninput = e => refs[i].phone = e.target.value;
+    row.querySelector('.r-em').oninput = e => refs[i].email = e.target.value;
+    el.appendChild(row);
+  });
+}
+function addRefRow(){ refs.push({}); renderRefList(); }
+
+/* ================= "BACK TO TOP" FLOATING BUTTON ================= */
+// Only shown while the Profile view is active AND the user has scrolled a bit.
+window.addEventListener('scroll', () => {
+  const btn = document.getElementById('pfTopBtn'); if (!btn) return;
+  const onProfile = state && state.view === 'profile' && !document.getElementById('view-profile')?.classList.contains('hidden');
+  btn.style.display = (onProfile && window.scrollY > 200) ? 'block' : 'none';
+});
+
+async function _deleteAccount_removed(){
+  return; // Removed from the app \u2014 account deletion is admin-only.
+  askConfirm('Delete your account? This permanently removes your profile, CV, matches, application history and stops your agent. This can\u2019t be undone.', async ()=>{
+    const btn=$('#delAcctBtn'); btn.disabled=true; btn.textContent='Deleting…';
+    try{
+      const {data:{session}} = await sb.auth.getSession();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, {
+        method:'POST', headers:{ 'Authorization': `Bearer ${session.access_token}` }
+      });
+      const result = await res.json();
+      if(!res.ok) throw new Error(result.error || 'Failed to delete account');
+      await sb.auth.signOut();
+      currentUser=null; currentSeeker=null;
+      $('#app').classList.add('hidden');
+      $('#authWrap').classList.remove('hidden');
+      showAuth('signin');
+      toast('Your account has been deleted.','ok');
+    }catch(err){
+      toast('⚠ '+err.message,'err');
+      btn.disabled=false; btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>Delete my account';
+    }
+  });
+}
+
+/* ================= DASHBOARD ================= */
+function isBlocked(kind,val){
+  if(!currentSeeker || !val) return false;
+  const list = kind==='companies' ? (currentSeeker.blocked_companies||[]) : (currentSeeker.blocked_locations||[]);
+  return list.some(b=>b.toLowerCase()===String(val).toLowerCase());
+}
+
+function renderDashboard(){
+  // "Matches" is the agent's own pipeline (discovered, queued, applied).
+  // "Applications sent" counts the jobs the agent has actually applied to.
+  const appliedCount = new Set(applications.filter(isVisibleAppliedApplication).map(a=>a.job_match_id||a.id)).size;
+  const viewCounts=matchViewCounts();
+  $$('.nav-badge-sync').forEach(b=>{ b.textContent=viewCounts.discovered; b.classList.toggle('hidden',viewCounts.discovered===0); });
+  $('#stNew').textContent=viewCounts.discovered;
+  $('#stApps').textContent=appliedCount;
+  const blockedCount=(currentSeeker?.blocked_companies?.length||0)+(currentSeeker?.blocked_locations?.length||0);
+  $('#stSkipped').textContent=viewCounts.skipped;
+  $$('.skipped-badge-sync').forEach(b=>{const n=viewCounts.skipped;b.textContent=n;b.classList.toggle('hidden',n===0);});
+
+  // Top-right "Last …" label removed — per-card timestamps carry the truth.
+  // Profile is "complete" when the strengthened required fields are filled — CV upload is now optional.
+  const done = !!(currentSeeker
+    && currentSeeker.job_title_keywords?.length
+    && currentSeeker.preferred_locations?.length
+    && currentSeeker.full_name
+    && currentSeeker.phone
+    && currentSeeker.id_number
+    && currentSeeker.gender
+    && currentSeeker.date_of_birth
+    && currentSeeker.nationality
+    && currentSeeker.apply_qualifications?.length
+    && currentSeeker.apply_experience_ranges?.length);
+  $('#setupBanner').classList.toggle('hidden', done);
+  if(done){
+    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Railway discovers South African jobs nationwide every few hours. Admins handle all applications.';
+  } else {
+    $('#agentSummary').textContent='Set up your profile to activate the agent.';
+  }
+
+  // Derived activity feed — merges recent matches + applications, no separate activity table exists
+  const feed=[];
+  matches.slice(0,15).forEach(m=>feed.push({t:m.discovered_at, msg:'🎯 New match'+(m.match_score!=null?' ('+Math.round(m.match_score)+'%)':'')+': '+privateJobText(m.job_title)+(employerLabel(m)?' at '+employerLabel(m):'')}));
+  // Only show successful applications in the user's activity feed. Problem
+  // results (needs_manual_action, failed, captcha_blocked, submission_unverified)
+  // are an admin responsibility and live in the admin Application Report — users
+  // never need to see "Application needs_manual_action" style noise on their dashboard.
+  applications.filter(isConfirmedApplication).slice(0,15).forEach(a=>feed.push({t:a.attempted_at, msg:'📮 Applied: '+(a.job_matches?.job_title||'a role')+(employerLabel(a.job_matches||{})?' at '+employerLabel(a.job_matches||{}):'')}));
+  feed.sort((a,b)=>new Date(b.t)-new Date(a.t));
+  const actEl=$('#actList');
+  actEl.innerHTML = feed.length
+    ? feed.slice(0,10).map(a=>'<li><span>'+esc(a.msg)+'</span><time>'+timeAgo(a.t)+'</time></li>').join('')
+    : '<li style="color:var(--muted)">No activity yet.</li>';
+}
+
+function updateAgentPill(){
+  const dot=$('#agentDot'), txt=$('#agentText');
+  if(!currentSeeker){ dot.className='dot idle'; txt.textContent='set up your profile'; return; }
+  dot.className='dot';
+  const lastMatch = matches[0]?.discovered_at;
+  txt.textContent = lastMatch ? ('On watch · found '+timeAgo(lastMatch)) : 'On watch';
+}
+
+/* ================= MATCHES ================= */
+// Country-level location filter, driven by the dropdown — not a hard
+// block. Each match's raw location text gets classified into one of a
+// fixed set of countries; picking a country in the dropdown shows every
+// posting anywhere in that country (all its cities/provinces together).
+// Nothing is filtered out at load time — "All locations" shows everything,
+// the user decides what to narrow down to, including overseas if they want.
+const COUNTRY_INDICATORS = {
+  south_africa: ['south africa','johannesburg','joburg','cape town','pretoria','durban',
+    'centurion','sandton','rosslyn','bloemfontein','port elizabeth','gqeberha','east london',
+    'pietermaritzburg','polokwane','nelspruit','mbombela','kimberley','rustenburg','george',
+    'stellenbosch','soweto','midrand','gauteng','western cape','eastern cape','kwazulu-natal',
+    'kwazulu natal','free state','limpopo','mpumalanga','north west province','northern cape'],
+  united_states: ['united states','usa',' us,','u.s.','new york','menlo park','san francisco',
+    'california','silicon valley','seattle','boston','chicago','los angeles','austin','texas',
+    'denver','atlanta','miami','washington dc','san diego','portland'],
+  canada: ['canada','toronto','vancouver','montreal','montréal','ottawa','calgary','edmonton',
+    'ontario','quebec','québec','british columbia'],
+  germany: ['germany','berlin','munich','münchen','frankfurt','hamburg','cologne','köln',
+    'stuttgart','düsseldorf'],
+  united_kingdom: ['united kingdom','u.k.',' uk','london','manchester','birmingham','edinburgh',
+    'glasgow','england','scotland','wales'],
+  australia: ['australia','sydney','melbourne','brisbane','perth','adelaide','canberra'],
+  netherlands: ['netherlands','amsterdam','rotterdam','the hague','utrecht','eindhoven']
+};
+const COUNTRY_LABELS = {
+  south_africa:'🇿🇦 South Africa', united_states:'🇺🇸 United States', canada:'🇨🇦 Canada',
+  germany:'🇩🇪 Germany', united_kingdom:'🇬🇧 United Kingdom', australia:'🇦🇺 Australia',
+  netherlands:'🇳🇱 Netherlands', other:'🌍 Other / unspecified'
+};
+function classifyLocationCountry(loc){
+  if(!loc) return 'other';
+  const l = loc.toLowerCase().trim();
+
+  // Smart South Africa detection FIRST — catches any city/town whose name
+  // isn't hard-coded below, provided the string is clearly SA-labelled:
+  //   "Somerset West, ZA"  "Bedfordview, ZA"  "Kempton Park, ZA"
+  //   "Any Town, South Africa"  "Anywhere, RSA"  "Anywhere, SA"
+  //   "Cape Town / ZA"  "Durban - South Africa"
+  // Without this the previous keyword pass silently dropped legit SA metros
+  // that hadn't been added to the whitelist yet.
+  if (/(?:,|\/|-|\s)\s*(?:za|s\.?a\.?|rsa|south africa|zaf)\s*$/i.test(l)) return 'south_africa';
+  if (/(?:,|\s)\s*south africa(?:$|\W)/i.test(l)) return 'south_africa';
+
+  for(const [country, keywords] of Object.entries(COUNTRY_INDICATORS)){
+    if(keywords.some(kw => l.includes(kw))) return country;
+  }
+  return 'other';
+}
+
+// Sources that are themselves South-African by nature (not multinationals
+// that merely sometimes hire there) — used as a fallback so a blank/missing
+// location on one of THEIR postings still counts as South African, instead
+// of being silently dropped by classifyLocationCountry('') === 'other'.
+// Deliberately excludes global multinationals (SGS/Rotork/Red Bull SA/M-KOPA)
+// since assuming SA for their blank-location postings would risk false positives.
+const SA_SCOPED_SOURCES = new Set(['boschgroup','deloitte6','wnsglobalservices144','ista-2',
+  'ikhokha','jobjack','sparkschools','kontakrecruitment','ozow','offerzen']);
+
+// Job-board / aggregator names (CareerJunction, Pnet, Job Mail, "Via Jobmail"…)
+// must never appear as the hiring company in applicant-facing job details.
+const SOURCE_NAME_RE = /^(via\s+.+|career\s?junction|careers\s?24|executive\s?placements|pnet|job\s?mail|indeed|linkedin|adzuna|remote\s?ok|jobbi|jobrapido|talent\.com|jobjack|offerzen|gumtree|jooble|glassdoor|ziprecruiter)$/i;
+function isSourceName(n){ return SOURCE_NAME_RE.test(String(n||'').trim()); }
+function coLabel(n){ return isSourceName(n)?'':privateJobText(n); }
+// The REAL hiring company for a match. Watched-page discovery stores the job
+// board / recruitment site in company_name (kept for block-lists, filtering and
+// SA-scope logic) and the actual employer in employer_name; feeds already store
+// the employer. Prefer the real employer for display, and fall back to the
+// source name only when the employer wasn't captured (e.g. older rows).
+function employerLabel(m){
+  // Never show a job board's own name as the company (Pnet, CareerJunction,
+  // Careers24, "Via Jobmail", …). Older rows stored that source label in
+  // employer_name, so it is screened too — not just company_name. Falls back to
+  // a neutral label only when nothing real is known.
+  const emp = (m && m.employer_name != null) ? String(m.employer_name).trim() : '';
+  if(emp && !isSourceName(emp)) return privateJobText(emp);
+  const src = String((m && m.company_name) || '').trim();
+  if(src && !isSourceName(src)) return privateJobText(src);
+  return 'Company not listed';
+}
+function isSouthAfricanMatch(m){
+  const c = classifyLocationCountry(m.location);
+  if(c==='south_africa' || c==='united_states') return true;
+  // Do not silently hide jobs whose location is blank or unrecognized — only
+  // drop ones clearly classified as a DIFFERENT country. Blank/unknown ('other')
+  // locations stay visible so real jobs are never lost to a missing label.
+  if(c==='other') return true;
+  if(!m.location && m.company_name && SA_SCOPED_SOURCES.has(m.company_name.toLowerCase())) return true;
+  // Watched pages (is_custom_source=true) are user-added job boards/companies,
+  // so a blank location on one of THEIR postings still counts as in-scope
+  // instead of being silently dropped.
+  if(!m.location && m.is_custom_source) return true;
+  return false;
+}
+
+// Baseline options for the Matches location filter — always available even
+// before any matches exist, so the dropdown never looks empty/dead.
+const SA_LOCATIONS=['Bloemfontein','Cape Town','Centurion','Durban','East London','George',
+  'Gqeberha','Johannesburg','Kimberley','Midrand','Nelspruit','Pietermaritzburg','Polokwane',
+  'Pretoria','Rustenburg','Sandton','Soweto','Stellenbosch','Remote'];
+const ZA_PROVINCES=['Eastern Cape','Free State','Gauteng','KwaZulu-Natal','Limpopo','Mpumalanga','Northern Cape','North West','Western Cape'];
+const US_LOCATIONS=["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "Washington DC", "New York City", "Los Angeles", "Chicago", "San Francisco", "Seattle", "Austin", "Boston", "Dallas", "Denver", "Atlanta", "Miami", "Phoenix", "Remote (US)"];
+
+// Preferred-locations multiselect (Profile view) — a tick-box dropdown built
+// on the same SA_LOCATIONS list as the Matches filter, merged with anything
+// already saved that isn't on the static list, plus a "Search all locations"
+// option stored as the sentinel ['All locations'] (mutually exclusive with
+// picking specific ones).
+function toggleLocMenu(e){
+  if(e) e.stopPropagation();
+  const nowHidden = $('#pfLocsMenu').classList.toggle('hidden');
+  $('#pfLocsBtn').classList.toggle('open', !nowHidden);
+}
+function closeLocMenu(){
+  const menu=$('#pfLocsMenu'), btn=$('#pfLocsBtn');
+  if(menu) menu.classList.add('hidden');
+  if(btn) btn.classList.remove('open');
+}
+document.addEventListener('click', e=>{
+  const wrap=$('.loc-multiselect');
+  if(wrap && !wrap.contains(e.target)) closeLocMenu();
+});
+function renderLocMenu(selected){
+  const isAll = selected.length===1 && selected[0]==='All locations';
+  const picked = isAll ? [] : [...new Set(selected.map(canonicalLocationLabel))];
+  const opts = [...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...picked])].sort();
+  $('#pfLocsList').innerHTML = opts.map(l=>
+    '<label class="loc-ms-opt'+(isAll?' disabled':'')+'"><input type="checkbox" value="'+esc(l)+'" '+
+    (picked.includes(l)?'checked':'')+' onchange="onPfLocOptChange()"> '+esc(l)+'</label>'
+  ).join('');
+  $('#pfLocAll').checked = isAll;
+  updatePfLocsLabel();
+}
+function onPfLocAllChange(){
+  const all = $('#pfLocAll').checked;
+  $$('#pfLocsList input[type=checkbox]').forEach(cb=>{
+    cb.checked=false;
+    cb.closest('.loc-ms-opt').classList.toggle('disabled', all);
+  });
+  updatePfLocsLabel();
+}
+function onPfLocOptChange(){
+  const any = Array.from($$('#pfLocsList input[type=checkbox]')).some(cb=>cb.checked);
+  if(any) $('#pfLocAll').checked=false;
+  updatePfLocsLabel();
+}
+function getSelectedLocs(){
+  if($('#pfLocAll') && $('#pfLocAll').checked) return ['All locations'];
+  return Array.from($$('#pfLocsList input[type=checkbox]')).filter(cb=>cb.checked).map(cb=>cb.value);
+}
+function updatePfLocsLabel(){
+  const label=$('#pfLocsLabel'); if(!label) return;
+  const sel=getSelectedLocs();
+  if(!sel.length){ label.textContent='Select locations…'; label.classList.add('placeholder'); return; }
+  label.classList.remove('placeholder');
+  label.textContent = sel[0]==='All locations' ? '🌍 Discovering across South Africa'
+    : (sel.length<=2 ? sel.join(', ') : sel[0]+', '+sel[1]+' +'+(sel.length-2)+' more');
+}
+
+async function loadMatches({silent=false,signal=null}={}){
+  const seekerId=currentSeeker?.id;
+  if(!seekerId){matches=[];return false;}
+  const all=[];const size=500;
+  try{
+    for(let offset=0;;offset+=size){
+      let query=sb.from('job_matches').select('*').eq('job_seeker_id',seekerId)
+        .order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
+      if(signal)query=query.abortSignal(signal);
+      const {data,error}=await query;
+      if(error)throw error;
+      const rows=data||[];all.push(...rows);if(rows.length<size)break;
+    }
+    if(signal?.aborted||currentSeeker?.id!==seekerId)return false;
+    matches=all.filter(m=>m.job_title!=='⚠ Watched page could not be read (not a job)'&&m.job_title!=='(watched page)');
+    return true;
+  }catch(error){if(!silent)toast('Could not load discoveries: '+(error.message||'Connection error'),'err');return false;}
+}
+function isSkippedMatch(m){return m.status!=='applied' && !!(m.status==='skipped'||m.agent_skipped_at||m.skip_reason);}
+function matchViewCounts(rows=matches){const skipped=rows.filter(isSkippedMatch).length;return {discovered:rows.length-skipped,skipped};}
+// Display the saved event timestamp, not the current clock. SAST is UTC+02:00 year-round.
+function discoveryDate(value){
+  if(!value)return 'Date and time unavailable';
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return 'Date and time unavailable';
+  const date=d.toLocaleDateString('en-ZA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'short',day:'numeric'});
+  const time=d.toLocaleTimeString('en-ZA',{timeZone:'Africa/Johannesburg',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  return date+' · '+time;
+}
+
+var openNotes = new Set();   // ids of Matches cards whose skipped/queued note is expanded
+function noteBox(cls, id, text, btnHtml){
+  // Collapsed = one fixed-height line with the message scrolling like a ticker (keeps every
+  // card the same size). Click to open the full message; click again to close.
+  const open = openNotes.has(id);
+  if(open) return '<div class="'+cls+' sn-box" data-note="'+id+'" title="Click to close"><div class="sn-full">'+esc(text)+btnHtml+'<span class="sn-caret">▴</span></div></div>';
+  const dur = Math.max(12, Math.round(text.length*0.16));
+  return '<div class="'+cls+' sn-box sn-closed" data-note="'+id+'" title="Click to read the full message"><div class="sn-head"><span class="sn-view"><span class="sn-track" style="animation-duration:'+dur+'s;animation-delay:-'+Math.round(dur*0.28)+'s">'+esc(text)+'</span></span><span class="sn-caret">▾</span></div></div>';
+}
+// ---- Location scope (mirrors jobFit.locationInScope so the UI can explain
+// why an out-of-area "Discovered" match wasn't auto-applied, and offer Apply) ----
+const _locNorm = (s) => String(s||'').toLowerCase().replace(/&#x2013;|&ndash;/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+// Normalize equivalent province labels without changing stored locations or collapsing cities.
+const SOURCE_PATTERN=String.raw`\b(?:adzuna|job\s*mail|pnet|career\s*junction|careers?\s*24|executive\s*placements|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter|remote\s*ok|talent\.com)\b`;
+function privateJobText(value){
+  return cleanJobText(value).replace(/https?:\/\/[^\s<>]+|www\.[^\s<>]+/gi,'')
+    .replace(/[\w.+-]+@(?:[\w.-]*\.)?(?:pnet|jobmail|careerjunction|careers24|adzuna|jobbi)\.[a-z.]+/gi,'')
+    .replace(/\b(?:[a-z0-9-]+\.)*(?:adzuna|jobmail|pnet|careerjunction|careers24|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter)\.[a-z.]+\b/gi,'')
+ .replace(/#?J-\d+-Ljbffr/gi,'').replace(new RegExp(SOURCE_PATTERN,'gi'),'the application platform')
+    .replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+}
+function canonicalLocationLabel(value){
+  const raw=String(value||'').trim().replace(/[\s,;|·–—-]+za\s*$/i,'').trim();
+  const key=_locNorm(raw).replace(/\s+(?:za|south africa)$/,'');
+  const province=ZA_PROVINCES.find(p=>_locNorm(p)===key);
+  return province||raw;
+}
+function locationKey(value){return _locNorm(canonicalLocationLabel(value));}
+// Matches-filter groups only: never rewrite the saved job location or profile preferences.
+function matchLocationGroup(value){
+  const raw=canonicalLocationLabel(cleanJobText(value));
+  const key=_locNorm(raw).replace(/\s+south africa$/,'');
+  if(!key)return '';
+  const has=(place)=>(' '+key+' ').includes(' '+_locNorm(place)+' ');
+  // Keep these localities consistent even when their parent metro is appended.
+  if(has('Bellville'))return 'Bellville';
+  if(has('Brackenfell'))return 'Brackenfell';
+  if(has('Parow'))return 'Parow';
+  if(has('Port Elizabeth')||has('Nelson Mandela Bay'))return 'Gqeberha';
+  if(has('eThekwini'))return 'Durban';
+  // Keep separately listed cities such as Soweto and Pretoria in their own groups.
+  const city=SA_LOCATIONS.find(place=>!['Johannesburg','Midrand','Sandton'].includes(place)&&has(place));
+  if(city)return city;
+  if(key==='gauteng'||['johannesburg','johannasburg','johannesberg','joburg','jhb','jozi','rosebank','midrand','sandton','randburg','roodepoort','fourways','bryanston','braamfontein','parktown','melrose','illovo','houghton','lonehill','northriding'].some(has))return 'Johannesburg';
+  // Parent municipalities/provinces are metadata, not additional town options.
+  const locality=raw.split(/[,;|]/)[0].trim().replace(/[\s–—-]+(?:south africa|Ekurhuleni|Emfuleni|Mangaung|Matlosana|Waterberg|Drakenstein|Cape Winelands|Bojanala Platinum|uMhlathuze|Eden)\s*$/i,'').trim();
+  return canonicalLocationLabel(locality);
+}
+function matchLocationOptions(values){
+  const groups=new Map();
+  values.forEach(value=>{const label=matchLocationGroup(value),key=_locNorm(label);if(key&&!groups.has(key))groups.set(key,label);});
+  return [...groups.values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+}
+// Decode named/numeric HTML entities as text only, including escaped and double-encoded source text.
+function cleanJobText(value){
+  let text=String(value??'');
+  const decoder=document.createElement('textarea');
+  for(let pass=0;pass<4;pass++){
+    const next=text.replace(/\\+(?=&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);)/gi,'')
+      .replace(/&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);/gi,entity=>{decoder.innerHTML=entity;return decoder.value;});
+    if(next===text)break;
+    text=next;
+  }
+  return text;
+}
+const _JHB_METRO=['johannesburg','joburg','jhb','jozi','sandton','midrand','randburg','roodepoort','soweto','rosebank','fourways','bryanston','sandringham','braamfontein','bedfordview','edenvale','germiston','kempton park','boksburg','benoni','alberton','brakpan','springs','krugersdorp','ekurhuleni','lonehill','northriding','melrose','illovo','parktown','houghton','linden'];
+const _TSHWANE_METRO=['pretoria','tshwane','centurion','clubview','silverton','menlyn','hatfield','brooklyn'];
+const _GAUTENG_OTHER=['vereeniging','vanderbijlpark','westonaria','randfontein','heidelberg'];
+const _GAUTENG_ALL=['gauteng',..._JHB_METRO,..._TSHWANE_METRO,..._GAUTENG_OTHER];
+const _JHB_ALIASES=['gauteng',..._JHB_METRO];
+const _PTA_ALIASES=['gauteng',..._TSHWANE_METRO];
+function _aliasesFor(pref){
+  const p=locationKey(pref); if(!p) return [];
+  if(p==='gauteng') return _GAUTENG_ALL;
+  if(_JHB_ALIASES.includes(p) && p!=='gauteng'){
+    if(['johannesburg','joburg','jhb','jozi'].includes(p)) return _JHB_ALIASES;
+    return [p,'johannesburg','joburg','gauteng'];
+  }
+  if(_TSHWANE_METRO.includes(p)) return _PTA_ALIASES;
+  return [p];
+}
+function _containsPhrase(h,p){ return (' '+h+' ').includes(' '+p+' '); }
+function locationInScope(jobLocation, prefs){
+  prefs=Array.isArray(prefs)?prefs:[];
+  if(prefs.length===0 || (prefs.length===1 && prefs[0]==='All locations')) return true;
+  const loc=locationKey(jobLocation); if(!loc) return false;
+  return prefs.some(p=>_aliasesFor(p).some(a=>_containsPhrase(loc,a)) || _containsPhrase(loc,locationKey(p)));
+}
+function isOutOfPreferredLocation(m){
+  const prefs=currentSeeker?.preferred_locations||[];
+  const scopeAll=prefs.length===0 || (prefs.length===1 && prefs[0]==='All locations');
+  if(scopeAll) return false;
+  return !locationInScope(m.location, prefs);
+}
+function isVisibleMatch(m){return state.view==='skipped'?isSkippedMatch(m):!isSkippedMatch(m);}
+function renderMatches(){
+  // Location dropdown = a fixed list of major South African metros (always
+  // usable, even with zero matches yet) merged with any location that
+  // actually shows up in this user's real matches (so an unlisted town
+  // still appears once the agent finds a job there).
+  const locSel=$('#mLoc'); const cur=state.mLoc==='all'?'all':matchLocationGroup(state.mLoc);
+  state.mLoc=cur;
+  const visiblePool=matches.filter(isVisibleMatch);
+  const matchLocs=visiblePool.map(m=>m.location).filter(Boolean);
+  const locs=matchLocationOptions([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs]);
+  locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
+  if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
+
+  const q=state.mQ.toLowerCase();
+  let list = visiblePool.filter(m=>{
+    // Saved discoveries remain visible even if a later block prevents future work.
+    if(state.mLoc!=='all' && _locNorm(matchLocationGroup(m.location))!==_locNorm(state.mLoc)) return false;
+    if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  list.sort((a,b)=>new Date(b.discovered_at)-new Date(a.discovered_at));
+  lastFilteredIds = list.map(m=>m.id);
+
+  const g=$('#matchGrid');
+  if(!list.length){
+    g.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="big">📡</div>'+
+      (visiblePool.length ? 'No matches fit these filters. Try clearing them.' : (state.view==='skipped'?'No skipped matches.':'No discovered matches in this view.'))+'</div>';
+    updateBulkBar();
+    return;
+  }
+  // Queued is an explicit user choice, not a confirmed application.
+  const statusPill = (s) => {
+    if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
+    if (s === 'approved') return '<span class="pill green">⏳ Queued for an agent</span>';
+    if (s === 'skipped') return '<span class="pill skip">⏭ Skipped by agent</span>';
+    return '<span class="pill gray">🔍 Discovered</span>'; // discovery stays saved through every outcome
+  };
+  g.innerHTML = list.map(m=>{
+    // match_score is stored as an integer 0..100, not a fraction.
+    const scoreHtml = m.match_score!=null
+      ? '<span class="score">'+Math.round(m.match_score)+'% match</span>'
+      : '<span class="score gray">found by your agent</span>';
+    const requested=m.status==='approved';
+    const uncertain=m.status==='submission_unverified';
+    const canRequest=m.status!=='applied'&&!requested&&!uncertain;
+    return '<div class="mcard">'+
+      '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
+      '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
+      scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
+      '<div><h4>'+esc(privateJobText(m.job_title))+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
+      '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
+      (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+privateJobText(m.skip_reason),'') : '')+
+      (requested ? '<p class="queue-request-message">Your request has been successfully submitted and is waiting for the agent on the next run.</p>' : '')+
+      (uncertain ? '<p class="sub2">An earlier submission is uncertain. An agent will check before applying again.</p>' : '')+
+      (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
+      '<div class="acts">'+
+      '<div class="acts-btns">'+
+      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Request agent review for this application">▶ Approve</button>' : '')+
+      '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
+      '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
+      (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
+      '</div>'+
+      '<span class="found">Discovered '+esc(discoveryDate(m.discovered_at))+'</span></div></div>';
+  }).join('');
+  updateBulkBar();
+}
+
+let lastFilteredIds=[];
+
+function toggleSelectAll(checked){
+  if(checked) lastFilteredIds.forEach(id=>state.selected.add(id));
+  else lastFilteredIds.forEach(id=>state.selected.delete(id));
+  renderMatches();
+}
+
+function updateBulkBar(){
+  const count=state.selected.size;
+  $('#bulkBar').classList.toggle('hidden', count===0);
+  $('#bulkCount').textContent=count;
+  const allVisibleSelected = lastFilteredIds.length>0 && lastFilteredIds.every(id=>state.selected.has(id));
+  const sa=$('#mSelectAll'); if(sa) sa.checked=allVisibleSelected;
+}
+
+async function bulkDelete(){
+  const ids=[...state.selected];
+  if(!ids.length) return;
+  askConfirm('Delete '+ids.length+' selected '+(ids.length===1?'job':'jobs')+' permanently? This can\u2019t be undone.', async ()=>{
+    // Remove dependent application history first; otherwise the foreign-key
+    // constraint can prevent a match from being deleted.
+    const {error: logError} = await sb.from('application_log').delete().in('job_match_id', ids);
+    if(logError){ toast('⚠ '+logError.message,'err'); return; }
+    const {data: deleted, error} = await sb.from('job_matches').delete().in('id', ids).select('id');
+    if(error){ toast('⚠ '+error.message,'err'); return; }
+    if((deleted||[]).length !== ids.length){
+      toast('⚠ Some jobs could not be deleted. Please refresh and try again.','err');
+      await refreshAll();
+      return;
+    }
+    applications = applications.filter(a=>!ids.includes(a.job_match_id));
+    matches = matches.filter(m=>!ids.includes(m.id));
+    state.selected.clear();
+    toast('Deleted '+ids.length+' '+(ids.length===1?'job':'jobs'));
+    renderMatches(); renderDashboard();
+  });
+}
+
+function clearMatchFilters(){ state.mQ=''; state.mLoc='all'; $('#mSearch').value=''; renderMatches(); }
+
+$('#matchGrid').addEventListener('change', (e)=>{
+  const box=e.target.closest('input.match-select');
+  if(!box) return;
+  if(box.checked) state.selected.add(box.dataset.id);
+  else state.selected.delete(box.dataset.id);
+  updateBulkBar();
+});
+
+$('#matchGrid').addEventListener('click', async (e)=>{
+  const nt=e.target.closest('[data-note]');
+  if(nt && !e.target.closest('button')){
+    const nid=nt.getAttribute('data-note');
+    if(openNotes.has(nid)) openNotes.delete(nid); else openNotes.add(nid);
+    renderMatches(); return;
+  }
+  const qb=e.target.closest('button[data-quickblock-co]');
+  if(qb && qb.dataset.quickblockCo){ await addBlockRaw('companies', qb.dataset.quickblockCo); return; }
+  const btn=e.target.closest('button[data-action]');
+  if(!btn) return;
+  const id=btn.dataset.id, action=btn.dataset.action;
+  const mm = matches.find(x=>x.id===id);
+  if(action==='view'){ if(mm) openJobView(mm); return; }
+  if(action==='apply'){
+    btn.disabled=true;
+    const {error}=await sb.rpc('request_job_application',{p_match_id:id});
+    if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
+    if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
+    toast('Your request has been successfully submitted and is waiting for the agent on the next run.','ok queue-success');renderMatches();renderDashboard();return;
+  }
+  if(action==='delete'){
+    if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
+    btn.disabled=true;
+    const {error: logError} = await sb.from('application_log').delete().eq('job_match_id', id);
+    if(logError){ toast('⚠ '+logError.message,'err'); btn.disabled=false; return; }
+    const {data: deleted, error} = await sb.from('job_matches').delete().eq('id', id).select('id');
+    if(error){ toast('⚠ '+error.message,'err'); btn.disabled=false; return; }
+    if(!deleted?.length){ toast('⚠ Job was not deleted. Please refresh and try again.','err'); btn.disabled=false; return; }
+    applications=applications.filter(a=>a.job_match_id!==id);
+    toast('Deleted'); matches=matches.filter(m=>m.id!==id); renderMatches(); renderDashboard();
+    return;
+  }
+});
+
+/* ================= APPLICATIONS ================= */
+async function loadApplications({silent=false,signal=null}={}){
+  const seekerId=currentSeeker?.id;
+  if(!seekerId){applications=[];return false;}
+  const all=[];const size=500;
+  try{
+    for(let offset=0;;offset+=size){
+      let query=sb.from('application_log')
+        .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
+        .eq('job_seeker_id',seekerId).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
+      if(signal)query=query.abortSignal(signal);
+      const {data,error}=await query;
+      if(error)throw error;
+      const rows=data||[];all.push(...rows);if(rows.length<size)break;
+    }
+    if(signal?.aborted||currentSeeker?.id!==seekerId)return false;
+    applications=all;return true;
+  }catch(error){if(!silent)toast('Could not load applied matches: '+(error.message||'Connection error'),'err');return false;}
+}
+
+const ATTENTION_RESULTS = ['failed','captcha_blocked','needs_manual_action','submission_unverified'];
+function isConfirmedApplication(a){
+  if(a.result!=='success')return false;
+  if(a.verification_status==='user_confirmed'||a.verification_status==='admin_confirmed')return true;
+  if(a.verification_status!=='confirmed'||!a.confirmation_text)return false;
+  try{if(/(^|\.)adzuna\.[a-z.]+$/i.test(new URL(a.confirmation_url).hostname))return false;}catch(_){return false;}
+  const lines=String(a.confirmation_text).split(/\n+|(?<=[.!?])\s+/);
+  return lines.some(t=>! /\b(?:must|should|required|please|before|prior to|after|once|if|when|until|click|need to|will be|can be|may be|how to)\b/i.test(t)&&/\byour application\s+(?:(?:has been|was|is)\s+)?(?:successfully\s+)?(?:submitted|received)\b|\b(?:we have|we've|we)\s+(?:successfully\s+)?received\s+your application\b|\byou (?:have )?successfully applied\b|\b(?:thank you|thanks) for (?:applying|submitting your application)\b|\bapplication (?:successfully submitted|submission successful)\b/i.test(t));
+}
+
+const ATTENTION_META = {
+  failed: {icon:'⚠️', label:'Application failed'},
+  captcha_blocked: {icon:'🔒', label:'Blocked by a CAPTCHA'},
+  needs_manual_action: {icon:'✋', label:'Needs manual action'},
+  submission_unverified: {icon:'❔', label:'Submission not verified'}
+};
+// A real SVG instead of an emoji — the 🗑 emoji renders as a blank box on some
+// Windows/Chrome font setups (same class of bug as the earlier 🪪 ID icon).
+const TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
+
+function isVisibleAppliedApplication(a){
+  return isConfirmedApplication(a)&&!a.job_matches?.user_applied_deleted_at&&
+    !(typeof matches!=='undefined'&&matches.find(m=>m.id===a.job_match_id)?.user_applied_deleted_at);
+}
+function renderApplications(){
+  const byJob=new Map();
+  applications.filter(isVisibleAppliedApplication).forEach(a=>{if(!byJob.has(a.job_match_id||a.id))byJob.set(a.job_match_id||a.id,a);});
+  const applied=[...byJob.values()];
+  $('#appList').innerHTML='<p class="sub2" style="margin:10px 0">Application completed</p>'+
+    (applied.length?applied.map(a=>'<div class="lrow"><div class="grow"><b>'+esc(a.job_matches?.job_title||'Unknown role')+'</b><div class="sub2">'+esc(employerLabel(a.job_matches||{}))+'</div><div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div></div><span class="pill green">'+(a.verification_status==='admin_confirmed'?'Applied':a.verification_status==='user_confirmed'?'✓ User confirmed':'✓ Employer receipt')+'</span><button class="btn btn-ghost btn-xs" data-view-job="'+esc(a.id)+'">View job</button><button class="btn btn-danger btn-xs" data-del-app="'+esc(a.id)+'">Delete</button></div>').join(''):'<div class="empty">No completed applications recorded yet. Admins manage pending work in the admin application queue.</div>');
+}
+
+function safeApplicationDetailUrl(value){
+  try{
+    const url=new URL(value);
+    if(url.protocol!=='https:'||url.username||url.password)return '';
+    if(new RegExp(SOURCE_PATTERN,'i').test(url.hostname))return '';
+    return url.href;
+  }catch{return '';}
+}
+function completedApplicationForJob(job,explicit){
+  if(typeof isConfirmedApplication!=='function')return null;
+  if(explicit&&isConfirmedApplication(explicit))return explicit;
+  if(!job?.id||typeof applications==='undefined'||!Array.isArray(applications))return null;
+  return applications.filter(a=>a.job_match_id===job.id&&isConfirmedApplication(a))
+    .sort((a,b)=>new Date(b.attempted_at||0)-new Date(a.attempted_at||0))[0]||null;
+}
+function applicationDetailsMarkup(a){
+  if(!a)return '';
+  const receipt=privateJobText(a.confirmation_text||'');
+  const ref=privateJobText(a.confirmation_reference||'');
+  const screenshot=safeApplicationDetailUrl(a.confirmation_screenshot_url);
+  const fields=Array.isArray(a.submitted_fields)?a.submitted_fields:[];
+  return '<section id="jobApplicationDetails" style="margin-top:24px;padding-top:18px;border-top:1px solid var(--line)">'+
+    '<h3 class="completion-heading">Application completed</h3>'+
+    (a.attempted_at?'<div><span class="pill green completion-badge">Applied '+esc(discoveryDate(a.attempted_at))+'</span></div>':'')+
+    (receipt?'<div style="margin-top:14px"><h3 class="completion-heading">Confirmation details</h3><div><span class="pill green completion-badge">'+esc(receipt)+'</span></div></div>':'')+
+    (ref?'<div class="sub2" style="margin-top:8px">Reference: <b>'+esc(ref)+'</b></div>':'')+
+    (fields.length?'<div style="margin-top:18px"><b style="font-size:13px">Answers sent</b><div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">'+fields.map(f=>'<div style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px"><b>'+esc(privateJobText(f.field||'Application field'))+'</b><div class="sub2" style="margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(privateJobText(f.value??''))+'</div></div>').join('')+'</div></div>':'<div class="sub2" style="margin-top:18px">No form answers were captured for this record.</div>')+
+    (screenshot?'<div style="margin-top:18px"><b style="font-size:13px">Confirmation screenshot</b><img src="'+esc(screenshot)+'" alt="Application confirmation" style="display:block;width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line)"></div>':'')+
+    '</section>';
+}
+// Legacy calls now open the same combined job view; there is no separate confirmation card.
+function applicationDetails(id){
+  const a=applications.find(x=>x.id===id);
+  if(a)openJobView(a.job_matches||{},a);
+}
+
+$('#appList').addEventListener('click', (e)=>{
+  const vj=e.target.closest('button[data-view-job]');
+  if(vj){ const ap=applications.find(x=>x.id===vj.dataset.viewJob); if(ap) openJobView(ap.job_matches||{},ap); return; }
+  const btn=e.target.closest('button[data-del-app]');
+  if(!btn) return;
+  const record=applications.find(a=>a.id===btn.dataset.delApp);
+  if(!record?.job_match_id)return;
+  askConfirm('Remove this job from your Applied matches list? Your saved job and completion record will be kept, and other users are not affected.', async ()=>{
+    btn.disabled=true;
+    try{
+      const {data,error}=await sb.rpc('user_delete_applied_match',{p_match_id:record.job_match_id});
+      if(error)throw error;
+      if(data?.id!==record.job_match_id||data?.user_applied_deleted!==true)throw new Error('The server did not confirm removal. Please refresh and check before retrying.');
+      const removedAt=new Date().toISOString();
+      applications.filter(a=>a.job_match_id===record.job_match_id).forEach(a=>{a.job_matches={...(a.job_matches||{}),user_applied_deleted_at:removedAt};});
+      const match=matches.find(m=>m.id===record.job_match_id);if(match)match.user_applied_deleted_at=removedAt;
+      toast('Removed from Applied matches','ok');renderApplications();renderDashboard();
+    }catch(error){toast('Could not delete: '+(error.message||'Connection error'),'err');}
+    finally{btn.disabled=false;}
+  });
+});
+
+/* ================= OTHER DOCUMENTS ================= */
+const DOC_TYPE_LABEL={id:'ID document',certificate:'Certificate',qualification:'Qualification',other:'Other'};
+const DOC_TYPE_ICON={id:'🆔',certificate:'📜',qualification:'🎓',other:'📎'};
+
+async function loadDocuments(){
+  if(!currentSeeker){ documents=[]; return; }
+  const {data, error} = await sb.from('job_seeker_documents').select('*').eq('job_seeker_id', currentSeeker.id).order('created_at',{ascending:false});
+  documents = error ? [] : (data||[]);
+}
+function renderDocuments(){
+  const el=$('#docList');
+  if(!documents.length){ el.innerHTML='<div class="empty"><div class="big">🗂️</div>No documents yet — optional, add them anytime.</div>'; return; }
+  el.innerHTML = documents.map(d=>'<div class="lrow">'+
+    '<span style="font-size:22px">'+(DOC_TYPE_ICON[d.doc_type]||'📎')+'</span>'+
+    '<div class="grow"><b>'+esc(DOC_TYPE_LABEL[d.doc_type]||d.doc_type)+'</b><div class="sub2"><a href="'+esc(d.file_url)+'" target="_blank" rel="noopener">'+esc(d.file_name)+'</a></div></div>'+
+    '<button class="btn btn-ghost btn-xs" data-remove-doc-id="'+d.id+'">Remove</button></div>'
+  ).join('');
+}
+async function addDoc(){
+  if(!currentSeeker){ toast('⚠ Save your profile first','warn'); return; }
+  const file=$('#docFile').files[0];
+  if(!file){ toast('Choose a file first','warn'); return; }
+  const docType=$('#docType').value;
+  const btn=$('#docUploadBtn'); btn.disabled=true; btn.textContent='Uploading…';
+  try{
+    const path = `${currentUser.id}/${docType}-${Date.now()}-${file.name}`;
+    const {error: upErr} = await sb.storage.from('documents').upload(path, file, {upsert:true});
+    if(upErr) throw upErr;
+    const {data: signed, error: signErr} = await sb.storage.from('documents').createSignedUrl(path, 315360000);
+    if(signErr) throw signErr;
+    const {error: insErr} = await sb.from('job_seeker_documents').insert({
+      job_seeker_id: currentSeeker.id, doc_type: docType, file_name: file.name, file_url: signed.signedUrl
+    });
+    if(insErr) throw insErr;
+    $('#docFile').value='';
+    toast('Document added ✓','ok');
+    await loadDocuments(); renderDocuments(); renderDashboard();
+  }catch(err){
+    toast('⚠ '+err.message,'err');
+  }finally{ btn.disabled=false; btn.textContent='⬆ Upload'; }
+}
+$('#docList').addEventListener('click', async (e)=>{
+  const btn=e.target.closest('button[data-remove-doc-id]');
+  if(!btn) return;
+  await sb.from('job_seeker_documents').delete().eq('id', btn.dataset.removeDocId);
+  await loadDocuments(); renderDocuments();
+});
+
+/* ================= BLOCK LIST ================= */
+function addBlock(kind){
+  const inp = kind==='companies' ? $('#bcInput') : $('#blInput');
+  addBlockRaw(kind, inp.value);
+  inp.value='';
+}
+async function addBlockRaw(kind, val){
+  val = (val||'').trim();
+  if(!val) return;
+  if(!currentSeeker){ toast('⚠ Save your profile first','warn'); return; }
+  const field = kind==='companies' ? 'blocked_companies' : 'blocked_locations';
+  const current = currentSeeker[field] || [];
+  if(current.some(b=>b.toLowerCase()===val.toLowerCase())){ toast('Already blocked','warn'); return; }
+  const updated = [...current, val];
+  const {error} = await sb.from('job_seekers').update({[field]: updated}).eq('id', currentSeeker.id);
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  currentSeeker[field] = updated;
+  toast('Blocked "'+val+'"','err');
+  renderBlocked(); renderMatches(); renderDashboard();
+  if(kind==='companies' && typeof renderApplications==='function' && $('#attnList')) renderApplications();
+}
+async function removeBlock(kind, val){
+  const field = kind==='companies' ? 'blocked_companies' : 'blocked_locations';
+  const updated = (currentSeeker[field]||[]).filter(b=>b!==val);
+  const {error} = await sb.from('job_seekers').update({[field]: updated}).eq('id', currentSeeker.id);
+  if(error){ toast('⚠ '+error.message,'err'); return; }
+  currentSeeker[field] = updated;
+  // Confirm the unblock and remind the user the pipeline will resume for this
+  // company/place — matches show up again immediately (isBlocked() reads the
+  // fresh currentSeeker) and future runs of the apply worker will queue it.
+  toast(
+    kind==='companies'
+      ? '✓ Unblocked "'+val+'" — future discoveries from this company can resume; admins apply'
+      : '✓ Unblocked "'+val+'" — discovery in this place can resume; admins apply',
+    'ok'
+  );
+  renderBlocked(); renderMatches(); renderDashboard();
+  if(kind==='companies' && typeof renderApplications==='function' && $('#attnList')) renderApplications();
+}
+function renderBlocked(){
+  const companies = currentSeeker?.blocked_companies || [];
+  const locations = currentSeeker?.blocked_locations || [];
+  $('#bcList').innerHTML = companies.length
+    ? companies.map(c=>'<span class="block-chip">🏢 '+esc(c)+
+        '<button class="chip-unblock" data-unblock-co="'+esc(c)+'" title="Unblock — resume future discoveries from this company">Unblock</button>'+
+      '</span>').join('')
+    : '<span style="color:var(--muted);font-size:13px">Nothing blocked yet.</span>';
+  $('#blList').innerHTML = locations.length
+    ? locations.map(l=>'<span class="block-chip loc">📍 '+esc(l)+
+        '<button class="chip-unblock" data-unblock-loc="'+esc(l)+'" title="Unblock — resume future discovery in this place">Unblock</button>'+
+      '</span>').join('')
+    : '<span style="color:var(--muted);font-size:13px">Nothing blocked yet.</span>';
+}
+$('#bcList').addEventListener('click', e=>{ const b=e.target.closest('button[data-unblock-co]'); if(b) removeBlock('companies', b.dataset.unblockCo); });
+$('#blList').addEventListener('click', e=>{ const b=e.target.closest('button[data-unblock-loc]'); if(b) removeBlock('locations', b.dataset.unblockLoc); });
+
+/* ================= DISMISSIBLE CARDS =================
+   Any card marked `.dismissable` with a data-card-id can be hidden by the
+   user. Dismissals persist in localStorage per-browser, and a "Show hidden
+   cards" link appears so nothing is ever lost permanently. */
+function dismissedCards(){ try{ return JSON.parse(localStorage.getItem('ja_dismissed_cards')||'[]'); }catch{ return []; } }
+function dismissCard(cardId){
+  const d = new Set(dismissedCards()); d.add(cardId);
+  localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
+  applyDismissedCards();
+}
+function restoreCard(cardId){
+  const d = new Set(dismissedCards()); d.delete(cardId);
+  localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
+  applyDismissedCards();
+}
+function restoreAllCards(){
+  localStorage.setItem('ja_dismissed_cards','[]');
+  applyDismissedCards();
+}
+function applyDismissedCards(){
+  const d = new Set(dismissedCards());
+  document.querySelectorAll('.card.dismissable').forEach(c => {
+    c.classList.toggle('hidden', d.has(c.dataset.cardId));
+  });
+  // Render "Show hidden cards" link in each view's restore slot
+  ['dashRestore','helpRestore'].forEach(slotId => {
+    const slot = document.getElementById(slotId); if(!slot) return;
+    // Only consider cards that live inside this slot's parent view
+    const section = slot.closest('section');
+    const hidden = section ? [...section.querySelectorAll('.card.dismissable')].filter(c=>d.has(c.dataset.cardId)) : [];
+    if(!hidden.length){ slot.innerHTML = ''; return; }
+    slot.innerHTML = '<div class="sub2" style="font-size:12.5px">'+hidden.length+' hidden card'+(hidden.length===1?'':'s')+' · <a href="#" onclick="event.preventDefault();restoreAllCards()" style="color:var(--accent);text-decoration:underline">show again</a></div>';
+  });
+}
+
+/* ================= CONTACT US (support_messages) =================
+   Threaded support conversation between the signed-in seeker and the admin
+   team. RLS already scopes rows to this seeker, so the client just selects
+   everything in the table and orders by created_at. */
+let helpMessages = [];
+
+async function loadHelpThread(){
+  const el = $('#helpThread');
+  if(!currentSeeker){ if(el) el.innerHTML = '<div class="sub2">Sign in first.</div>'; return; }
+  if(el) el.innerHTML = '<div class="sub2">Loading…</div>';
+  const {data, error} = await sb.from('support_messages')
+    .select('*')
+    .eq('job_seeker_id', currentSeeker.id)
+    .eq('hidden_by_user', false)
+    .order('created_at', {ascending:true});
+  if(error){ if(el) el.innerHTML = '<div class="sub2">⚠ '+esc(error.message)+'</div>'; return; }
+  helpMessages = data || [];
+  renderHelpThread();
+  // Mark any unread admin replies as seen so the nav badge clears.
+  const unread = helpMessages.filter(m => m.sender_type==='admin' && !m.read_by_user).map(m=>m.id);
+  if(unread.length){
+    await sb.from('support_messages').update({read_by_user:true}).in('id', unread);
+    helpMessages = helpMessages.map(m => unread.includes(m.id) ? {...m, read_by_user:true} : m);
+    updateHelpBadge();
+  }
+}
+
+function renderHelpThread(){
+  const el = $('#helpThread');
+  if(!el) return;
+  if(!helpMessages.length){
+    el.innerHTML = '<div class="sub2">No messages yet — send one above to start the conversation.</div>';
+    return;
+  }
+  el.innerHTML = helpMessages.map(m => {
+    const mine = m.sender_type === 'user';
+    const bg = mine ? 'rgba(79,157,255,.10)' : 'rgba(163,230,53,.08)';
+    const border = mine ? 'rgba(79,157,255,.30)' : 'rgba(163,230,53,.25)';
+    const label = mine ? 'You' : '🛟 Support team';
+    return '<div style="border:1px solid '+border+';background:'+bg+';border-radius:12px;padding:12px 14px;margin-bottom:10px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">'+
+        '<b style="font-size:12.5px">'+esc(label)+'</b>'+
+        '<div style="display:flex;align-items:center;gap:6px">'+
+          '<span class="sub2" style="font-size:11.5px">'+esc(fmtStamp(m.created_at))+'</span>'+
+          '<button class="msg-del" data-del-msg="'+esc(m.id)+'" title="Delete this message">'+TRASH_ICON+'</button>'+
+        '</div>'+
+      '</div>'+
+      '<div style="white-space:pre-wrap;line-height:1.5;font-size:14px">'+esc(m.body)+'</div>'+
+    '</div>';
+  }).join('');
+}
+
+async function deleteHelpMessage(id){
+  if(!id) return;
+  if(!confirm('Remove this message from your view? The support team keeps their own copy.')) return;
+  // Soft-delete: only hides from this seeker's own thread. The admin's view
+  // is driven by hidden_by_admin, so the message stays visible to them.
+  const {error} = await sb.from('support_messages').update({hidden_by_user:true}).eq('id', id);
+  if(error){ alert('⚠ '+error.message); return; }
+  helpMessages = helpMessages.filter(m => m.id !== id);
+  renderHelpThread();
+  updateHelpBadge();
+}
+
+// Delegate delete clicks (buttons are re-rendered on every refresh)
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-del-msg]');
+  if(btn){ deleteHelpMessage(btn.dataset.delMsg); }
+});
+
+async function sendHelpMessage(){
+  const ta = $('#helpInput'); const status = $('#helpStatus'); const btn = $('#helpSendBtn');
+  const body = (ta?.value || '').trim();
+  if(!body){ status.textContent = 'Write something first.'; return; }
+  if(!currentSeeker){ status.textContent = 'Sign in first.'; return; }
+  btn.disabled = true; status.textContent = 'Sending…';
+  const {error} = await sb.from('support_messages').insert({
+    job_seeker_id: currentSeeker.id,
+    sender_type: 'user',
+    body
+  });
+  btn.disabled = false;
+  if(error){ status.textContent = '⚠ '+error.message; return; }
+  ta.value = ''; status.textContent = '✓ Sent';
+  setTimeout(()=>{ status.textContent=''; }, 2500);
+  await loadHelpThread();
+}
+
+// Nav badge for unread admin replies — called from boot + whenever thread refreshes.
+async function updateHelpBadge(){
+  if(!currentSeeker) return;
+  const badge = $('#navHelpCount'); if(!badge) return;
+  const {count, error} = await sb.from('support_messages')
+    .select('id', {count:'exact', head:true})
+    .eq('job_seeker_id', currentSeeker.id)
+    .eq('sender_type', 'admin')
+    .eq('read_by_user', false);
+  if(error) return;
+  if(count && count > 0){ badge.textContent = String(count); badge.classList.remove('hidden'); }
+  else { badge.classList.add('hidden'); }
+}
+
+/* ================= MODALS ================= */
+function closeModal(id){ $('#'+id).classList.add('hidden'); }
+/* In-app job viewer: shows the posting's details (title, real company, location,
+   salary, description, match reason) inside the app. Never links out — if a
+   field is missing we simply omit it, and we always render whatever job info
+   we do have instead of hiding it behind an "unavailable" fallback. */
+// Select published role facts for the viewer; never ask AI to rewrite or invent them.
+function scopeJobSections(value){
+  const text=privateJobText(value).replace(/\r/g,'');
+  const sections={duties:[],requirements:[],salary:[]};
+  const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|what you(?: will|’ll|\x27ll) do)';
+  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
+  const salary='(?:salary(?: range| package)?|remuneration(?: package)?|compensation(?: package)?|pay(?: range)?)';
+  const stop='(?:about (?:us|the company|the employer|the role)|company overview|job overview|role summary|summary|benefits|perks|location|working hours|employment type|contract type|how to apply|application(?: process| instructions)?|closing date|application deadline|equal opportunities|privacy|disclaimer)';
+  const heading=new RegExp('^\\s*(?:#+\\s*)?(?:[0-9]+[.)]\\s*)?(?:\\*\\*)?('+duties+'|'+requirements+'|'+salary+'|'+stop+')(?:\\*\\*)?(?:\\s+(?:will include|include|includes|are))?\\s*(?::\\s*(.*)|$)','i');
+  const dutyHeading=new RegExp('^'+duties+'$','i'),reqHeading=new RegExp('^'+requirements+'$','i'),salaryHeading=new RegExp('^'+salary+'$','i');
+  // Listing summaries may have explicit facts inline rather than on separate lines.
+  const readable=text.replace(new RegExp('([.!?]\\s+)('+duties+')\\s+(?:will include|includes?|are)\\s*:?', 'gi'),'$1\n$2: ')
+    .replace(new RegExp('([.!?]\\s+)('+requirements+'|'+salary+')\\s*:', 'gi'),'$1\n$2:');
+  let current=null;
+  for(const line of readable.split('\n')){
+    const m=line.match(heading);
+    if(m){
+      const name=m[1].replace(/\*\*/g,'').trim();
+      current=dutyHeading.test(name)?'duties':reqHeading.test(name)?'requirements':salaryHeading.test(name)?'salary':null;
+      if(current){
+        // Preserve specific requirement subheadings (e.g. experience) to avoid losing meaning.
+        if(current==='requirements')sections[current].push(name+':');
+        if(m[2]?.trim())sections[current].push(m[2].trim());
+      }
+    }else if(current)sections[current].push(line);
+  }
+  for(const key of Object.keys(sections))sections[key]=sections[key].join('\n').replace(/\n{3,}/g,'\n\n').trim();
+  return sections;
+}
+function renderScopedJobDetails(description,salary,status){
+  const sections=scopeJobSections(description);
+  if(!sections.salary&&salary)sections.salary=privateJobText(salary);
+  const entries=[['duties','Responsibilities & duties'],['requirements','Qualifications & requirements'],['salary','Salary']].filter(([key])=>sections[key]);
+  const hasRoleSections=!!(sections.duties||sections.requirements);
+  const notice=status==='captured'?'':'<div class="sub2" style="margin-bottom:12px">These are the available saved details. The complete advert has not been retrieved yet.</div>';
+  const blocks=entries.map(([key,label])=>'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">'+label+'</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(sections[key])+'</div></section>').join('');
+  // A summary remains available if the source did not provide identifiable role sections.
+  const fallback=!hasRoleSections&&description?'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Available job summary</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(privateJobText(description))+'</div></section>':'';
+  if(!blocks&&!fallback)return '<div class="sub2">Job details are not available yet. The agent will retry retrieving them on a later scan.</div>';
+  return notice+blocks+fallback;
+}
+function openJobView(j,application=null){
+  j = j || {};
+  const title   = privateJobText(j.job_title || 'Job details');
+  const company = cleanJobText((typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||''));
+  const loc     = canonicalLocationLabel(cleanJobText(j.location || ''));
+  const salary  = j.salary_text ? privateJobText(j.salary_text).trim() : '';
+  const reason  = j.match_reason && !/^Matched from /i.test(j.match_reason) ? privateJobText(j.match_reason).trim() : '';
+  const score   = (j.match_score!=null && !isNaN(j.match_score)) ? Math.round(j.match_score)+'% match' : '';
+  const found   = j.discovered_at ? ('Found '+timeAgo(j.discovered_at)) : '';
+  const desc    = (j.job_description && String(j.job_description).trim()) ? privateJobText(j.job_description).trim() : '';
+
+  $('#jmTitle').textContent = title;
+
+  // Top line: company · location
+  const headerBits = [];
+  if (company) headerBits.push('<span>🏢 '+esc(company)+'</span>');
+  if (loc)     headerBits.push('<span>📍 '+esc(loc)+'</span>');
+  const header = headerBits.length
+    ? '<div class="sub2" style="margin-bottom:12px">'+headerBits.join(' · ')+'</div>'
+    : '';
+
+  // Chip strip: salary, match %, discovery age — only when the value exists
+  const chips = [];
+  if (salary) chips.push('<span class="pill gray">💰 '+esc(salary)+'</span>');
+  if (score)  chips.push('<span class="pill green">'+esc(score)+'</span>');
+  if (found)  chips.push('<span class="pill gray">🕒 '+esc(found)+'</span>');
+  const chipRow = chips.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">'+chips.join('')+'</div>'
+    : '';
+
+  // Why your agent picked this
+  const reasonBlock = reason
+    ? '<div style="border:1px solid var(--line);background:var(--input-bg);border-radius:12px;padding:12px 14px;margin-bottom:14px">'+
+        '<b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Why your agent picked this</b>'+
+        '<div style="margin-top:6px;line-height:1.55;font-size:14px">'+esc(reason)+'</div>'+
+      '</div>'
+    : '';
+
+  // Full job description — the primary content when we have it
+  const descBlock=renderScopedJobDetails(desc,salary,j.job_description_status||'legacy');
+
+  const completed=completedApplicationForJob(j,application);
+  $('#jmBody').innerHTML = header + chipRow + descBlock + applicationDetailsMarkup(completed);
+  $('#jobModal').classList.remove('hidden');
+}
+$$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
+let cfCb=null;
+function askConfirm(msg, cb){ $('#cfMsg').textContent=msg; cfCb=cb; $('#confirmModal').classList.remove('hidden'); }
+$('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb){ cfCb(); cfCb=null; } });
+
+/* ================= BOOT ================= */
+(async function boot(){
+  // Don't auto-enter the app on a password-recovery link — Supabase creates
+  // a real (if temporary) session from the recovery token, and without this
+  // guard that session would win the race against showAuth('newpass') above
+  // and drop the user straight into the dashboard instead of the "set a new
+  // password" screen.
+  if(window.location.hash.includes('type=recovery') || resetSessionReady) return;
+  const {data:{session}} = await sb.auth.getSession();
+  if(session){
+    // Any live session means this device has an account. Keep the
+    // Create-Account link hidden for future visits too.
+    markAccountCreated();
+    await enterApp(session.user);
+  }
+})();
+</script>
+</body>
+</html>
+
