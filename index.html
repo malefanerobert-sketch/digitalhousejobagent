@@ -2081,7 +2081,7 @@ function renderMatches(){
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
-      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Request agent review for this application">▶ Apply</button>' : '')+
+      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Request agent review for this application">▶ Approve</button>' : '')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
