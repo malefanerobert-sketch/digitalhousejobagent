@@ -296,6 +296,8 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 .pill{font-size:11.5px;font-weight:700;border-radius:99px;padding:4px 11px}
 .pill.amber{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
 .pill.green{background:rgba(52,211,153,.14);color:var(--ok)}
+#jobApplicationDetails .completion-badge{display:inline-block;max-width:100%;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+#jobApplicationDetails .completion-heading{margin-bottom:10px}
 .pill.red{background:rgba(255,107,107,.14);color:#ff8f8f}
 .pill.teal{background:rgba(var(--accent2-rgb),.14);color:var(--accent2)}
 .pill.gray{background:#1a2444;color:var(--muted)}
@@ -2245,9 +2247,9 @@ function applicationDetailsMarkup(a){
   const screenshot=safeApplicationDetailUrl(a.confirmation_screenshot_url);
   const fields=Array.isArray(a.submitted_fields)?a.submitted_fields:[];
   return '<section id="jobApplicationDetails" style="margin-top:24px;padding-top:18px;border-top:1px solid var(--line)">'+
-    '<h3 style="margin-bottom:10px">Application completed</h3>'+
-    (a.attempted_at?'<div class="sub2">Applied '+esc(discoveryDate(a.attempted_at))+'</div>':'')+
-    (receipt?'<div style="margin-top:14px"><b style="font-size:13px">Confirmation details</b><p style="margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55">'+esc(receipt)+'</p></div>':'')+
+    '<h3 class="completion-heading">Application completed</h3>'+
+    (a.attempted_at?'<div><span class="pill green completion-badge">Applied '+esc(discoveryDate(a.attempted_at))+'</span></div>':'')+
+    (receipt?'<div style="margin-top:14px"><h3 class="completion-heading">Confirmation details</h3><div><span class="pill green completion-badge">'+esc(receipt)+'</span></div></div>':'')+
     (ref?'<div class="sub2" style="margin-top:8px">Reference: <b>'+esc(ref)+'</b></div>':'')+
     (fields.length?'<div style="margin-top:18px"><b style="font-size:13px">Answers sent</b><div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">'+fields.map(f=>'<div style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px"><b>'+esc(privateJobText(f.field||'Application field'))+'</b><div class="sub2" style="margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(privateJobText(f.value??''))+'</div></div>').join('')+'</div></div>':'<div class="sub2" style="margin-top:18px">No form answers were captured for this record.</div>')+
     (screenshot?'<div style="margin-top:18px"><b style="font-size:13px">Confirmation screenshot</b><img src="'+esc(screenshot)+'" alt="Application confirmation" style="display:block;width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line)"></div>':'')+
