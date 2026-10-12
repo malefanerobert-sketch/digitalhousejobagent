@@ -1982,6 +1982,23 @@ function canonicalLocationLabel(value){
   return province||raw;
 }
 function locationKey(value){return _locNorm(canonicalLocationLabel(value));}
+// Matches-filter groups only: never rewrite the saved job location or profile preferences.
+function matchLocationGroup(value){
+  const raw=canonicalLocationLabel(cleanJobText(value));
+  const key=_locNorm(raw).replace(/\s+south africa$/,'');
+  if(!key)return '';
+  const has=(place)=>(' '+key+' ').includes(' '+_locNorm(place)+' ');
+  // Keep separately listed cities such as Soweto and Pretoria in their own groups.
+  const city=SA_LOCATIONS.find(place=>!['Johannesburg','Midrand','Sandton'].includes(place)&&has(place));
+  if(city)return city;
+  if(key==='gauteng'||['johannesburg','johannasburg','johannesberg','joburg','jhb','jozi','rosebank','midrand','sandton','randburg','roodepoort','fourways','bryanston','braamfontein','parktown','melrose','illovo','houghton','lonehill','northriding'].some(has))return 'Johannesburg';
+  return canonicalLocationLabel(raw.replace(/[\s,;|·–—-]+south africa\s*$/i,''));
+}
+function matchLocationOptions(values){
+  const groups=new Map();
+  values.forEach(value=>{const label=matchLocationGroup(value),key=_locNorm(label);if(key&&!groups.has(key))groups.set(key,label);});
+  return [...groups.values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+}
 // Decode named/numeric HTML entities as text only, including escaped and double-encoded source text.
 function cleanJobText(value){
   let text=String(value??'');
@@ -2029,18 +2046,18 @@ function renderMatches(){
   // usable, even with zero matches yet) merged with any location that
   // actually shows up in this user's real matches (so an unlisted town
   // still appears once the agent finds a job there).
-  const locSel=$('#mLoc'); const cur=state.mLoc==='all'?'all':canonicalLocationLabel(state.mLoc);
+  const locSel=$('#mLoc'); const cur=state.mLoc==='all'?'all':matchLocationGroup(state.mLoc);
   state.mLoc=cur;
   const visiblePool=matches.filter(isVisibleMatch);
-  const matchLocs=visiblePool.map(m=>canonicalLocationLabel(m.location)).filter(Boolean);
-  const locs=[...new Set([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs].map(canonicalLocationLabel))].sort();
+  const matchLocs=visiblePool.map(m=>m.location).filter(Boolean);
+  const locs=matchLocationOptions([...SA_LOCATIONS, ...ZA_PROVINCES, ...matchLocs]);
   locSel.innerHTML='<option value="all">📍 All locations</option>'+locs.map(l=>'<option'+(l===cur?' selected':'')+'>'+esc(l)+'</option>').join('');
   if(!locs.includes(cur) && cur!=='all') state.mLoc='all';
 
   const q=state.mQ.toLowerCase();
   let list = visiblePool.filter(m=>{
     // Saved discoveries remain visible even if a later block prevents future work.
-    if(state.mLoc!=='all' && locationKey(m.location)!==locationKey(state.mLoc)) return false;
+    if(state.mLoc!=='all' && _locNorm(matchLocationGroup(m.location))!==_locNorm(state.mLoc)) return false;
     if(q && !((m.job_title||'')+' '+employerLabel(m)+' '+coLabel(m.company_name)+' '+(m.location||'')).toLowerCase().includes(q)) return false;
     return true;
   });
