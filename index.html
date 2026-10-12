@@ -1988,11 +1988,19 @@ function matchLocationGroup(value){
   const key=_locNorm(raw).replace(/\s+south africa$/,'');
   if(!key)return '';
   const has=(place)=>(' '+key+' ').includes(' '+_locNorm(place)+' ');
+  // Keep these localities consistent even when their parent metro is appended.
+  if(has('Bellville'))return 'Bellville';
+  if(has('Brackenfell'))return 'Brackenfell';
+  if(has('Parow'))return 'Parow';
+  if(has('Port Elizabeth')||has('Nelson Mandela Bay'))return 'Gqeberha';
+  if(has('eThekwini'))return 'Durban';
   // Keep separately listed cities such as Soweto and Pretoria in their own groups.
   const city=SA_LOCATIONS.find(place=>!['Johannesburg','Midrand','Sandton'].includes(place)&&has(place));
   if(city)return city;
   if(key==='gauteng'||['johannesburg','johannasburg','johannesberg','joburg','jhb','jozi','rosebank','midrand','sandton','randburg','roodepoort','fourways','bryanston','braamfontein','parktown','melrose','illovo','houghton','lonehill','northriding'].some(has))return 'Johannesburg';
-  return canonicalLocationLabel(raw.replace(/[\s,;|·–—-]+south africa\s*$/i,''));
+  // Parent municipalities/provinces are metadata, not additional town options.
+  const locality=raw.split(/[,;|]/)[0].trim().replace(/[\s–—-]+(?:south africa|Ekurhuleni|Emfuleni|Mangaung|Matlosana|Waterberg|Drakenstein|Cape Winelands|Bojanala Platinum|uMhlathuze|Eden)\s*$/i,'').trim();
+  return canonicalLocationLabel(locality);
 }
 function matchLocationOptions(values){
   const groups=new Map();
