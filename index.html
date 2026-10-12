@@ -2076,7 +2076,7 @@ function renderMatches(){
       '<div><h4>'+esc(privateJobText(m.job_title))+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
       (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+privateJobText(m.skip_reason),'') : '')+
-      (requested ? '<p class="queue-request-message">Your request has been successfully submitted and is waiting for agent review.</p>' : '')+
+      (requested ? '<p class="queue-request-message">Your request has been successfully submitted and is waiting for a human agent on the next run.</p>' : '')+
       (uncertain ? '<p class="sub2">An earlier submission is uncertain. An agent will check before applying again.</p>' : '')+
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
@@ -2159,7 +2159,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
     const {error}=await sb.rpc('request_job_application',{p_match_id:id});
     if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
     if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
-    toast('Your request has been successfully submitted and is waiting for agent review.','ok queue-success');renderMatches();renderDashboard();return;
+    toast('Your request has been successfully submitted and is waiting for a human agent on the next run.','ok queue-success');renderMatches();renderDashboard();return;
   }
   if(action==='delete'){
     if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
