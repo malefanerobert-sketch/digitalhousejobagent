@@ -1976,7 +1976,7 @@ function privateJobText(value){
     .replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 }
 function canonicalLocationLabel(value){
-  const raw=String(value||'').trim();
+  const raw=String(value||'').trim().replace(/[\s,;|·–—-]+za\s*$/i,'').trim();
   const key=_locNorm(raw).replace(/\s+(?:za|south africa)$/,'');
   const province=ZA_PROVINCES.find(p=>_locNorm(p)===key);
   return province||raw;
