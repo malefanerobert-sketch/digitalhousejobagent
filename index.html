@@ -357,6 +357,8 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   padding:13px 18px;border-radius:12px;font-size:13.5px;font-weight:600;box-shadow:0 12px 30px rgba(0,0,0,.5);
   animation:slidein .25s ease;max-width:340px}
 .toast.ok{border-left-color:var(--ok)}
+.queue-request-message,.toast.queue-success{color:var(--ok);font-size:12.5px;line-height:1.5}
+.queue-request-message{margin:0;font-weight:600}
 .toast.warn{border-left-color:var(--accent)}
 .toast.err{border-left-color:var(--danger)}
 .toast.out{opacity:0;transform:translateX(20px);transition:.35s}
@@ -1199,7 +1201,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLiv
 window.addEventListener('focus',()=>refreshLiveMatchLists());
 
 /* ================= VIEWS / NAV ================= */
-const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches',''], skipped:['Skipped by agent','Request Apply to send a skipped job to the admin queue'],
+const VIEWS={dashboard:['Dashboard','Your agent at a glance'],matches:['Discovered matches',''], skipped:['Skipped by agent','Request Apply to send a skipped job for agent review'],
   applications:['Applied matches','Completed applications recorded with confirmation'],
   docs:['Documents','ID, certificates, qualifications — optional'],
   blocked:['Block list','Stop posts from certain companies or places'],profile:['Profile','Your search settings and agent behaviour'],
@@ -2055,7 +2057,7 @@ function renderMatches(){
   // Queued is an explicit user choice, not a confirmed application.
   const statusPill = (s) => {
     if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
-    if (s === 'approved') return '<span class="pill green">⏳ Queued for admin</span>';
+    if (s === 'approved') return '<span class="pill green">⏳ Queued for an agent</span>';
     if (s === 'skipped') return '<span class="pill skip">⏭ Skipped by agent</span>';
     return '<span class="pill gray">🔍 Discovered</span>'; // discovery stays saved through every outcome
   };
@@ -2074,12 +2076,12 @@ function renderMatches(){
       '<div><h4>'+esc(privateJobText(m.job_title))+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
       (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+privateJobText(m.skip_reason),'') : '')+
-      (requested ? '<p class="sub2">Your request is in the admin application queue. No automatic submission will occur.</p>' : '')+
-      (uncertain ? '<p class="sub2">An earlier submission is uncertain. Admin will check before applying again.</p>' : '')+
+      (requested ? '<p class="queue-request-message">Your request has been successfully submitted and is waiting for agent review.</p>' : '')+
+      (uncertain ? '<p class="sub2">An earlier submission is uncertain. An agent will check before applying again.</p>' : '')+
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
-      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Ask an admin to apply for this job">▶ Apply</button>' : '')+
+      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Request agent review for this application">▶ Apply</button>' : '')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
@@ -2157,7 +2159,7 @@ $('#matchGrid').addEventListener('click', async (e)=>{
     const {error}=await sb.rpc('request_job_application',{p_match_id:id});
     if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
     if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
-    toast('Queued for admin ✓ No automatic application will be sent','ok');renderMatches();renderDashboard();return;
+    toast('Your request has been successfully submitted and is waiting for agent review.','ok queue-success');renderMatches();renderDashboard();return;
   }
   if(action==='delete'){
     if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
