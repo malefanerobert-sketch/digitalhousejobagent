@@ -366,7 +366,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         </div>
 
         <div class="card" style="margin-bottom:18px">
-          <h3 style="margin-bottom:6px;font-size:15px">Shared AI keys — 10-slot Groq vault</h3>
+          <h3 style="margin-bottom:6px;font-size:15px">Shared AI keys — 20-slot Groq vault</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
             DigitalHouse-owned AI keys power the Agent for every JobAgent user — match scoring, CV/cover letter/motivational
             letter drafting, reading a user's Watched pages, and applying on their behalf. Users never see or manage this
@@ -386,7 +386,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             </div>
           </div>
           <div id="groqKeyVault" class="hidden" style="margin-bottom:16px">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Exactly 10 Groq key slots (K1–K10). Fill any number of slots. Every slot uses the same model selected below. The updated Railway worker rotates ready keys and skips keys that hit a limit.</p>
+            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Exactly 20 Groq key slots (K1–K20). Fill any number of slots. Every slot uses the same model selected below. The updated Railway worker rotates ready keys and skips keys that hit a limit.</p>
             <div id="groqKeyRows" class="row2"></div>
             <div class="field" style="margin-top:10px"><label>Fallback cooldown (seconds)</label><input id="setGroqCooldown" type="number" min="10" max="600" step="10" value="60"></div>
             <p style="color:var(--muted);font-size:12px">Provider retry timing takes priority. Keys in the same organization can share limits. These keys are saved to your database, not this browser; restrict dispatch_settings to authorized admins and the worker.</p>
@@ -402,7 +402,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <button class="btn btn-primary" id="setSaveBtn" onclick="saveSettings()">💾 Save</button>
           <p style="color:var(--muted);font-size:12px;margin-top:14px">
-            Settings are stored in <code>dispatch_settings</code>. For 10-key rotation, install the supplied SQL migration, updated <code>aiMatch.js</code>, and <code>groqKeyPool.js</code>, then redeploy the Railway worker. The admin page alone cannot rotate worker requests.</p>
+            Settings are stored in <code>dispatch_settings</code>. For 20-key rotation, install migration_groq_twenty_slots.sql, updated <code>aiMatch.js</code>, and <code>groqKeyPool.js</code>, then redeploy the Railway worker. The admin page alone cannot rotate worker requests.</p>
         </div>
         <div class="card">
           <h3 style="margin-bottom:6px;font-size:15px">Agent instructions</h3>
@@ -1381,7 +1381,7 @@ const MODEL_OPTIONS = {
   ],
   none: []
 };
-const GROQ_SLOT_COUNT = 10;
+const GROQ_SLOT_COUNT = 20;
 function cleanGroqKey(value){ return String(value || '').trim().replace(/^bearer\s+/i,'').replace(/^["']|["']$/g,'').trim(); }
 function renderGroqSlots(keys){
   const padded=Array.from({length:GROQ_SLOT_COUNT},(_,i)=>cleanGroqKey(Array.isArray(keys)?keys[i]:''));

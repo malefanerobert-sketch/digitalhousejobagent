@@ -15,7 +15,7 @@
 // cache for the rest of the run — avoids re-querying Supabase for every
 // single job.
 
-const { GroqKeyPool, groqRequestBody } = require('./groqKeyPool');
+const { GroqKeyPool, groqRequestBody, SLOT_COUNT } = require('./groqKeyPool');
 const groqPool = new GroqKeyPool();
 let cachedSettings = null;
 
@@ -32,7 +32,7 @@ async function loadSettings(supabase) {
     cachedSettings = data || { ai_provider: 'none', ai_api_key: null, ai_model: null, agent_prompt: null, agent_enabled: true };
   }
   groqPool.configure(cachedSettings.ai_api_keys, cachedSettings.ai_api_key, cachedSettings.ai_key_cooldown_seconds);
-  if (cachedSettings.ai_provider === 'groq') console.log(`[ai-match] shared Groq vault: ${groqPool.slots.filter(Boolean).length}/10 slots configured; model ${currentModel('groq')}; rotation enabled`);
+  if (cachedSettings.ai_provider === 'groq') console.log(`[ai-match] shared Groq vault: ${groqPool.slots.filter(Boolean).length}/${SLOT_COUNT} slots configured; model ${currentModel('groq')}; rotation enabled`);
   return cachedSettings;
 }
 
