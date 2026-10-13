@@ -181,9 +181,9 @@ select{cursor:pointer}
 #sidebar{background:#0c1226;border-right:1px solid #23305a;padding:20px 14px;display:flex;
   flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
 .side-brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;border-bottom:1px solid #23305a;margin-bottom:14px}
-.side-brand .logo{font-size:26px}
-.side-brand b{font-size:18px;font-weight:900}
-.side-brand small{display:block;color:#8b96b8;font-size:11px;font-weight:600}
+.side-brand .logo{font-size:30px;flex-shrink:0;line-height:1}
+.side-brand>div{flex:1;min-width:0}
+.side-brand b{display:block;font-size:32px;font-weight:900;letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
 .nav-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;
   color:#8b96b8;padding:10px 12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;
   transition:.15s;font-family:inherit;margin-bottom:2px}
@@ -500,7 +500,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   <div class="shell">
     <aside id="sidebar">
       <div class="side-brand"><span class="logo">📡</span>
-        <div><b><span style="color:#FFB3D9">Job</span><span style="color:#4A90E2">Agent</span></b><small>working while you sleep</small></div>
+        <div><b><span style="color:#FFB3D9">Job</span><span style="color:#4A90E2">Agent</span></b></div>
       </div>
       <nav>
         <button class="nav-btn active" data-view="dashboard" onclick="setView('dashboard')"><span class="ico">📡</span>Dashboard</button>
@@ -1737,7 +1737,7 @@ function renderDashboard(){
     && currentSeeker.apply_experience_ranges?.length);
   $('#setupBanner').classList.toggle('hidden', done);
   if(done){
-    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Railway discovers South African jobs nationwide every few hours. Admins handle all applications.';
+    $('#agentSummary').innerHTML = 'Searching for <b>'+esc(currentSeeker.job_title_keywords.join(', '))+'</b> in <b>'+esc(currentSeeker.preferred_locations.join(', '))+'</b>.<br>Agent discovers South African jobs nationwide every few hours. Application requests are handled by your agent.';
   } else {
     $('#agentSummary').textContent='Set up your profile to activate the agent.';
   }
