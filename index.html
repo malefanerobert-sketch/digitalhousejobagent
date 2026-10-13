@@ -2561,11 +2561,11 @@ function closeModal(id){ $('#'+id).classList.add('hidden'); }
    we do have instead of hiding it behind an "unavailable" fallback. */
 // Select published role facts for the viewer; never ask AI to rewrite or invent them.
 function scopeJobSections(value){
-  const text=privateJobText(value).replace(/\r/g,'');
+  const text=privateJobText(value).replace(/\r/g,'').replace(/(?:minimum|nimum)\s+requirements\s*:/gi,'\nMinimum requirements:\n');
   const sections={duties:[],requirements:[],salary:[],overview:[],details:[]};
-  const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|key performance areas|key accountabilities|what you(?: will|’ll|\x27ll) do)';
-  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications(?: and requirements)?|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|desired experience (?:&|and) qualifications?|job related personal attributes|personal attributes|candidate profile|person specification|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
-  const salary='(?:salary(?: range| package| and benefits)?|remuneration(?: package)?|compensation(?: package)?|pay(?: range)?)';
+  const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|job specifications?|key performance areas|key accountabilities|what you(?: will|’ll|\x27ll) do)';
+  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications(?: and requirements)?|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|special conditions of employment|desired experience (?:&|and) qualifications?|job related personal attributes|personal attributes|candidate profile|person specification|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
+  const salary='(?:salary(?: range| package| and benefits)?|remuneration(?: package| and benefits)?|compensation(?: package)?|pay(?: range)?)';
   const overview='(?:about (?:the role|this job)|role overview|purpose|main purpose|job purpose|purpose of (?:the role|the position|the job)|job summary|role summary|job description|introduction)';
   const details='(?:location|working hours|employment type|contract type|contract duration|closing date|application deadline)';
   const stop='(?:about (?:us|the company|the employer)|company overview|how to apply|application(?: process| instructions)?|interested parties should send cv.?s to|equal opportunities|privacy|disclaimer|benefits|perks|advertisement|similar jobs|related jobs)';
@@ -2576,6 +2576,8 @@ function scopeJobSections(value){
     .replace(new RegExp('([.!?]\\s+)('+requirements+'|'+salary+')\\s*:', 'gi'),'$1\n$2:');
   let current=null;let excluded=false;const unlabelled=[];
   for(const line of readable.split('\n')){
+    if(/only successful applicants will be contacted|if you have not received feedback|if you haven.?t been contacted/i.test(line))continue;
+    if(/is an equal opportunity employer|approved employment equity plan/i.test(line)){current='details';excluded=false;sections.details.push('Recruitment policy:',line.trim());continue;}
     // Required supporting documents remain job facts even inside apply instructions.
     if(current!=='requirements'&&/\b(?:cv|cvs|applications?)\b.*\b(?:must be accompanied|required documents|certified copies)\b/i.test(line)){sections.requirements.push(line.trim());continue;}
     const m=line.match(heading);
@@ -2586,7 +2588,7 @@ function scopeJobSections(value){
       if(current){
         // Preserve specific requirement subheadings (e.g. experience) to avoid losing meaning.
         if(current==='requirements'||current==='details')sections[current].push(name+':');
-        if(m[2]?.trim()){let fact=m[2].trim();if(current==='details'&&/^employment type$/i.test(name))fact=fact.replace(/FULL_TIME/g,'Full-time').replace(/PART_TIME/g,'Part-time');sections[current].push(fact);}
+        if(m[2]?.trim()){let fact=m[2].trim();if(current==='details'&&/^employment type$/i.test(name))fact=fact.replace(/FULL_TIME/g,'Full-time').replace(/PART_TIME/g,'Part-time').replace(/PERMANENT/g,'Permanent');sections[current].push(fact);}
       }
     }else if(current)sections[current].push(line);
     else if(!excluded&&line.trim())unlabelled.push(line);
