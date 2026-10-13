@@ -1969,10 +1969,12 @@ const _locNorm = (s) => String(s||'').toLowerCase().replace(/&#x2013;|&ndash;/g,
 // Normalize equivalent province labels without changing stored locations or collapsing cities.
 const SOURCE_PATTERN=String.raw`\b(?:adzuna|job\s*mail|pnet|career\s*junction|careers?\s*24|executive\s*placements|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter|remote\s*ok|talent\.com)\b`;
 function privateJobText(value){
-  return cleanJobText(value).replace(/https?:\/\/[^\s<>]+|www\.[^\s<>]+/gi,'')
+  return cleanJobText(value).replace(/\u00a0/g,' ').replace(/\t/g,' ').replace(/https?:\/\/[^\s<>]+|www\.[^\s<>]+/gi,'')
     .replace(/[\w.+-]+@(?:[\w.-]*\.)?(?:pnet|jobmail|careerjunction|careers24|adzuna|jobbi)\.[a-z.]+/gi,'')
     .replace(/\b(?:[a-z0-9-]+\.)*(?:adzuna|jobmail|pnet|careerjunction|careers24|jobbi|jobrapido|jooble|indeed|linkedin|glassdoor|ziprecruiter)\.[a-z.]+\b/gi,'')
  .replace(/#?J-\d+-Ljbffr/gi,'').replace(new RegExp(SOURCE_PATTERN,'gi'),'the application platform')
+    .replace(/^.*(?:back to last search|create email alert|receive similar jobs|similar jobs|stats for this job|privacy notice|cookie use|accept all cookies|decline all cookies|popular searches|terms (?:and|&) conditions).*$/gmi,'')
+    .replace(/^\s*(?:apply (?:now|for this job)|save (?:this )?job|share (?:this )?job|report (?:this )?job|sign in|register|advertisement)\s*$/gmi,'')
     .replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 }
 function canonicalLocationLabel(value){
@@ -2560,41 +2562,49 @@ function closeModal(id){ $('#'+id).classList.add('hidden'); }
 // Select published role facts for the viewer; never ask AI to rewrite or invent them.
 function scopeJobSections(value){
   const text=privateJobText(value).replace(/\r/g,'');
-  const sections={duties:[],requirements:[],salary:[]};
-  const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|what you(?: will|’ll|\x27ll) do)';
-  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
-  const salary='(?:salary(?: range| package)?|remuneration(?: package)?|compensation(?: package)?|pay(?: range)?)';
-  const stop='(?:about (?:us|the company|the employer|the role)|company overview|job overview|role summary|summary|benefits|perks|location|working hours|employment type|contract type|how to apply|application(?: process| instructions)?|closing date|application deadline|equal opportunities|privacy|disclaimer)';
-  const heading=new RegExp('^\\s*(?:#+\\s*)?(?:[0-9]+[.)]\\s*)?(?:\\*\\*)?('+duties+'|'+requirements+'|'+salary+'|'+stop+')(?:\\*\\*)?(?:\\s+(?:will include|include|includes|are))?\\s*(?::\\s*(.*)|$)','i');
-  const dutyHeading=new RegExp('^'+duties+'$','i'),reqHeading=new RegExp('^'+requirements+'$','i'),salaryHeading=new RegExp('^'+salary+'$','i');
+  const sections={duties:[],requirements:[],salary:[],overview:[],details:[]};
+  const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|key performance areas|key accountabilities|what you(?: will|’ll|\x27ll) do)';
+  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications(?: and requirements)?|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|desired experience (?:&|and) qualifications?|job related personal attributes|personal attributes|candidate profile|person specification|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
+  const salary='(?:salary(?: range| package| and benefits)?|remuneration(?: package)?|compensation(?: package)?|pay(?: range)?)';
+  const overview='(?:about (?:the role|this job)|role overview|purpose|main purpose|job purpose|purpose of (?:the role|the position|the job)|job summary|role summary|job description|introduction)';
+  const details='(?:location|working hours|employment type|contract type|contract duration|closing date|application deadline)';
+  const stop='(?:about (?:us|the company|the employer)|company overview|how to apply|application(?: process| instructions)?|interested parties should send cv.?s to|equal opportunities|privacy|disclaimer|benefits|perks|advertisement|similar jobs|related jobs)';
+  const heading=new RegExp('^\\s*(?:#+\\s*)?(?:[0-9]+[.)]\\s*)?(?:\\*\\*)?('+duties+'|'+requirements+'|'+salary+'|'+overview+'|'+details+'|'+stop+')(?:\\*\\*)?(?:\\s+(?:will include|include|includes|are))?\\s*(?::\\s*(.*)|$)','i');
+  const dutyHeading=new RegExp('^'+duties+'$','i'),reqHeading=new RegExp('^'+requirements+'$','i'),salaryHeading=new RegExp('^'+salary+'$','i'),overviewHeading=new RegExp('^'+overview+'$','i'),detailsHeading=new RegExp('^'+details+'$','i');
   // Listing summaries may have explicit facts inline rather than on separate lines.
   const readable=text.replace(new RegExp('([.!?]\\s+)('+duties+')\\s+(?:will include|includes?|are)\\s*:?', 'gi'),'$1\n$2: ')
     .replace(new RegExp('([.!?]\\s+)('+requirements+'|'+salary+')\\s*:', 'gi'),'$1\n$2:');
-  let current=null;
+  let current=null;let excluded=false;const unlabelled=[];
   for(const line of readable.split('\n')){
+    // Required supporting documents remain job facts even inside apply instructions.
+    if(current!=='requirements'&&/\b(?:cv|cvs|applications?)\b.*\b(?:must be accompanied|required documents|certified copies)\b/i.test(line)){sections.requirements.push(line.trim());continue;}
     const m=line.match(heading);
     if(m){
       const name=m[1].replace(/\*\*/g,'').trim();
-      current=dutyHeading.test(name)?'duties':reqHeading.test(name)?'requirements':salaryHeading.test(name)?'salary':null;
+      current=dutyHeading.test(name)?'duties':reqHeading.test(name)?'requirements':salaryHeading.test(name)?'salary':overviewHeading.test(name)?'overview':detailsHeading.test(name)?'details':null;
+      excluded=!current;
       if(current){
         // Preserve specific requirement subheadings (e.g. experience) to avoid losing meaning.
-        if(current==='requirements')sections[current].push(name+':');
-        if(m[2]?.trim())sections[current].push(m[2].trim());
+        if(current==='requirements'||current==='details')sections[current].push(name+':');
+        if(m[2]?.trim()){let fact=m[2].trim();if(current==='details'&&/^employment type$/i.test(name))fact=fact.replace(/FULL_TIME/g,'Full-time').replace(/PART_TIME/g,'Part-time');sections[current].push(fact);}
       }
     }else if(current)sections[current].push(line);
+    else if(!excluded&&line.trim())unlabelled.push(line);
   }
-  for(const key of Object.keys(sections))sections[key]=sections[key].join('\n').replace(/\n{3,}/g,'\n\n').trim();
+  // Preserve a substantive role introduction, but not generic recruitment invitations.
+  if((sections.duties.length||sections.requirements.length)&&unlabelled.length){const intro=unlabelled.join('\n');if(!/invites applications|seeking (?:an?|the) |join (?:our|a) team/i.test(intro))sections.overview.unshift(intro);}
+  for(const key of Object.keys(sections))sections[key]=sections[key].join('\n').replace(/^[ \t]+$/gm,'').replace(/\n[ \t]*\n(?=[ \t]*[•*-]\s)/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
   return sections;
 }
 function renderScopedJobDetails(description,salary,status){
   const sections=scopeJobSections(description);
   if(!sections.salary&&salary)sections.salary=privateJobText(salary);
-  const entries=[['duties','Responsibilities & duties'],['requirements','Qualifications & requirements'],['salary','Salary']].filter(([key])=>sections[key]);
-  const hasRoleSections=!!(sections.duties||sections.requirements);
-  const notice=status==='captured'?'':'<div class="sub2" style="margin-bottom:12px">These are the available saved details. The complete advert has not been retrieved yet.</div>';
+  const entries=[['overview','Role overview'],['duties','Responsibilities & duties'],['requirements','Qualifications & requirements'],['salary','Salary'],['details','Additional job details']].filter(([key])=>sections[key]);
+  const hasRoleSections=!!(sections.duties||sections.requirements||sections.overview);
+  const notice=status==='captured'?'':'<div class="sub2" style="margin-bottom:12px;font-size:12px;color:var(--muted);font-weight:400">These are the available saved details. The complete advert has not been retrieved yet.</div>';
   const blocks=entries.map(([key,label])=>'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">'+label+'</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(sections[key])+'</div></section>').join('');
   // A summary remains available if the source did not provide identifiable role sections.
-  const fallback=!hasRoleSections&&description?'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Available job summary</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(privateJobText(description))+'</div></section>':'';
+  const fallback=!hasRoleSections&&description?'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">'+(status==='captured'?'Job details':'Available job summary')+'</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(privateJobText(description))+'</div></section>':'';
   if(!blocks&&!fallback)return '<div class="sub2">Job details are not available yet. The agent will retry retrieving them on a later scan.</div>';
   return notice+blocks+fallback;
 }
