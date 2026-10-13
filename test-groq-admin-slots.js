@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const html = fs.readFileSync(__dirname + '/admin.html', 'utf8');
+assert(html.includes('All twenty slots use the selected model.'));
+assert(!html.includes('All ten slots'));
 const start = html.indexOf('const GROQ_SLOT_COUNT =');
 const end = html.indexOf('function showProviderKeyFields', start);
 assert(start >= 0 && end > start);
