@@ -19,8 +19,15 @@ function privateText(value){
 function hasSections(text){return /(?:requirements|qualifications|minimum criteria|minimum education|experience required|key responsibilities|duties|closing date|competencies)/i.test(text);}
 function limitedDescription(text){return !text || /(?:…|\.\.\.)\s*$/.test(text) || (text.length<800&&!hasSections(text));}
 function browserEngine(){try{const e=require('playwright-extra');return e.chromium;}catch{return require('playwright').chromium;}}
+const CAPTURE_VERSION=2;
 const cache=new Map();
-async function captureJobDetails(url,{browser=null,title='',employer=''}={}){
+const pendingCaptures=new Map();
+async function captureJobDetails(url,options={}){
+ const key=detailCacheKey(url);if(pendingCaptures.has(key))return pendingCaptures.get(key);
+ const task=captureJobDetailsInternal(url,options);pendingCaptures.set(key,task);
+ try{return await task;}finally{pendingCaptures.delete(key);}
+}
+async function captureJobDetailsInternal(url,{browser=null,title='',employer=''}={}){
  const cacheKey=detailCacheKey(url);const prior=cache.get(cacheKey);if(prior&&Date.now()-prior.at<15*60*1000)return prior.value;
  let owned=false,page=null;const seen=new Set();let best={description:null,status:'unavailable',employer:null};
  try{
@@ -38,14 +45,16 @@ async function captureJobDetails(url,{browser=null,title='',employer=''}={}){
    }
    const extract=()=>{
     const postings=[];
-    function walk(o){if(!o||typeof o!=='object')return;if(Array.isArray(o)){o.forEach(walk);return;}const types=Array.isArray(o['@type'])?o['@type']:[o['@type']];if(types.some(t=>/JobPosting/i.test(String(t))))postings.push(o);if(o['@graph'])walk(o['@graph']);}
+    function walk(o){if(!o||typeof o!=='object')return;if(Array.isArray(o)){o.forEach(walk);return;}const types=Array.isArray(o['@type'])?o['@type']:[o['@type']];if(types.some(t=>/JobPosting/i.test(String(t))))postings.push(o);for(const value of Object.values(o))if(value&&typeof value==='object')walk(value);}
     for(const script of document.querySelectorAll('script[type="application/ld+json"]'))try{walk(JSON.parse(script.textContent));}catch{}
     function plain(html){const doc=new DOMParser().parseFromString(String(html),'text/html');doc.querySelectorAll('script,style,nav,footer,header,form').forEach(n=>n.remove());doc.querySelectorAll('br').forEach(n=>n.replaceWith('\n'));doc.querySelectorAll('li').forEach(n=>n.prepend('• '));doc.querySelectorAll('p,div,li,ul,ol,h1,h2,h3,h4,tr').forEach(n=>n.append('\n'));return (doc.body.textContent||'').replace(/[ \t]{2,}/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim();}
     function postingText(o){
      const parts=[plain(o.description||'')];
      // Some publishers supply the role facts in separate JobPosting fields.
-     for(const [key,label] of [['responsibilities','Responsibilities'],['qualifications','Qualifications'],['educationRequirements','Education requirements'],['experienceRequirements','Experience requirements'],['skills','Skills']]){
-      const value=o[key];const text=plain(Array.isArray(value)?value.map(x=>typeof x==='string'?x:x?.name||'').join('\n'):typeof value==='string'?value:value?.name||'');
+     for(const [key,label] of [['responsibilities','Responsibilities'],['qualifications','Qualifications'],['educationRequirements','Education requirements'],['experienceRequirements','Experience requirements'],['skills','Skills'],['jobBenefits','Benefits']]){
+      const value=o[key];
+      const fact=x=>typeof x==='string'?x:x&&typeof x==='object'?[x.name,x.description,x.credentialCategory,x.educationalLevel,x.monthsOfExperience!=null?x.monthsOfExperience+' months of experience':null].filter(Boolean).join('\n'):'';
+      const text=plain(Array.isArray(value)?value.map(fact).join('\n'):fact(value));
       if(text&&!parts[0].includes(text))parts.push(label+'\n'+text);
      }
      const salary=o.baseSalary;const amount=salary&&typeof salary==='object'?salary.value:salary;
@@ -57,7 +66,7 @@ async function captureJobDetails(url,{browser=null,title='',employer=''}={}){
      if(o.employmentType)parts.push('Employment type: '+(Array.isArray(o.employmentType)?o.employmentType.join(', '):o.employmentType));
      return parts.filter(Boolean).join('\n\n');
     }
-    const candidates=postings.map(o=>({text:postingText(o),employer:o.hiringOrganization?.name||null,title:o.title||'',structured:true,incomplete:/(?:…|\.\.\.)\s*$/.test(plain(o.description||''))})).filter(o=>o.text);
+    const candidates=postings.map(o=>({text:postingText(o),employer:o.hiringOrganization?.name||null,title:o.title||'',structured:true,supplements:postingText({...o,description:''}),incomplete:/(?:…|\.\.\.)\s*$/.test(plain(o.description||''))})).filter(o=>o.text);
     const selectors=['.adp-body','[data-at="job-ad-content"]','[data-at="job-ad-description"]','[data-testid="job-description"]','[itemprop="description"]','#job-description','#job_description','.job-description','.job_description','.jobDescription','.jobsearch-jobDescriptionText','.job-detail-description','.job-details-description','.vacancy-description','.job-ad-description','.job-ad-display','.jobad-content','.job-details-content','[class*="job-description"]','[class*="jobDescription"]','article.job','article[itemtype*="JobPosting"]'];
     for(const selector of selectors)for(const el of document.querySelectorAll(selector)){
      const copy=el.cloneNode(true);copy.querySelectorAll('script,style,nav,footer,header,form,[class*="similar"],[class*="related"],button').forEach(n=>n.remove());const text=plain(copy.innerHTML);if(text.length>100)candidates.push({text,employer:null,title:document.querySelector('h1')?.innerText||'',structured:false});
@@ -93,8 +102,13 @@ async function captureJobDetails(url,{browser=null,title='',employer=''}={}){
    const ranked=data.candidates.filter(titleOkay).sort((a,b)=>quality(b)-quality(a)||b.text.length-a.text.length);
    const chosen=ranked[0];
    if(chosen){
-    const text=privateText(chosen.text);
-    if(text.length>(best.description||'').length || (hop>0&&!limitedDescription(text)))best={description:text,status:(chosen.incomplete||limitedDescription(text))?'limited':'captured',employer:chosen.employer||best.employer};
+    // A visible container can be longer than JSON-LD, while the JSON-LD
+    // carries salary/qualifications/benefits absent from that container.
+    // Retain those matching posting facts instead of choosing one or the other.
+    const structured=data.candidates.find(c=>c.structured&&titleOkay(c));
+    const extra=(structured?.supplements||'').split('\n\n').filter(f=>f.trim()&&!chosen.text.includes(f.trim()));
+    const text=privateText([chosen.text,...extra].join('\n\n'));
+    if(text.length>(best.description||'').length || (hop>0&&!limitedDescription(text)))best={description:text,status:(chosen.incomplete||limitedDescription(text))?'limited':'captured',employer:chosen.employer||structured?.employer||best.employer};
     if(best.status==='captured' && !data.links.some(l=>!seen.has(l.url)))break;
    }
    const next=data.links.find(l=>!seen.has(l.url));if(!next)break;url=next.url;
@@ -103,19 +117,67 @@ async function captureJobDetails(url,{browser=null,title='',employer=''}={}){
  finally{if(page)await page.close().catch(()=>{});if(owned&&browser)await browser.close().catch(()=>{});}
  if(cache.size>500)cache.clear();cache.set(cacheKey,{at:Date.now(),value:best});return best;
 }
-async function refreshSavedDescriptions(sb,{browser=null,limit=8}={}){
- const cutoff=new Date(Date.now()-6*60*60*1000).toISOString();
- const {data,error}=await sb.from('job_matches').select('id,job_url,job_title,employer_name,job_description,job_description_status')
- .neq('job_description_status','captured').or('job_description_checked_at.is.null,job_description_checked_at.lt.'+cutoff)
- .order('job_description_checked_at',{ascending:true,nullsFirst:true}).order('discovered_at',{ascending:false}).limit(limit*4);
- if(error){console.warn('[jobDetails] Existing advert refresh unavailable');return;}
- const refreshed=new Set();
- for(const row of data||[]){
-  const key=detailCacheKey(row.job_url);if(refreshed.has(key))continue;if(refreshed.size>=limit)break;refreshed.add(key);
-  const result=await captureJobDetails(row.job_url,{browser,title:row.job_title,employer:row.employer_name});
-  const patch={job_description_checked_at:new Date().toISOString(),job_description_status:result.status};
-  if(result.description && (result.status==='captured' || result.description.length>(row.job_description||'').length))patch.job_description=result.description;
-  const {error:e}=await sb.from('job_matches').update(patch).eq('job_url',row.job_url);if(e)console.warn('[jobDetails] Could not save advert refresh');
- }
+// Shared by autonomous feeds and watched-page discovery. A shorter failed
+// extraction must never replace a richer feed; a feed is never called complete.
+function usableEmployer(value){
+ const name=String(value||'').trim();
+ return !!name&&!new RegExp('^(?:via\\s+.+|'+SOURCE_PATTERN.replace(/^\\b|\\b$/g,'')+'|n/?a|unknown|not specified|not stated|company|employer|recruiter)$','i').test(name);
 }
-module.exports={captureJobDetails,refreshSavedDescriptions,privateText,limitedDescription};
+function storedJobDetails(result={},fallbackDescription='',fallbackEmployer=''){
+ const captured=privateText(result.description);
+ const fallback=privateText(fallbackDescription);
+ const description=captured&&(result.status==='captured'||captured.length>=fallback.length)?captured:fallback;
+ const status=description?(description===captured&&result.status==='captured'?'captured':'limited'):'unavailable';
+ const employer=usableEmployer(result.employer)?result.employer:usableEmployer(fallbackEmployer)?fallbackEmployer:null;
+ return {employer_name:employer,job_description:description||null,job_description_status:status,
+  job_description_checked_at:new Date().toISOString(),job_description_capture_version:CAPTURE_VERSION};
+}
+const DETAIL_COLUMNS='id,job_url,job_title,employer_name,job_description,job_description_status,job_description_capture_version,job_description_checked_at';
+let repairInFlight=null;
+function refreshSavedDescriptions(sb,options={}){
+ // Both discovery paths and the dedicated scheduler may request a pass at once.
+ // Share one pass in-process rather than racing the same saved descriptions.
+ if(repairInFlight)return repairInFlight;
+ repairInFlight=refreshSavedDescriptionsInternal(sb,options).finally(()=>{repairInFlight=null;});
+ return repairInFlight;
+}
+async function refreshSavedDescriptionsInternal(sb,{browser=null,limit=8}={}){
+ const cutoff=new Date(Date.now()-6*60*60*1000).toISOString();
+ const rows=[];const urls=new Set();const batchSize=100;
+ // Page beyond duplicate applicants' copies of one advert. Deterministic order
+ // and collecting before updates prevents offset skips while the queue changes.
+ for(let offset=0;offset<2000&&urls.size<limit;offset+=batchSize){
+  const {data,error}=await sb.from('job_matches').select(DETAIL_COLUMNS)
+   .or(`and(or(job_description_status.is.null,job_description_status.neq.captured,job_description_capture_version.lt.${CAPTURE_VERSION}),or(job_description_checked_at.is.null,job_description_checked_at.lt.${cutoff}))`)
+   .not('job_title','in','("⚠ Watched page could not be read (not a job)","(watched page)")')
+   .order('job_description_checked_at',{ascending:true,nullsFirst:true}).order('id',{ascending:true})
+   .range(offset,offset+batchSize-1);
+  if(error){console.warn('[jobDetails] Existing advert repair query failed');return;}
+  for(const row of data||[]){const key=detailCacheKey(row.job_url);if(!row.job_url||urls.has(key))continue;urls.add(key);rows.push(row);if(rows.length>=limit)break;}
+  if((data||[]).length<batchSize)break;
+ }
+ for(const row of rows){
+  const result=await captureJobDetails(row.job_url,{browser,title:row.job_title,employer:row.employer_name});
+  // Repair each applicant copy independently: never bulk overwrite a sibling's
+  // richer description or touch eligibility, application status or timestamps.
+  const {data:copies,error}=await sb.from('job_matches').select(DETAIL_COLUMNS).eq('job_url',row.job_url);
+  if(error){console.warn('[jobDetails] Could not load advert copies for repair');continue;}
+  for(const copy of copies||[]){
+   const patch={job_description_checked_at:new Date().toISOString()};
+   const prior=privateText(copy.job_description);
+   if(result.description){
+    const fresh=storedJobDetails(result,prior,copy.employer_name);
+    // Keep a previously captured richer advert if the source now offers less.
+    const keepPrior=copy.job_description_status==='captured'&&(result.status!=='captured'||prior.length>fresh.job_description.length);
+    if(!keepPrior){patch.job_description=fresh.job_description;patch.job_description_status=fresh.job_description_status;patch.job_description_capture_version=CAPTURE_VERSION;}
+    else if(result.status==='captured'){patch.job_description_capture_version=CAPTURE_VERSION;}
+    if(!usableEmployer(copy.employer_name)&&usableEmployer(fresh.employer_name))patch.employer_name=fresh.employer_name;
+   }else if(!prior){patch.job_description_status='unavailable';}
+   // A failed recapture leaves old content and its version intact for retry.
+   const {error:updateError}=await sb.from('job_matches').update(patch).eq('id',copy.id);
+   if(updateError)console.warn('[jobDetails] Could not save advert repair');
+  }
+ }
+ console.log(`[jobDetails] Repair pass checked ${rows.length} distinct adverts`);
+}
+module.exports={captureJobDetails,refreshSavedDescriptions,privateText,limitedDescription,storedJobDetails,CAPTURE_VERSION};

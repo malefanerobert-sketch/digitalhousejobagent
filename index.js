@@ -7,16 +7,27 @@ const cron = require('node-cron');
 // jobs it finds on its own.
 const discoverWatched = require('./discoverWatched');
 const discoverAuto = require('./discoverAuto');
+const jobDetails = require('./jobDetails');
+const sb = require('./supabaseClient');
+const aiMatch = require('./aiMatch');
 // Applications are performed by admins in admin.html. Never load the submitter here.
 
 const WATCH_CRON = process.env.WATCH_CRON || '0 */3 * * *';     // watched pages — every 3 hours by default
 const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 */3 * * *'; // autonomous Adzuna/RemoteOK/Jobmail search — every 3 hours by default
+const DETAILS_CRON = process.env.DETAILS_CRON || '*/15 * * * *';
+// Bounded repair remains subject to the master switch, but not new-job volume.
+async function repairJobDetails(){
+  await aiMatch.loadSettings(sb);
+  if(!aiMatch.isAgentEnabled())return;
+  await jobDetails.refreshSavedDescriptions(sb,{limit:8});
+}
 // No application cron: discovery-only deployment.
 
 console.log('=================================================');
 console.log(' Dispatch Agent Worker — starting up');
 console.log(' watched-pages schedule:  ', WATCH_CRON);
 console.log(' autonomous-search sched.:', DISCOVER_CRON);
+console.log(' job-details repair sched.:', DETAILS_CRON);
 console.log(' discovery country: South Africa only — nationwide; US/global company feeds frozen');
 console.log(' application mode: admin only — automatic submissions disabled');
 console.log('=================================================');
@@ -33,6 +44,9 @@ cron.schedule(WATCH_CRON, () => {
 cron.schedule(DISCOVER_CRON, () => {
   discoverAuto.run().catch(err => console.error('[scheduled discoverAuto]', err));
 });
+
+repairJobDetails().catch(err=>console.error('[startup jobDetails]',err));
+cron.schedule(DETAILS_CRON,()=>repairJobDetails().catch(err=>console.error('[scheduled jobDetails]',err)));
 
 // Keep the process alive — this file itself IS the "24/7" part.
 process.stdin.resume();

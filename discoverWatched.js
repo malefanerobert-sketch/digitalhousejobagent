@@ -170,31 +170,6 @@ function employerFromJsonLd(html) {
   }
   return null;
 }
-// Clean a raw posting into a focused, job-relevant description for the in-app
-// viewer. Strips navigation, cookie notices, "opens in a new tab" boilerplate,
-// and bounce-page copy. Returns null when the page has no real job content
-// (e.g. a filled/closed position or a redirect/404 landing page).
-function buildDescriptionCleanupPrompt(raw) {
-  return `Below is text scraped from a single job posting. Rewrite ONLY the job-relevant content as clean plain text that a candidate would want to read in a job-details panel: role summary, responsibilities, requirements, qualifications, experience, salary, employment type, benefits, location nuances.
-
-Rules:
-- Keep the author's own wording and bullet style; do not invent facts.
-- STRIP site navigation ("Jobs", "My Profile", "Sign in", "Search by Keyword/Location", "Create Alert", category lists, province lists, cookie banners), repeated "Opens in a new tab" lines, legal boilerplate footers, "Apply now" buttons, and any mention of the source job board.
-- If the posting is clearly closed, filled, expired, or the page is a redirect / 404 / nav-only shell, return exactly: NO_DESCRIPTION
-- Output ONLY the cleaned description (plain text, blank line between sections, bullets with "• "). No preamble, no markdown headings.
-
-POSTING TEXT:
-${String(raw || '').slice(0, 7000)}`;
-}
-async function cleanDescriptionWithAI(raw) {
-  const text = String(raw || '').trim();
-  if (!text) return null;
-  const out = await aiMatch.completeWithAI(buildDescriptionCleanupPrompt(text), null);
-  if (!out) return null;
-  const cleaned = tidyPlain(out).replace(/^```[a-z]*\s*|\s*```$/gi, '').trim();
-  if (!cleaned || /^NO_DESCRIPTION\b/i.test(cleaned) || cleaned.length < 80) return null;
-  return cleaned.slice(0, 8000);
-}
 // Pull the full job description for the in-app viewer. schema.org JobPosting
 // embeds it in `description` (HTML) — the most reliable, zero-cost source.
 // NOTE: do not route this through decodeEntities() — that helper collapses all
@@ -299,18 +274,8 @@ async function fetchJobDetail(browser, url) {
       }
     }
 
-    // No structured (JSON-LD) description? Run the visible page text through
-    // AI to strip nav/boilerplate and keep only job-relevant content. Returns
-    // null for bounce/closed/filled pages so the viewer shows a friendly
-    // fallback (or an external link, for Capitec) instead of garbage.
-    if (!description) {
-      if (!text) {
-        text = await page
-          .evaluate(() => (document.body && (document.body.innerText || document.body.textContent) || '').trim())
-          .catch(() => '');
-      }
-      if (text) description = await cleanDescriptionWithAI(text);
-    }
+    // Preserve only publisher-provided structured text here. The shared
+    // extractor handles full advert containers without AI output limits.
 
     return {
       employer: (cand && !isUnusableEmployer(cand)) ? cand : null,
@@ -658,10 +623,7 @@ async function run() {
           }
           employerCache.set(absoluteUrl, detail);
         }
-        let employer = (job.company && String(job.company).trim())
-          ? String(job.company).trim()
-          : (detail && detail.employer) || null;
-        const description = (detail && detail.description) || null;
+        const savedDetails=jobDetails.storedJobDetails(detail,job.description||'',job.company||'');
 
         const { error: insErr } = await supabase.from('job_matches').insert({
           job_seeker_id: seeker.id,
@@ -673,10 +635,7 @@ async function run() {
           // company_name so block-lists/routing on the source still work).
           // Taken from the listing when present, otherwise from the posting's
           // detail page. Null only when neither shows a company.
-          employer_name: employer,
-          job_description: description,
-          job_description_status: detail?.status || 'unavailable',
-          job_description_checked_at: new Date().toISOString(),
+          ...savedDetails,
           job_url: absoluteUrl,
           location: job.location || null,
           match_score: score, // stored as integer 0..100 like every other source

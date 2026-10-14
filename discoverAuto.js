@@ -693,30 +693,6 @@ function employerFromJsonLd(html) {
   return null;
 }
 
-// Clean a raw posting into a focused, job-relevant description for the in-app
-// viewer. Strips navigation, cookie notices, "opens in a new tab" boilerplate,
-// and bounce-page copy. Returns null when the page has no real job content.
-function buildDescriptionCleanupPrompt(raw) {
-  return `Below is text scraped from a single job posting. Rewrite ONLY the job-relevant content as clean plain text that a candidate would want to read in a job-details panel: role summary, responsibilities, requirements, qualifications, experience, salary, employment type, benefits, location nuances.
-
-Rules:
-- Keep the author's own wording and bullet style; do not invent facts.
-- STRIP site navigation ("Jobs", "My Profile", "Sign in", "Search by Keyword/Location", "Create Alert", category lists, province lists, cookie banners), repeated "Opens in a new tab" lines, legal boilerplate footers, "Apply now" buttons, and any mention of the source job board.
-- If the posting is clearly closed, filled, expired, or the page is a redirect / 404 / nav-only shell, return exactly: NO_DESCRIPTION
-- Output ONLY the cleaned description (plain text, blank line between sections, bullets with "• "). No preamble, no markdown headings.
-
-POSTING TEXT:
-${String(raw || '').slice(0, 7000)}`;
-}
-async function cleanDescriptionWithAI(raw, override) {
-  const text = String(raw || '').trim();
-  if (!text) return null;
-  const out = await callScoringAI(buildDescriptionCleanupPrompt(text), override);
-  if (!out) return null;
-  const cleaned = tidyPlain(out).replace(/^```[a-z]*\s*|\s*```$/gi, '').trim();
-  if (!cleaned || /^NO_DESCRIPTION\b/i.test(cleaned) || cleaned.length < 80) return null;
-  return cleaned.slice(0, 8000);
-}
 // Pull the full job description for the in-app viewer. schema.org JobPosting
 // embeds it in `description` (HTML) — the most reliable, zero-cost source.
 // NOTE: do not route this through decodeEntities() — that helper collapses all
@@ -822,7 +798,7 @@ async function resolveDetailFromPostingUrl(url, override) {
     // to strip nav/boilerplate and keep only job-relevant content. Returns
     // null for bounce/closed/filled pages so the viewer shows a friendly
     // fallback (or an external link, for Capitec) instead of garbage.
-    if (!description && text) description = await cleanDescriptionWithAI(text, override);
+    // Description retrieval belongs to jobDetails.captureJobDetails; never AI-rewrite or truncate it here.
 
     return {
       employer: (cand && !isPlaceholderCompany(cand)) ? cand : null,
@@ -950,9 +926,8 @@ async function saveMatches(userId, matches, override) {
     // Capture the actual advert first, following vacancy links privately when needed.
     const feedDesc=jobDetails.privateText(cleanHtml(job.description));
     const detail=await jobDetails.captureJobDetails(job.url,{title:job.title,employer:isPlaceholderCompany(job.company)?'':job.company});
-    job._employer=detail.employer || (isPlaceholderCompany(job.company)?null:String(job.company).trim());
-    job._description=detail.description || feedDesc || null;
-    job._descriptionStatus=detail.status;
+    job._details=jobDetails.storedJobDetails(detail,feedDesc,job.company);
+    job._employer=job._details.employer_name;
 
   }
 
@@ -991,10 +966,7 @@ async function saveMatches(userId, matches, override) {
     company_name: job.company,
     // The real hiring company for the UI to display. Null when neither the feed
     // nor the posting page named a real company (UI then falls back gracefully).
-    employer_name: job._employer || null,
-    job_description: job._description || null,
-    job_description_status: job._descriptionStatus || 'unavailable',
-    job_description_checked_at: new Date().toISOString(),
+    ...job._details,
     location: job.location,
     job_url: job.url,
     salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,

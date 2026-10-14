@@ -1,5 +1,5 @@
 const fs=require('fs'),assert=require('node:assert/strict');
-const {chromium}=require('/data/application-tests/node_modules/playwright');
+const {chromium}=require('playwright');
 const {captureJobDetails,privateText,refreshSavedDescriptions}=require('./jobDetails');
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:'/usr/local/bin/chromium',args:['--no-sandbox']});
@@ -23,8 +23,10 @@ const {captureJobDetails,privateText,refreshSavedDescriptions}=require('./jobDet
   await p.evaluate(desc=>openJobView({job_description:desc,job_description_status:'limited',job_title:'Office Administrator',company_name:'JobMail'}),summary.description);const body=await p.locator('#jmBody').innerText();assert(body.toLowerCase().includes('available job summary'));assert(body.includes('Short role summary'));assert(!/jobmail|pnet|http/i.test(body));
   await p.evaluate(()=>openJobView({job_description:String.raw`Requirements\n1\&ndash;2 years\&rsquo; experience. &lt;img src=x onerror="window.bad=1"&gt; Apply via CareerJunction. https://www.careerjunction.co.za/123`,job_description_status:'legacy'}));assert.equal(await p.locator('#jmBody img').count(),0);assert(!(await p.locator('#jmBody').innerText()).includes('CareerJunction'));assert((await p.locator('#jmBody').innerText()).includes('1–2 years’ experience'));
   console.log('PASS full text reaches user viewer; available summaries stay visible; legacy source names/links redacted; entity decoding remains safe');
-  let patch=null;const row={id:'existing',job_url:'https://fixture.test/redirect',job_title:'Office Administrator',job_description:'Short existing description',job_description_status:'legacy'};
-  const select={neq(){return this},or(){return this},order(){return this},async limit(){return {data:[row]}}};const sb={from:()=>({select:()=>select,update:v=>({eq:async()=>{patch=v;return {}}})})};await refreshSavedDescriptions(sb,{browser:borrowed});assert(patch.job_description===full,'Existing row did not receive full description');assert.equal(patch.job_description_status,'captured');assert.deepEqual(Object.keys(patch).sort(),['job_description','job_description_checked_at','job_description_status']);
+  const {mockDetailsDatabase}=require('./test-detail-db');
+  const row={id:'existing',job_url:'https://fixture.test/redirect',job_title:'Office Administrator',job_description:'Short existing description',job_description_status:'legacy'};
+  const sb=mockDetailsDatabase([row]);await refreshSavedDescriptions(sb,{browser:borrowed});
+  const patch=sb.patches[0].patch;assert(patch.job_description===full,'Existing row did not receive full description');assert.equal(patch.job_description_status,'captured');assert.deepEqual(Object.keys(patch).sort(),['employer_name','job_description','job_description_capture_version','job_description_checked_at','job_description_status']);
   console.log('PASS existing description refresh preserves match IDs, discovery dates, application statuses and counts');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});

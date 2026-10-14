@@ -2210,7 +2210,7 @@ async function loadApplications({silent=false,signal=null}={}){
   try{
     for(let offset=0;;offset+=size){
       let query=sb.from('application_log')
-        .select('*, job_matches(job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
+        .select('*, job_matches(id, job_title, company_name, employer_name, job_url, location, job_description, job_description_status, user_applied_deleted_at, salary_text, match_reason, match_score, discovered_at, status)')
         .eq('job_seeker_id',seekerId).order('attempted_at',{ascending:false}).order('id').range(offset,offset+size-1);
       if(signal)query=query.abortSignal(signal);
       const {data,error}=await query;
@@ -2554,7 +2554,7 @@ async function updateHelpBadge(){
 }
 
 /* ================= MODALS ================= */
-function closeModal(id){ $('#'+id).classList.add('hidden'); }
+function closeModal(id){ $('#'+id).classList.add('hidden'); if(id==='jobModal')openJobView.request=(openJobView.request||0)+1; }
 /* In-app job viewer: shows the posting's details (title, real company, location,
    salary, description, match reason) inside the app. Never links out — if a
    field is missing we simply omit it, and we always render whatever job info
@@ -2562,15 +2562,16 @@ function closeModal(id){ $('#'+id).classList.add('hidden'); }
 // Select published role facts for the viewer; never ask AI to rewrite or invent them.
 function scopeJobSections(value){
   const text=privateJobText(value).replace(/\r/g,'').replace(/(?:minimum|nimum)\s+requirements\s*:/gi,'\nMinimum requirements:\n');
-  const sections={duties:[],requirements:[],salary:[],overview:[],details:[]};
+  const sections={duties:[],requirements:[],salary:[],benefits:[],overview:[],details:[]};
   const duties='(?:duties(?: and responsibilities)?|responsibilities(?: and duties)?|(?:key|main|core|specific|job|role) (?:duties|responsibilities)|job specifications?|key performance areas|key accountabilities|what you(?: will|’ll|\x27ll) do)';
-  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications(?: and requirements)?|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|special conditions of employment|desired experience (?:&|and) qualifications?|job related personal attributes|personal attributes|candidate profile|person specification|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
+  const requirements=String.raw`(?:(?:(?:minimum|essential|preferred|key|job|person|educational|education|technical|mandatory) )?(?:requirements|qualifications(?: and requirements)?|education|experience|skills|competencies)|(?:required|minimum|preferred) (?:skills|qualifications|experience)|required documents|supporting documents|documents required|special conditions of employment|desired experience (?:&|and) qualifications?|job related personal attributes|personal attributes|candidate profile|person specification|(?:minimum )?applicable (?:experience|education|qualifications)(?: \([^)]*\))?(?: \([^)]*\))?)`;
   const salary='(?:salary(?: range| package| and benefits)?|remuneration(?: package| and benefits)?|compensation(?: package)?|pay(?: range)?)';
   const overview='(?:about (?:the role|this job)|role overview|purpose|main purpose|job purpose|purpose of (?:the role|the position|the job)|job summary|role summary|job description|introduction)';
   const details='(?:location|working hours|employment type|contract type|contract duration|closing date|application deadline)';
-  const stop='(?:about (?:us|the company|the employer)|company overview|how to apply|application(?: process| instructions)?|interested parties should send cv.?s to|equal opportunities|privacy|disclaimer|benefits|perks|advertisement|similar jobs|related jobs)';
-  const heading=new RegExp('^\\s*(?:#+\\s*)?(?:[0-9]+[.)]\\s*)?(?:\\*\\*)?('+duties+'|'+requirements+'|'+salary+'|'+overview+'|'+details+'|'+stop+')(?:\\*\\*)?(?:\\s+(?:will include|include|includes|are))?\\s*(?::\\s*(.*)|$)','i');
-  const dutyHeading=new RegExp('^'+duties+'$','i'),reqHeading=new RegExp('^'+requirements+'$','i'),salaryHeading=new RegExp('^'+salary+'$','i'),overviewHeading=new RegExp('^'+overview+'$','i'),detailsHeading=new RegExp('^'+details+'$','i');
+  const benefits='(?:benefits|perks|what we offer|employee benefits)';
+  const stop='(?:how to apply|application(?: process| instructions)?|interested parties should send cv.?s to|equal opportunities|privacy|disclaimer|advertisement|similar jobs|related jobs)';
+  const heading=new RegExp('^\\s*(?:#+\\s*)?(?:[0-9]+[.)]\\s*)?(?:\\*\\*)?('+duties+'|'+requirements+'|'+salary+'|'+overview+'|'+details+'|'+benefits+'|about (?:us|the company|the employer)|company overview|'+stop+')(?:\\*\\*)?(?:\\s+(?:will include|include|includes|are))?\\s*(?::\\s*(.*)|$)','i');
+  const dutyHeading=new RegExp('^'+duties+'$','i'),reqHeading=new RegExp('^'+requirements+'$','i'),salaryHeading=new RegExp('^'+salary+'$','i'),overviewHeading=new RegExp('^'+overview+'$','i'),detailsHeading=new RegExp('^'+details+'$','i'),benefitsHeading=new RegExp('^'+benefits+'$','i');
   // Listing summaries may have explicit facts inline rather than on separate lines.
   const readable=text.replace(new RegExp('([.!?]\\s+)('+duties+')\\s+(?:will include|includes?|are)\\s*:?', 'gi'),'$1\n$2: ')
     .replace(new RegExp('([.!?]\\s+)('+requirements+'|'+salary+')\\s*:', 'gi'),'$1\n$2:');
@@ -2583,7 +2584,7 @@ function scopeJobSections(value){
     const m=line.match(heading);
     if(m){
       const name=m[1].replace(/\*\*/g,'').trim();
-      current=dutyHeading.test(name)?'duties':reqHeading.test(name)?'requirements':salaryHeading.test(name)?'salary':overviewHeading.test(name)?'overview':detailsHeading.test(name)?'details':null;
+      current=dutyHeading.test(name)?'duties':reqHeading.test(name)?'requirements':salaryHeading.test(name)?'salary':overviewHeading.test(name)?'overview':detailsHeading.test(name)?'details':benefitsHeading.test(name)?'benefits':/^(?:about (?:us|the company|the employer)|company overview)$/i.test(name)?'overview':null;
       excluded=!current;
       if(current){
         // Preserve specific requirement subheadings (e.g. experience) to avoid losing meaning.
@@ -2593,15 +2594,16 @@ function scopeJobSections(value){
     }else if(current)sections[current].push(line);
     else if(!excluded&&line.trim())unlabelled.push(line);
   }
-  // Preserve a substantive role introduction, but not generic recruitment invitations.
-  if((sections.duties.length||sections.requirements.length)&&unlabelled.length){const intro=unlabelled.join('\n');if(!/invites applications|seeking (?:an?|the) |join (?:our|a) team/i.test(intro))sections.overview.unshift(intro);}
+  // An introduction can contain essential role facts. Never discard it based
+  // on recruitment wording or because a heading was not recognised.
+  if((sections.duties.length||sections.requirements.length||sections.benefits.length||sections.overview.length||sections.details.length)&&unlabelled.length)sections.overview.unshift(unlabelled.join('\n'));
   for(const key of Object.keys(sections))sections[key]=sections[key].join('\n').replace(/^[ \t]+$/gm,'').replace(/\n[ \t]*\n(?=[ \t]*[•*-]\s)/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
   return sections;
 }
 function renderScopedJobDetails(description,salary,status){
   const sections=scopeJobSections(description);
   if(!sections.salary&&salary)sections.salary=privateJobText(salary);
-  const entries=[['overview','Role overview'],['duties','Responsibilities & duties'],['requirements','Qualifications & requirements'],['salary','Salary'],['details','Additional job details']].filter(([key])=>sections[key]);
+  const entries=[['overview','Role overview'],['duties','Responsibilities & duties'],['requirements','Qualifications & requirements'],['salary','Salary'],['benefits','Benefits'],['details','Additional job details']].filter(([key])=>sections[key]);
   const hasRoleSections=!!(sections.duties||sections.requirements||sections.overview);
   const notice=status==='captured'?'':'<div class="sub2" style="margin-bottom:12px;font-size:12px;color:var(--muted);font-weight:400">These are the available saved details. The complete advert has not been retrieved yet.</div>';
   const blocks=entries.map(([key,label])=>'<section style="margin-bottom:18px"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">'+label+'</b><div style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px">'+esc(sections[key])+'</div></section>').join('');
@@ -2610,7 +2612,8 @@ function renderScopedJobDetails(description,salary,status){
   if(!blocks&&!fallback)return '<div class="sub2">Job details are not available yet. The agent will retry retrieving them on a later scan.</div>';
   return notice+blocks+fallback;
 }
-function openJobView(j,application=null){
+function openJobView(j,application=null,skipReload=false){
+  const request=(openJobView.request||0)+1;openJobView.request=request;
   j = j || {};
   const title   = privateJobText(j.job_title || 'Job details');
   const company = cleanJobText((typeof employerLabel==='function') ? employerLabel(j) : (j.employer_name||''));
@@ -2654,6 +2657,25 @@ function openJobView(j,application=null){
   const completed=completedApplicationForJob(j,application);
   $('#jmBody').innerHTML = header + chipRow + descBlock + applicationDetailsMarkup(completed);
   $('#jobModal').classList.remove('hidden');
+  // A tab may still hold a feed snippet after the discovery worker has saved
+  // the full advert. Re-read only this user's row; never fetch source pages in
+  // the browser or expose private routing URLs in the modal.
+  if(!skipReload&&j.id&&typeof currentSeeker!=='undefined'&&currentSeeker&&typeof sb!=='undefined'){
+    const indicator=document.createElement('p');indicator.className='sub2';indicator.textContent='Checking for updated job details…';indicator.setAttribute('role','status');$('#jmBody').append(indicator);
+    (async()=>{
+      try{
+        const {data,error}=await sb.from('job_matches')
+          .select('id,job_title,company_name,employer_name,location,salary_text,job_description,job_description_status,match_score,discovered_at')
+          .eq('id',j.id).eq('job_seeker_id',currentSeeker.id).maybeSingle();
+        if(openJobView.request!==request||$('#jobModal').classList.contains('hidden'))return;
+        if(error||!data){indicator.textContent='Could not check for updates. Showing the saved details available in this tab.';return;}
+        Object.assign(j,data);
+        openJobView(j,application,true);
+      }catch{
+        if(openJobView.request===request)indicator.textContent='Could not check for updates. Showing the saved details available in this tab.';
+      }
+    })();
+  }
 }
 $$('.modal').forEach(m=>m.addEventListener('click', e=>{ if(e.target===m) m.classList.add('hidden'); }));
 let cfCb=null;
