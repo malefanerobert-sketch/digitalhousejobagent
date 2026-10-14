@@ -49,6 +49,6 @@ const {mockDetailsDatabase}=require('./test-detail-db');
  let enabled=false,repairs=0;const schedules=[];
  const modules={'dotenv':{config(){}},'node-cron':{schedule:(pattern,callback)=>schedules.push({pattern,callback})},'./discoverWatched':{run:async()=>{}},'./discoverAuto':{run:async()=>{}},'./jobDetails':{refreshSavedDescriptions:async()=>{repairs++;}},'./supabaseClient':{},'./aiMatch':{loadSettings:async()=>{},isAgentEnabled:()=>enabled}};
  const sandbox={require:n=>modules[n],process:{env:{},stdin:{resume(){}}},console:{log(){},error(){}}};vm.runInNewContext(fs.readFileSync(__dirname+'/index.js','utf8'),sandbox);await new Promise(r=>setImmediate(r));assert.equal(repairs,0);
- const scheduled=schedules.find(x=>x.pattern==='*/15 * * * *');assert(scheduled);enabled=true;await scheduled.callback();assert.equal(repairs,1);
- console.log('PASS both discovery paths use shared complete storage; no legacy AI advert truncation; independent scheduled repair respects master switch');
+ const scheduled=schedules.find(x=>x.pattern==='*/15 * * * *');assert(scheduled);enabled=true;await scheduled.callback();assert.equal(repairs,0,'Historical repair is off by default');sandbox.process.env.REPAIR_EXISTING_JOB_DETAILS='true';await scheduled.callback();assert.equal(repairs,1);
+ console.log('PASS both discovery paths use shared complete storage; no legacy AI advert truncation; historical repair is opt-in and respects master switch');
 })().catch(e=>{console.error(e);process.exitCode=1;});

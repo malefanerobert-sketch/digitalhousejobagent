@@ -931,6 +931,14 @@ async function saveMatches(userId, matches, override) {
 
   }
 
+  // Do not publish a feed summary or a failed/partial advert as a match.
+  // It has not been saved/deduplicated, so a later discovery run can retry it.
+  const readyMatches=matches.filter(job=>jobDetails.canPublishJobDetails(job._details,job.title));
+  const deferred=matches.length-readyMatches.length;
+  if(deferred)console.log(`  Deferred ${deferred} advert(s): full employer/role/requirements not available yet`);
+  matches=readyMatches;
+  if(!matches.length)return 0;
+
   // DEDUP ACROSS FEEDS: the same posting is often syndicated to several feeds
   // with different URLs. The upsert below only dedups on (job_seeker_id,
   // job_url), so identical title+employer+location jobs from different feeds
@@ -1012,7 +1020,7 @@ async function run() {
     return;
   }
 
-  await jobDetails.refreshSavedDescriptions(sb,{limit:8});
+  if(process.env.REPAIR_EXISTING_JOB_DETAILS==='true')await jobDetails.refreshSavedDescriptions(sb,{limit:8});
 
   // Get all active users with auto-search enabled. discovery_mode 'both'
   // means "watched pages AND autonomous search" — it must be included here,

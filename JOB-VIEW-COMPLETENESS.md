@@ -1,12 +1,21 @@
 # Complete applicant job view
 
+## Current scope: future matches only
+
+New automatic-feed and watched-page jobs must pass `canPublishJobDetails` before entering `job_matches`. The gate requires a captured, substantive advert, a named employer, role information and requirements/qualifications/experience. It rejects title-only summaries, failed/limited extraction, unknown/source-labelled employers, and ellipsis-truncated paragraphs even when salary/type metadata follows them. Salary is optional when the advertiser has not disclosed it. A deferred candidate is not inserted or marked known, so later discovery can retry it if it is rediscovered. There is no durable unpublished-candidate queue in this change.
+
+Existing matches are neither hidden nor rewritten by this gate. Historical description repair is now **off by default** in the startup scheduler and both discovery paths. It runs only if `REPAIR_EXISTING_JOB_DETAILS=true` is explicitly set (and the master switch is enabled). Keep that option unset/false for the requested forward-only scope.
+
+Run `node test-future-publication.js` for publication-gate, autonomous-save and no-historical-repair regressions. The test has no browser or service dependencies.
+
+
 The job modal now re-reads the selected match's latest saved advert, scoped to the signed-in seeker. This replaces stale in-tab summaries when the worker has already saved fuller details. The browser does not request the source URL. Late responses cannot overwrite a different job or reopen a closed modal. If reloading fails, the saved in-tab details remain visible.
 
 Published employer information, introductions, benefits, duties, qualifications, experience, salary, working arrangements, required documents and closing dates are retained. Unknown subheadings inside job sections do not impose a preview cutoff. Source branding and links remain filtered from applicant display; application routing stays in the backend/admin records. This is display privacy, not a new column-level access policy.
 
 Extraction preserves salary, qualifications, education, experience and benefits supplied as separate structured fields even when a longer visible advert container is selected. Structured credential categories and month-based experience requirements are supported. The hiring employer can also be recovered from the corresponding structured posting.
 
-No salary or requirement is invented. An expired, blocked or inaccessible source can still leave only a summary. The versioned background retry pass retrieves missing adverts; opening the modal reloads saved data, not a new source scrape.
+No salary or requirement is invented. An expired, blocked or inaccessible source can still leave only a summary. The optional versioned historical retry pass retrieves missing adverts; opening the modal reloads saved data, not a new source scrape.
 
 Run:
 
@@ -25,7 +34,7 @@ Set `CHROMIUM_PATH` for the new test if Chromium is not at `/usr/local/bin/chrom
 - Structured JobPosting objects nested inside WebPage/mainEntity and other object fields are recognised. Concurrent captures of the same normalised vacancy URL share one in-process task.
 - `migration_job_detail_capture_version.sql` must be applied before deploying the Node worker. Existing records default to version 0 and become repair candidates, including old captured records and null statuses. New extraction is version 2.
 - Repair paginates up to 2,000 candidate records per pass to find up to eight distinct adverts, rather than stopping at one applicant-copy cluster. It excludes watched-page error notices. It updates each applicant copy independently and preserves richer saved content on shorter results or retrieval failure. It does not alter application status, eligibility, match identity or discovery time.
-- `index.js` schedules a bounded repair pass at startup and every 15 minutes (`DETAILS_CRON` can override this), independent of new-job discovery and subject to the existing master switch. Failed/limited adverts wait at least six hours between repair attempts. Both discovery paths can also request a pass; in-process overlap is shared.
+- When explicitly enabled with `REPAIR_EXISTING_JOB_DETAILS=true`, `index.js` schedules a bounded historical repair pass at startup and every 15 minutes (`DETAILS_CRON` can override this), subject to the existing master switch. It is disabled by default. Failed/limited adverts wait at least six hours between repair attempts. Both discovery paths can also request a pass; in-process overlap is shared.
 - Tracking-only query parameters share retrieval work; persisted copies with differing exact URLs may be updated on later passes from that cache. No source application forms are submitted by extraction.
 
 Additional regression test:

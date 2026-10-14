@@ -17,6 +17,8 @@ const DISCOVER_CRON = process.env.DISCOVER_CRON || '0 */3 * * *'; // autonomous 
 const DETAILS_CRON = process.env.DETAILS_CRON || '*/15 * * * *';
 // Bounded repair remains subject to the master switch, but not new-job volume.
 async function repairJobDetails(){
+  // Current scope is future jobs only. Historical repair requires explicit opt-in.
+  if(process.env.REPAIR_EXISTING_JOB_DETAILS!=='true')return;
   await aiMatch.loadSettings(sb);
   if(!aiMatch.isAgentEnabled())return;
   await jobDetails.refreshSavedDescriptions(sb,{limit:8});
@@ -27,7 +29,7 @@ console.log('=================================================');
 console.log(' Dispatch Agent Worker — starting up');
 console.log(' watched-pages schedule:  ', WATCH_CRON);
 console.log(' autonomous-search sched.:', DISCOVER_CRON);
-console.log(' job-details repair sched.:', DETAILS_CRON);
+console.log(' historical job-details repair:', process.env.REPAIR_EXISTING_JOB_DETAILS==='true'?DETAILS_CRON:'OFF (future jobs only)');
 console.log(' discovery country: South Africa only — nationwide; US/global company feeds frozen');
 console.log(' application mode: admin only — automatic submissions disabled');
 console.log('=================================================');

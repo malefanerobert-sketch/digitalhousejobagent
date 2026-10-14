@@ -132,6 +132,21 @@ function storedJobDetails(result={},fallbackDescription='',fallbackEmployer=''){
  return {employer_name:employer,job_description:description||null,job_description_status:status,
   job_description_checked_at:new Date().toISOString(),job_description_capture_version:CAPTURE_VERSION};
 }
+// Forward-only publication gate. Retrieval failure is not a usable match:
+// rediscovery can retry it, but an applicant must never get a title-only page.
+// Salary is deliberately optional: a publisher may legitimately omit it.
+function canPublishJobDetails(details={},title=''){
+ const text=String(details.job_description||'').trim();
+ if(details.job_description_status!=='captured'||!usableEmployer(details.employer_name))return false;
+ if(/^(?:company not listed|not (?:listed|disclosed|provided|available)|confidential(?: company| employer)?)$/i.test(String(details.employer_name).trim()))return false;
+ if(text.length<240||text.toLowerCase()===String(title).trim().toLowerCase())return false;
+ // Detect a cut-off description even if structured salary/type fields were
+ // appended after the truncated paragraph. Be conservative rather than publish.
+ if(/(?:…|\.{3})[ \t]*(?:\n|$)/.test(text))return false;
+ const role=/\b(?:responsibilit(?:y|ies)|duties|key performance|purpose|job description|role overview|you will|you['’]ll|successful candidate|the role|maintain|manage|assist|support|perform)\b/i.test(text);
+ const requirements=/\b(?:qualifications?|requirements?|education|experience|grade\s*12|matric|degree|diploma|certificate|skills|competenc(?:y|ies))\b/i.test(text);
+ return role&&requirements;
+}
 const DETAIL_COLUMNS='id,job_url,job_title,employer_name,job_description,job_description_status,job_description_capture_version,job_description_checked_at';
 let repairInFlight=null;
 function refreshSavedDescriptions(sb,options={}){
@@ -180,4 +195,4 @@ async function refreshSavedDescriptionsInternal(sb,{browser=null,limit=8}={}){
  }
  console.log(`[jobDetails] Repair pass checked ${rows.length} distinct adverts`);
 }
-module.exports={captureJobDetails,refreshSavedDescriptions,privateText,limitedDescription,storedJobDetails,CAPTURE_VERSION};
+module.exports={captureJobDetails,refreshSavedDescriptions,privateText,limitedDescription,storedJobDetails,canPublishJobDetails,CAPTURE_VERSION};

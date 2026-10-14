@@ -442,7 +442,7 @@ async function run() {
   const optedOut = new Set((optOuts || []).map(o => `${o.job_seeker_id}|${o.job_custom_source_id}`));
 
   const browser = await chromium.launch({ headless: true });
-  await jobDetails.refreshSavedDescriptions(supabase,{browser,limit:8});
+  if(process.env.REPAIR_EXISTING_JOB_DETAILS==='true')await jobDetails.refreshSavedDescriptions(supabase,{browser,limit:8});
   // Caches the real employer per posting URL for this run, so a detail-page
   // lookup happens at most once per URL even if several seekers match it.
   const employerCache = new Map();
@@ -624,6 +624,11 @@ async function run() {
           employerCache.set(absoluteUrl, detail);
         }
         const savedDetails=jobDetails.storedJobDetails(detail,job.description||'',job.company||'');
+        if(!jobDetails.canPublishJobDetails(savedDetails,job.title)){
+          console.log('[discoverWatched] Deferred incomplete advert; will retry if rediscovered');
+          continue;
+        }
+
 
         const { error: insErr } = await supabase.from('job_matches').insert({
           job_seeker_id: seeker.id,
