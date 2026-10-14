@@ -33,8 +33,8 @@ const tests=String.raw`
  check(document.querySelector('[data-report-account="account-b"]'),'Job search finds owning account');
  document.querySelector('#repSearch').value='';renderReport();openReportAccount('account-a');
  const pages=Array.from({length:301},(_,i)=>({...base[0],id:'page-'+i}));let ranges=[];
- window.sb={from:()=>({select:()=>{const q={is:()=>q,order:()=>q,range:async(a,b)=>{ranges.push([a,b]);return {data:pages.slice(a,b+1)};}};return q;}})};
- await loadReport();check(ranges.length===2&&reportRows.length===301,'Pagination loads all records');check(reportAccountId==='account-a','Refresh retains selected account');
+ window.sb={from:()=>({select:()=>{const q={is:()=>q,eq:()=>q,order:()=>q,range:async(a,b)=>{ranges.push([a,b]);return {data:pages.slice(a,b+1),count:pages.length};}};return q;}})};
+ await loadReport();check(ranges.length===2&&reportRows.filter(r=>reportAccountKey(r)==='account-a').length===301,'Pagination loads all records');check(reportAccountId==='account-a','Refresh retains selected account');
  reportRows=base.map(x=>({...x}));renderReport();
  reportRows=reportRows.filter(x=>x.job_seeker_id!=='account-a');renderReport();check(list.textContent.includes('No jobs remain for this account'),'Last removal has a scoped empty state');check(!list.textContent.includes('Warehouse Controller'),'Empty account never falls back to mixed jobs');
  showReportAccounts();reportRows=[{...base[0],job_seekers:{id:'account-a',full_name:'<img src=x onerror="window.bad=1">',dedicated_email:'a@example.test'}}];renderReport();check(document.querySelectorAll('#repAccounts img').length===0&&!window.bad,'Account labels are safely escaped');
@@ -42,11 +42,13 @@ const tests=String.raw`
  document.querySelector('#repSearch').value='';reportRows=[];renderReport();check(document.querySelector('#repAccounts').textContent.includes('No application work is waiting'),'Empty queue');
  // A stale request must not overwrite the result of a newer refresh.
  let resolves=[];window.sb={from:()=>({select:()=>{const q={is:()=>q,order:()=>q,range:()=>new Promise(resolve=>resolves.push(resolve))};return q;}})};
- const older=loadReport(),newer=loadReport();resolves[1]({data:[base[2]]});await newer;resolves[0]({data:[base[3]]});await older;check(reportRows[0].id==='job-a3','Newer refresh wins');
+ const older=loadReport(),newer=loadReport();resolves[1]({data:[base[2]],count:1});await newer;resolves[0]({data:[base[3]],count:1});await older;check(reportRows[0].id==='job-a3','Newer refresh wins');
  reportRows=base.map(x=>({...x}));renderReport();
  check(document.documentElement.scrollWidth<=innerWidth,'No horizontal overflow');
  const result=document.createElement('pre');result.id='test-result';result.textContent='PASS account cards; stable ID isolation; scoped search/status/stats; exact action IDs; pagination; refresh retention; empty states; escaping; stale refresh protection; responsive layout';result.hidden=true;document.body.append(result);
- if(new URLSearchParams(location.search).get('view')==='account')openReportAccount('account-a');
+ document.querySelector('#repLoadStatus').textContent='';
+ window.sb={from:()=>({select:()=>{let account=null;const q={is:()=>q,eq:(key,value)=>{account=value;return q;},order:()=>q,range:async(a,b)=>{const rows=base.filter(r=>!account||r.job_seeker_id===account);return {data:rows.slice(a,b+1),count:rows.length};}};return q;}})};
+ if(new URLSearchParams(location.search).get('view')==='account')await openReportAccount('account-a');
 })().catch(error=>{const result=document.createElement('pre');result.id='test-result';result.textContent='FAIL '+error.message;document.body.append(result);});`;
 const work=fs.mkdtempSync(path.join(os.tmpdir(),'admin-account-queue-'));
 const browser=process.env.CHROMIUM_PATH||'/usr/local/bin/chromium';

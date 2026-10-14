@@ -259,6 +259,9 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
               <option value="captcha_blocked">CAPTCHA blocked</option>
               <option value="submission_unverified">Submission not verified</option>
             </select>
+            <select id="repDateFilter" onchange="renderReport()" aria-label="Discovery date" style="width:auto;max-width:100%">
+              <option value="all">All dates · newest first</option><option value="today">Today (SA time)</option>
+            </select>
             <button class="btn" onclick="loadReport()">🔄 Refresh</button>
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
@@ -1000,29 +1003,61 @@ function openReportAccount(id){
   const group=groupReportAccounts(reportRows).find(g=>g.id===id);
   if(!group)return;
   reportAccountId=id;reportAccountName=group.name;reportAccountEmail=group.email;
+  // Account lookup search must not silently hide that account's job list.
+  const search=$('#repSearch');if(search)search.value='';
   renderReport();$('#repAccountName')?.focus();
+  return loadReport();
 }
 function showReportAccounts(){
-  const previous=reportAccountId;
+  const previous=reportAccountId;loadReport.request=(loadReport.request||0)+1;
+  const loading=$('#repLoadStatus');if(loading)loading.textContent='';
   reportAccountId=null;reportAccountName='';reportAccountEmail='';renderReport();
   [...($('#repAccounts')?.querySelectorAll('button[data-report-account]')||[])].find(button=>button.dataset.reportAccount===previous)?.focus();
 }
 
 
+function reportLocalDay(value){
+  try{
+    const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));
+    const get=type=>parts.find(part=>part.type===type)?.value||'';
+    return get('year')+'-'+get('month')+'-'+get('day');
+  }catch{return '';}
+}
+const REPORT_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)';
 async function loadReport(){
   const request=(loadReport.request||0)+1;loadReport.request=request;
-  const loading=$('#repLoadStatus');if(loading)loading.textContent='Loading application queue…';
-  const all=[];const size=300;
-  for(let offset=0;;offset+=size){
-    const {data,error}=await sb.from('job_matches').select('id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)')
-      .is('admin_queue_deleted_at',null).order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
-    if(request!==loadReport.request)return;
-    if(error){if(loading)loading.textContent='Could not refresh the application queue: '+error.message;return;}
-    const rows=data||[];all.push(...rows);if(rows.length<size)break;
+  const accountId=reportAccountId;
+  const loading=$('#repLoadStatus');if(loading)loading.textContent=accountId?'Fetching this account’s latest jobs…':'Loading application queue accounts…';
+  const all=[];const size=300;let offset=0;let expected=null;
+  try{
+    for(;;){
+      let query=sb.from('job_matches').select(REPORT_SELECT,{count:'exact'}).is('admin_queue_deleted_at',null);
+      if(accountId)query=query.eq('job_seeker_id',accountId);
+      const {data,error,count}=await query.order('discovered_at',{ascending:false}).order('id',{ascending:true}).range(offset,offset+size-1);
+      if(request!==loadReport.request)return;
+      if(error)throw error;
+      if(Number.isFinite(count))expected=count;
+      const page=data||[];
+      if(!page.length){
+        if(expected!==null&&offset<expected)throw new Error('The server returned only part of the queue. Please retry; the list has not been replaced with incomplete data.');
+        break;
+      }
+      all.push(...page);
+      // A server may return fewer rows than requested. Advance by the actual
+      // response size; a short page is not proof that the queue has ended.
+      offset+=page.length;
+      if(expected!==null&&offset>=expected)break;
+    }
+    const unique=[...new Map(all.map(row=>[row.id,row])).values()];
+    if(expected!==null&&unique.length<expected)throw new Error('The queue changed while loading. Refresh again so every job can be included.');
+    const fresh=unique.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
+    if(accountId)reportRows=reportRows.filter(row=>reportAccountKey(row)!==accountId).concat(fresh);
+    else reportRows=fresh;
+    renderReport();
+    if(loading)loading.textContent='Loaded '+fresh.length+' saved jobs'+(accountId?' for '+reportAccountName:' across accounts')+'. Newest discoveries first.';
+  }catch(error){
+    if(request===loadReport.request&&loading)loading.textContent='Could not refresh the application queue: '+(error.message||'Connection error')+'. The previous list may be out of date.';
   }
-  if(loading)loading.textContent='';
-  reportRows=all.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
-  renderReport();
 }
 
 function renderReport(){
@@ -1036,7 +1071,12 @@ function renderReport(){
   let rows = scope;
   if(filter==='queue')rows=rows.filter(r=>['pending','approved','failed','needs_manual_action','captcha_blocked','submission_unverified'].includes(r.status));
   else if(filter !== 'all') rows = rows.filter(r => r.status === filter);
-  rows=rows.slice().sort((a,b)=>(b.status==='approved')-(a.status==='approved')||new Date(b.admin_application_requested_at||b.discovered_at)-new Date(a.admin_application_requested_at||a.discovered_at));
+  // Today's discoveries must not sit below older user requests. Requests
+  // still have their badge and dedicated status filter.
+  rows=rows.slice().sort((a,b)=>(Date.parse(b.discovered_at)||0)-(Date.parse(a.discovered_at)||0)||String(a.id).localeCompare(String(b.id)));
+  if($('#repDateFilter')?.value==='today'){
+    const today=reportLocalDay(new Date());rows=rows.filter(row=>reportLocalDay(row.discovered_at)===today);
+  }
   if(q){
     rows = rows.filter(r => {
       const seeker = r.job_seekers?.full_name || '';
