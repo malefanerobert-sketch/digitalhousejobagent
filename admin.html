@@ -74,6 +74,25 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 .err{color:var(--danger);font-size:13px;min-height:16px;margin:4px 0 8px}
 .denied{text-align:center;padding:60px 20px;color:var(--muted)}
 
+/* Application queue: choose one account before viewing any job rows. */
+.queue-account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:14px}
+.queue-account-card{display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-width:0;text-align:left;font:inherit;color:var(--text);background:linear-gradient(180deg,#121b38,#0f1730);border:1px solid var(--line);border-radius:var(--radius);padding:20px;cursor:pointer;transition:border-color .15s,background .15s}
+.queue-account-card:hover{border-color:var(--accent);background:#15213e}
+.queue-account-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.queue-account-card .queue-account-name{font-size:15px;line-height:1.45;overflow-wrap:anywhere}
+.queue-account-card .queue-account-email{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.queue-account-card .queue-account-meta{display:flex;flex-wrap:wrap;gap:6px}
+.queue-account-card .queue-account-open{margin-top:auto;font-size:12.5px;font-weight:700;color:var(--accent)}
+.queue-account-heading{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.queue-account-heading h3{font-size:16px;overflow-wrap:anywhere}
+.queue-account-heading p{font-size:12.5px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+
+#repAccountName:focus{outline:none}
+@media(max-width:600px){
+  .queue-job-row{flex-direction:column}
+  .queue-job-actions{width:100%}
+}
+
 /* ---------- theme picker ---------- */
 .theme-picker-wrap{position:relative}
 .theme-toggle-btn{display:flex;align-items:center;gap:7px;background:#0d1428;color:var(--text);
@@ -229,11 +248,11 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         <div class="card" style="margin-bottom:18px">
           <h3 style="margin-bottom:6px;font-size:15px">📋 Admin application queue</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
+            Choose an account to see and manage its jobs. Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
           </p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="renderReport()" style="flex:1;min-width:260px">
-            <select id="repFilter" onchange="renderReport()" style="padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
+            <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="renderReport()" style="flex:1;min-width:min(260px,100%);max-width:none;margin-bottom:0">
+            <select id="repFilter" onchange="renderReport()" style="width:auto;max-width:100%;padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
               <option value="queue">Open application work</option><option value="all">All saved matches</option><option value="pending">New discoveries</option><option value="approved">User requests</option><option value="skipped">Skipped by agent</option><option value="applied">Completed applications</option>
               <option value="failed">Failed</option>
               <option value="needs_manual_action">Needs manual action</option>
@@ -244,8 +263,14 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <div class="card">
-          <div id="repList"></div>
+        <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
+        <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
+        <div id="repAccountView" class="hidden">
+          <div class="queue-account-heading">
+            <button type="button" class="btn" data-report-back="true">← All accounts</button>
+            <div style="min-width:0;flex:1"><h3 id="repAccountName" tabindex="-1"></h3><p id="repAccountEmail"></p></div>
+          </div>
+          <div class="card"><div id="repList"></div></div>
         </div>
       </section>
 
@@ -954,25 +979,48 @@ function renderHealth(){
   }).join('');
 }
 
-/* ================= APPLICATION REPORT (admin-wide troubleshooting view) =================
-   Users see their own failed/manual/blocked applications in their own account
-   (that view is unchanged). Admin sees the same data aggregated across every
-   seeker so the engineering team can spot systemic issues — e.g. "12 jobs
-   failed with 'Target page closed' → retry logic needs work" or "8 all blocked
-   by CAPTCHA on Careers24 → confirm 2Captcha budget". Read-only view: nothing
-   to click through here except opening the actual posting. */
+/* ================= APPLICATION QUEUE (account-first view) =================
+   Account cards group by seeker ID, never by display name/email. Job actions,
+   filtering, saved outcomes and queue removal keep their existing semantics. */
 let reportRows = [];
+let reportAccountId = null;
+let reportAccountName = '';
+let reportAccountEmail = '';
+function reportAccountKey(row){return String(row.job_seeker_id||row.job_seekers?.id||'unassigned');}
+function groupReportAccounts(rows){
+  const groups=new Map();
+  for(const row of rows){
+    const id=reportAccountKey(row),seeker=row.job_seekers||{};
+    if(!groups.has(id))groups.set(id,{id,name:seeker.full_name||seeker.dedicated_email||'Account unavailable',email:seeker.dedicated_email||'',rows:[]});
+    groups.get(id).rows.push(row);
+  }
+  return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'})||a.id.localeCompare(b.id));
+}
+function openReportAccount(id){
+  const group=groupReportAccounts(reportRows).find(g=>g.id===id);
+  if(!group)return;
+  reportAccountId=id;reportAccountName=group.name;reportAccountEmail=group.email;
+  renderReport();$('#repAccountName')?.focus();
+}
+function showReportAccounts(){
+  const previous=reportAccountId;
+  reportAccountId=null;reportAccountName='';reportAccountEmail='';renderReport();
+  [...($('#repAccounts')?.querySelectorAll('button[data-report-account]')||[])].find(button=>button.dataset.reportAccount===previous)?.focus();
+}
+
 
 async function loadReport(){
-  const el = $('#repList');
-  if(el) el.innerHTML = '<div class="empty">Loading…</div>';
+  const request=(loadReport.request||0)+1;loadReport.request=request;
+  const loading=$('#repLoadStatus');if(loading)loading.textContent='Loading application queue…';
   const all=[];const size=300;
   for(let offset=0;;offset+=size){
-    const {data,error}=await sb.from('job_matches').select('id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)')
+    const {data,error}=await sb.from('job_matches').select('id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)')
       .is('admin_queue_deleted_at',null).order('discovered_at',{ascending:false}).order('id').range(offset,offset+size-1);
-    if(error){if(el)el.innerHTML='<div class="empty">⚠ '+esc(error.message)+'</div>';return;}
+    if(request!==loadReport.request)return;
+    if(error){if(loading)loading.textContent='Could not refresh the application queue: '+error.message;return;}
     const rows=data||[];all.push(...rows);if(rows.length<size)break;
   }
+  if(loading)loading.textContent='';
   reportRows=all.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
   renderReport();
 }
@@ -984,7 +1032,8 @@ function renderReport(){
   const q = ($('#repSearch')?.value || '').trim().toLowerCase();
   const filter = $('#repFilter')?.value || 'queue';
 
-  let rows = reportRows;
+  const scope=reportAccountId?reportRows.filter(r=>reportAccountKey(r)===reportAccountId):reportRows;
+  let rows = scope;
   if(filter==='queue')rows=rows.filter(r=>['pending','approved','failed','needs_manual_action','captcha_blocked','submission_unverified'].includes(r.status));
   else if(filter !== 'all') rows = rows.filter(r => r.status === filter);
   rows=rows.slice().sort((a,b)=>(b.status==='approved')-(a.status==='approved')||new Date(b.admin_application_requested_at||b.discovered_at)-new Date(a.admin_application_requested_at||a.discovered_at));
@@ -1003,17 +1052,37 @@ function renderReport(){
 
   // Stats line at the top: quick totals so eng sees the shape of the problems
   const counts = { pending:0,approved:0,skipped:0,applied:0,failed:0,needs_manual_action:0,captcha_blocked:0,submission_unverified:0 };
-  for(const r of reportRows) if(counts[r.status] !== undefined) counts[r.status]++;
-  if(stats) stats.innerHTML = 'Saved discoveries: '+reportRows.length+' · '+counts.approved+' user requests · '+counts.pending+' new · '+counts.applied+' completed · '+
+  for(const r of scope) if(counts[r.status] !== undefined) counts[r.status]++;
+  if(stats) stats.innerHTML = (reportAccountId?'This account — ':'All accounts — ')+'Saved discoveries: '+scope.length+' · '+counts.approved+' user requests · '+counts.pending+' new · '+counts.applied+' completed · '+
     '<b style="color:#ff8f8f">'+counts.failed+'</b> failed · '+
     '<b style="color:var(--accent)">'+counts.needs_manual_action+'</b> needs manual · '+
     '<b style="color:#f6c66c">'+counts.captcha_blocked+'</b> captcha blocked · '+
     '<b style="color:#f6c66c">'+counts.submission_unverified+'</b> unverified · '+
     'showing <b>'+rows.length+'</b>';
 
+  const cards=$('#repAccounts'),accountView=$('#repAccountView');
+  if(cards)cards.classList.toggle('hidden',!!reportAccountId);
+  if(accountView)accountView.classList.toggle('hidden',!reportAccountId);
+  if(!reportAccountId){
+    const groups=groupReportAccounts(rows);
+    if(stats)stats.innerHTML+=' jobs across <b>'+groups.length+'</b> accounts';
+    if(cards)cards.innerHTML=groups.length?groups.map(group=>{
+      const requests=group.rows.filter(r=>r.status==='approved').length;
+      return '<button type="button" class="queue-account-card" data-report-account="'+esc(group.id)+'" aria-label="Open application queue for '+esc(group.name)+'">'+
+        '<strong class="queue-account-name">'+esc(group.name)+'</strong>'+
+        (group.email?'<span class="queue-account-email">'+esc(group.email)+'</span>':'')+
+        '<span class="queue-account-meta"><span class="pill gray">'+group.rows.length+' '+(group.rows.length===1?'job':'jobs')+'</span>'+
+        (requests?'<span class="pill amber">'+requests+' '+(requests===1?'user request':'user requests')+'</span>':'')+'</span>'+
+        '<span class="queue-account-open">Open account →</span></button>';
+    }).join(''):'<div class="card empty">'+(reportRows.length?'No accounts match the current search and status filter.':'No application work is waiting.')+'</div>';
+    el.innerHTML='';return;
+  }
+  const selected=groupReportAccounts(scope)[0];
+  if(selected){reportAccountName=selected.name;reportAccountEmail=selected.email;}
+  $('#repAccountName').textContent=reportAccountName||'Account unavailable';
+  $('#repAccountEmail').textContent=reportAccountEmail;
   if(!rows.length){
-    el.innerHTML = '<div class="empty">'+(reportRows.length ? 'Nothing matches that filter.' : 'No application work is waiting.')+'</div>';
-    return;
+    el.innerHTML='<div class="empty">'+(scope.length?'No jobs for this account match the current search and status filter.':'No jobs remain for this account in the admin queue.')+'</div>';return;
   }
 
   el.innerHTML = rows.map(r=>{
@@ -1032,7 +1101,7 @@ function renderReport(){
       : '<span class="pill amber">Manual action</span>';
     const seeker = r.job_seekers?.full_name || '(unknown user)';
     return '<div style="padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
-      '<div style="display:flex;gap:12px;align-items:flex-start">'+
+      '<div class="queue-job-row" style="display:flex;gap:12px;align-items:flex-start">'+
         '<div style="flex:1;min-width:0">'+
           '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
             '<b>'+esc(r.job_title||'(no title)')+'</b>'+
@@ -1046,7 +1115,7 @@ function renderReport(){
             esc(errText)+
           '</div>'+
         '</div>'+
-        '<div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
+        '<div class="queue-job-actions" style="display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
           '<a class="btn btn-sm" href="'+esc(r.job_url||'#')+'" target="_blank" rel="noopener">View posting ↗</a>'+
           '<button class="btn btn-primary btn-sm" data-apply-report="'+esc(r.id)+'">'+(r.status==='applied'?'View completion':'▶ Review / apply manually')+'</button>'+
           '<button class="btn btn-danger btn-sm" data-delete-report="'+esc(r.id)+'">Delete</button>'+
@@ -1243,6 +1312,9 @@ async function deleteAdminQueueMatch(id,button){
 
 // Delegate the Apply button clicks (buttons are re-rendered on every filter/search)
 document.addEventListener('click', (e)=>{
+  const account=e.target.closest('button[data-report-account]');
+  if(account){openReportAccount(account.dataset.reportAccount);return;}
+  if(e.target.closest('button[data-report-back]')){showReportAccounts();return;}
   const del=e.target.closest('button[data-delete-report]');
   if(del){deleteAdminQueueMatch(del.dataset.deleteReport,del);return;}
   const btn = e.target.closest('button[data-apply-report]');
