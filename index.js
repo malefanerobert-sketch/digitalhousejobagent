@@ -10,6 +10,16 @@ const discoverAuto = require('./discoverAuto');
 const jobDetails = require('./jobDetails');
 const sb = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
+const candidateQueue=require('./candidateQueue');
+const running=new Set();
+async function guarded(name,task){
+ if(running.has(name)){console.log('[scheduler] '+name+' is still running; skipped overlapping run');return;}
+ running.add(name);try{return await task();}finally{running.delete(name);}
+}
+async function retryCandidates(){
+ await aiMatch.loadSettings(sb);if(!aiMatch.isAgentEnabled())return;
+ await candidateQueue.processCandidates(sb,{limit:8});
+}
 // Applications are performed by admins in admin.html. Never load the submitter here.
 
 const WATCH_CRON = process.env.WATCH_CRON || '0 */3 * * *';     // watched pages — every 3 hours by default
@@ -36,19 +46,22 @@ console.log('=================================================');
 
 // Run once immediately on startup so you see activity right away,
 // then settle into the scheduled cadence.
-discoverWatched.run().catch(err => console.error('[startup discoverWatched]', err));
-discoverAuto.run().catch(err => console.error('[startup discoverAuto]', err));
+guarded('discoverWatched',()=>discoverWatched.run()).catch(err => console.error('[startup discoverWatched]', err));
+guarded('discoverAuto',()=>discoverAuto.run()).catch(err => console.error('[startup discoverAuto]', err));
 
 cron.schedule(WATCH_CRON, () => {
-  discoverWatched.run().catch(err => console.error('[scheduled discoverWatched]', err));
+  guarded('discoverWatched',()=>discoverWatched.run()).catch(err => console.error('[scheduled discoverWatched]', err));
 });
 
 cron.schedule(DISCOVER_CRON, () => {
-  discoverAuto.run().catch(err => console.error('[scheduled discoverAuto]', err));
+  guarded('discoverAuto',()=>discoverAuto.run()).catch(err => console.error('[scheduled discoverAuto]', err));
 });
 
 repairJobDetails().catch(err=>console.error('[startup jobDetails]',err));
 cron.schedule(DETAILS_CRON,()=>repairJobDetails().catch(err=>console.error('[scheduled jobDetails]',err)));
+
+guarded('candidateRetry',retryCandidates).catch(err=>console.error('[startup candidateRetry]',err));
+cron.schedule(process.env.CANDIDATE_RETRY_CRON||'*/5 * * * *',()=>guarded('candidateRetry',retryCandidates).catch(err=>console.error('[scheduled candidateRetry]',err)));
 
 // Keep the process alive — this file itself IS the "24/7" part.
 process.stdin.resume();

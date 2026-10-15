@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const zaScope=require('./zaJobScope');
 const jobDetails=require('./jobDetails');
+const candidateQueue=require('./candidateQueue');
 /**
  * discoverAuto.js - Autonomous Job Discovery Worker
  * Queries ALL enabled job sources for each user
@@ -917,6 +918,26 @@ async function saveMatches(userId, matches, override) {
     return 0;
   }
 
+  const matchRow=job=>({
+    job_seeker_id: userId,
+    job_source_id: job.job_source_id || null,
+    job_title: job.title,
+    company_name: job.company,
+    // The real hiring company for the UI to display. Null when neither the feed
+    // nor the posting page named a real company (UI then falls back gracefully).
+    ...job._details,
+    location: job.location,
+    job_url: job.url,
+    salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,
+    match_score: parseInt(job.match_score) || 0,
+    status: job.skip_reason ? 'skipped' : 'pending', // job_matches_status_check allows: pending, approved, rejected, applied, failed, needs_manual_action, seeker_paused, skipped
+    skip_reason: job.skip_reason || null,
+    discovered_at: new Date().toISOString(),
+    match_reason: `Matched from ${job.source}`,
+    is_custom_source: false,
+    user_marked_applied: false
+  });
+
   // Resolve the REAL employer for each match. Adzuna/RemoteOK already carry it
   // in job.company; Jobmail only has the "Via Jobmail" placeholder, so for those
   // we read the hiring company off the posting's detail page. A placeholder
@@ -932,10 +953,10 @@ async function saveMatches(userId, matches, override) {
   }
 
   // Do not publish a feed summary or a failed/partial advert as a match.
-  // It has not been saved/deduplicated, so a later discovery run can retry it.
+  // Preserve it in a worker-only queue so retry does not depend on rediscovery.
   const readyMatches=matches.filter(job=>jobDetails.canPublishJobDetails(job._details,job.title));
   const deferred=matches.length-readyMatches.length;
-  if(deferred)console.log(`  Deferred ${deferred} advert(s): full employer/role/requirements not available yet`);
+  if(deferred)await candidateQueue.deferCandidates(sb,matches.filter(job=>!jobDetails.canPublishJobDetails(job._details,job.title)).map(matchRow));
   matches=readyMatches;
   if(!matches.length)return 0;
 
@@ -967,25 +988,7 @@ async function saveMatches(userId, matches, override) {
   matches = dedupedMatches;
   if (matches.length === 0) { console.log(`  No new (non-duplicate) matches to save for user ${userId}`); return 0; }
 
-  const rows = matches.map(job => ({
-    job_seeker_id: userId,
-    job_source_id: job.job_source_id || null,
-    job_title: job.title,
-    company_name: job.company,
-    // The real hiring company for the UI to display. Null when neither the feed
-    // nor the posting page named a real company (UI then falls back gracefully).
-    ...job._details,
-    location: job.location,
-    job_url: job.url,
-    salary_text: job.salary_min && job.salary_max ? `R${job.salary_min}-${job.salary_max}` : null,
-    match_score: parseInt(job.match_score) || 0,
-    status: job.skip_reason ? 'skipped' : 'pending', // job_matches_status_check allows: pending, approved, rejected, applied, failed, needs_manual_action, seeker_paused, skipped
-    skip_reason: job.skip_reason || null,
-    discovered_at: new Date().toISOString(),
-    match_reason: `Matched from ${job.source}`,
-    is_custom_source: false,
-    user_marked_applied: false
-  }));
+  const rows = matches.map(matchRow);
 
   // UNIQUE (job_seeker_id, job_url) — same URL for the same seeker is a duplicate; skip
   const { data, error } = await sb

@@ -2,6 +2,6 @@
   "$schema": "https://railway.app/railway.schema.json",
   "deploy": {
     "buildCommand": "npm ci && npx playwright install chromium --with-deps",
-    "startCommand": "node index.js"
+    "startCommand": "node browserHealthcheck.js; node index.js"
   }
 }

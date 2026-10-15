@@ -18,21 +18,22 @@ function privateText(value){
 }
 function hasSections(text){return /(?:requirements|qualifications|minimum criteria|minimum education|experience required|key responsibilities|duties|closing date|competencies)/i.test(text);}
 function limitedDescription(text){return !text || /(?:…|\.\.\.)\s*$/.test(text) || (text.length<800&&!hasSections(text));}
-function browserEngine(){try{const e=require('playwright-extra');return e.chromium;}catch{return require('playwright').chromium;}}
+const jobBrowser=require('./jobBrowser');
 const CAPTURE_VERSION=2;
 const cache=new Map();
 const pendingCaptures=new Map();
+let captureTail=Promise.resolve();
 async function captureJobDetails(url,options={}){
  const key=detailCacheKey(url);if(pendingCaptures.has(key))return pendingCaptures.get(key);
- const task=captureJobDetailsInternal(url,options);pendingCaptures.set(key,task);
+ const task=captureTail.catch(()=>{}).then(()=>captureJobDetailsInternal(url,options));captureTail=task.catch(()=>{});pendingCaptures.set(key,task);
  try{return await task;}finally{pendingCaptures.delete(key);}
 }
 async function captureJobDetailsInternal(url,{browser=null,title='',employer=''}={}){
- const cacheKey=detailCacheKey(url);const prior=cache.get(cacheKey);if(prior&&Date.now()-prior.at<15*60*1000)return prior.value;
- let owned=false,page=null;const seen=new Set();let best={description:null,status:'unavailable',employer:null};
+ const cacheKey=detailCacheKey(url);const prior=cache.get(cacheKey);if(prior&&Date.now()-prior.at<(prior.value.status==='captured'?15*60*1000:60*1000))return prior.value;
+ let page=null;const seen=new Set();let best={description:null,status:'unavailable',employer:null};
  try{
   const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol))return best;
-  if(!browser){browser=await browserEngine().launch({headless:true,args:['--no-sandbox']});owned=true;}
+  if(!browser)browser=await jobBrowser.getDetailsBrowser();
   page=await browser.newPage();
   for(let hop=0;hop<3;hop++){
    if(seen.has(url))break;seen.add(url);
@@ -113,8 +114,8 @@ async function captureJobDetailsInternal(url,{browser=null,title='',employer=''}
    }
    const next=data.links.find(l=>!seen.has(l.url));if(!next)break;url=next.url;
   }
- }catch(error){console.warn('[jobDetails] Full advert retrieval unavailable:',error.name||'Error');}
- finally{if(page)await page.close().catch(()=>{});if(owned&&browser)await browser.close().catch(()=>{});}
+ }catch(error){best.errorCode=/Chromium|Browser startup|browserType.launch/i.test(String(error.message))?'browser_unavailable':'retrieval_failed';console.warn('[jobDetails] Full advert retrieval unavailable: '+jobBrowser.diagnostic(error));}
+ finally{if(page)await page.close().catch(()=>{});}
  if(cache.size>500)cache.clear();cache.set(cacheKey,{at:Date.now(),value:best});return best;
 }
 // Shared by autonomous feeds and watched-page discovery. A shorter failed
@@ -133,7 +134,7 @@ function storedJobDetails(result={},fallbackDescription='',fallbackEmployer=''){
   job_description_checked_at:new Date().toISOString(),job_description_capture_version:CAPTURE_VERSION};
 }
 // Forward-only publication gate. Retrieval failure is not a usable match:
-// rediscovery can retry it, but an applicant must never get a title-only page.
+// the private candidate queue retries it without publishing a title-only page.
 // Salary is deliberately optional: a publisher may legitimately omit it.
 function canPublishJobDetails(details={},title=''){
  const text=String(details.job_description||'').trim();

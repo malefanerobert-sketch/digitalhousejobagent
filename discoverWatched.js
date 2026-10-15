@@ -1,19 +1,8 @@
 const zaScope=require('./zaJobScope');
 const jobDetails=require('./jobDetails');
+const candidateQueue=require('./candidateQueue');
+const {launchJobBrowser}=require('./jobBrowser');
 require('dotenv').config();
-// Stealth-wrapped chromium (see apply.js for the full rationale) — this file
-// also drives a real browser against arbitrary third-party pages, so it
-// should get the same anti-detection benefit, with the same safe fallback.
-let chromium;
-try {
-  const extra = require('playwright-extra');
-  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-  extra.chromium.use(StealthPlugin());
-  chromium = extra.chromium;
-} catch (err) {
-  console.warn('[discoverWatched] stealth browser unavailable, falling back to plain Playwright:', err.message);
-  chromium = require('playwright').chromium;
-}
 const supabase = require('./supabaseClient');
 const aiMatch = require('./aiMatch');
 const jobFit = require('./jobFit');
@@ -441,12 +430,13 @@ async function run() {
   if (oErr) console.warn('[discoverWatched] could not load opt-outs, continuing without them:', oErr.message);
   const optedOut = new Set((optOuts || []).map(o => `${o.job_seeker_id}|${o.job_custom_source_id}`));
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchJobBrowser();
   if(process.env.REPAIR_EXISTING_JOB_DETAILS==='true')await jobDetails.refreshSavedDescriptions(supabase,{browser,limit:8});
   // Caches the real employer per posting URL for this run, so a detail-page
   // lookup happens at most once per URL even if several seekers match it.
   const employerCache = new Map();
 
+  try{
   for (const source of sources) {
     console.log(`[discoverWatched] scanning global company: "${source.company_name}" (${source.career_page_url})`);
 
@@ -624,13 +614,7 @@ async function run() {
           employerCache.set(absoluteUrl, detail);
         }
         const savedDetails=jobDetails.storedJobDetails(detail,job.description||'',job.company||'');
-        if(!jobDetails.canPublishJobDetails(savedDetails,job.title)){
-          console.log('[discoverWatched] Deferred incomplete advert; will retry if rediscovered');
-          continue;
-        }
-
-
-        const { error: insErr } = await supabase.from('job_matches').insert({
+        const matchRow={
           job_seeker_id: seeker.id,
           job_source_id: null,
           job_custom_source_id: source.id,
@@ -647,7 +631,12 @@ async function run() {
           status: skipReason ? 'skipped' : 'pending',
           skip_reason: skipReason,
           is_custom_source: true
-        });
+        };
+        if(!jobDetails.canPublishJobDetails(savedDetails,job.title)){
+          await candidateQueue.deferCandidates(supabase,[matchRow]);
+          continue;
+        }
+        const { error: insErr } = await supabase.from('job_matches').insert(matchRow);
 
         if (insErr) console.error(`[discoverWatched]  ✖ insert failed for ${seeker.full_name}:`, insErr.message);
         else console.log(`[discoverWatched]  ✔ new match: "${job.title}" @ ${source.company_name} for ${seeker.full_name}`);
@@ -658,7 +647,7 @@ async function run() {
     await supabase.from('job_custom_sources').update({ last_checked_at: new Date().toISOString() }).eq('id', source.id);
   }
 
-  await browser.close();
+  }finally{await browser.close().catch(()=>{});}
   console.log('[discoverWatched] run complete');
 }
 
