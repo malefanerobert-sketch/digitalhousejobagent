@@ -114,6 +114,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
   .topbar{flex-wrap:wrap;gap:10px;padding:14px 16px}
   .theme-toggle-btn span{display:none}
 }
+.support-account-link{display:inline-flex;flex-direction:column;gap:3px;margin-top:8px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--accent);text-decoration:none;font-weight:700;font-size:12px}.support-account-link small{color:var(--muted);font-weight:400}.support-account-link:hover{border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -611,14 +612,17 @@ async function signOut(){
 async function enterApp(){
   $('#authWrap').classList.add('hidden');
   $('#app').classList.remove('hidden');
-  // RLS itself is the real gatekeeper here — a non-admin account simply
-  // gets zero rows back on this query, not an error, since the SELECT
-  // policy only matches rows when auth.uid() is in dispatch_admins.
-  const {data, error} = await sb.from('job_seekers').select('*').limit(1);
-  if(error || !data || !data.length){
-    $('#mainBox').classList.add('hidden');
-    $('#deniedBox').classList.remove('hidden');
-    return;
+  // Check actual staff membership, not the presence of a readable seeker row:
+  // regular users can legitimately read their own profile under RLS.
+  const {data:{session}}=await sb.auth.getSession();
+  const {data,error}=session?await sb.from('dispatch_admins').select('user_id').eq('user_id',session.user.id).maybeSingle():{data:null,error:null};
+  if(error||!data){
+    $('#mainBox').classList.add('hidden');$('#deniedBox').classList.remove('hidden');return;
+  }
+  $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
+  const supportReturn=new URLSearchParams(location.search).get('support');
+  if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
+    const url=new URL('index.html',location.href);url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -1925,7 +1929,8 @@ function renderAccounts(){
     return '<div class="row">'+
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
-        '<div class="sub">'+esc(a.dedicated_email||'')+'</div></div>'+
+        '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
+        '<a class="support-account-link" href="index.html?support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+

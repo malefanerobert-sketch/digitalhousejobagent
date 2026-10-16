@@ -415,6 +415,10 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   #sidebar{transform:none!important}
 }
 
+.support-banner{border:1px solid var(--accent);border-radius:12px;padding:13px 15px;margin-bottom:18px;background:var(--panel);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.support-banner .sub2{margin-top:4px}
+#supportGate{max-width:600px;margin:12vh auto;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 </style>
 </head>
 <body>
@@ -495,6 +499,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
   </div>
 </div>
 
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
   <div class="shell">
@@ -524,6 +529,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
         <div class="topbar-right"></div>
       </div>
 
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -914,6 +920,7 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 
 <div id="toasts"></div>
 
+<script src="supportAccess.js"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -929,21 +936,27 @@ const SUPABASE_ANON_KEY = 'sb_publishable_QBseann9rrODgfZP9V0oXg_u9brFEVh';
    (survives closing the browser); when unchecked, it's written to
    sessionStorage only (cleared once the tab/browser closes). The flag
    itself always lives in localStorage so it persists across page loads. */
+const SUPPORT_REQUESTED=new URLSearchParams(location.search).has('support');
+const SUPPORT_TARGET=new URLSearchParams(location.search).get('support')||'';
+let supportContext=null;
+let supportAccessEpoch=0;
 const REMEMBER_KEY = 'dispatchRemember';
 function getRemember(){ try{ return localStorage.getItem(REMEMBER_KEY) !== '0'; }catch(e){ return true; } }
 function setRemember(v){ try{ localStorage.setItem(REMEMBER_KEY, v ? '1' : '0'); }catch(e){} }
 const authStorage = {
-  getItem: (key) => { try{ return (getRemember() ? localStorage : sessionStorage).getItem(key); }catch(e){ return null; } },
+  getItem: (key) => { try{ return SUPPORT_REQUESTED?(localStorage.getItem(key)||sessionStorage.getItem(key)):(getRemember() ? localStorage : sessionStorage).getItem(key); }catch(e){ return null; } },
   setItem: (key, value) => { try{
-      if(getRemember()){ localStorage.setItem(key, value); sessionStorage.removeItem(key); }
+      if(SUPPORT_REQUESTED?localStorage.getItem('jobagent_admin_remember')!=='false':getRemember()){ localStorage.setItem(key, value); sessionStorage.removeItem(key); }
       else { sessionStorage.setItem(key, value); localStorage.removeItem(key); }
     }catch(e){} },
   removeItem: (key) => { try{ localStorage.removeItem(key); sessionStorage.removeItem(key); }catch(e){} }
 };
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const baseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { storage: authStorage, persistSession: true, autoRefreshToken: true }
 });
 
+// Fail closed if the support helper did not load; never fall back to the normal app.
+const sb=SUPPORT_REQUESTED&&window.JobAgentSupport?window.JobAgentSupport.readOnly(baseClient):baseClient;
 let currentUser=null, currentSeeker=null;
 let matches=[], applications=[], documents=[];
 let state={mQ:'',mLoc:'all',view:'dashboard',selected:new Set()};
@@ -1112,12 +1125,14 @@ async function doForgot(){
 
 let resetSessionReady=false;
 sb.auth.onAuthStateChange((event, session)=>{
-  if(event==='PASSWORD_RECOVERY' || (event==='SIGNED_IN' && session && window.location.hash.includes('type=recovery'))){
+  if(SUPPORT_REQUESTED&&session&&currentUser&&session.user.id!==currentUser.id){showSupportFailure('The staff session changed. Reopen this account through admin.');return;}
+  if(SUPPORT_REQUESTED&&event==='SIGNED_OUT'){showSupportFailure('Staff session ended. Sign in through admin to continue.');return;}
+  if(!SUPPORT_REQUESTED&&(event==='PASSWORD_RECOVERY' || (event==='SIGNED_IN' && session && window.location.hash.includes('type=recovery')))){
     resetSessionReady=true;
     showAuth('newpass');
   }
 });
-if(window.location.hash.includes('type=recovery')){ showAuth('newpass'); }
+if(!SUPPORT_REQUESTED&&window.location.hash.includes('type=recovery')){ showAuth('newpass'); }
 
 async function doNewPass(){
   const errorEl=$('#npErr'); errorEl.textContent='';
@@ -1141,6 +1156,7 @@ async function doNewPass(){
 
 async function signOut(){
   stopMatchLiveRefresh();
+  if(SUPPORT_REQUESTED){await sb.auth.signOut();showSupportFailure('Staff session ended. Return to admin to sign in.');return;}
   await sb.auth.signOut();
   currentUser=null; currentSeeker=null;
   $('#app').classList.add('hidden');
@@ -1149,18 +1165,41 @@ async function signOut(){
 }
 
 /* ================= APP ENTRY ================= */
+function showSupportFailure(message){
+  supportAccessEpoch++;
+  stopMatchLiveRefresh();currentSeeker=null;currentUser=null;supportContext=null;matches=[];applications=[];documents=[];
+  $('#app').classList.add('hidden');$('#authWrap').classList.add('hidden');$('#supportGate').classList.remove('hidden');
+  ['#matchGrid','#appList','#docList','#helpThread','#actList'].forEach(selector=>{$(selector).innerHTML='';});
+  PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
+  $('#staffSupportName').textContent='';
+  $('#supportGateMessage').textContent=message;
+  const url=new URL('admin.html',location.href);if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  $('#supportAdminLink').href=url.href;
+}
 async function enterApp(user){
   currentUser=user;
-  $('#authWrap').classList.add('hidden');
-  $('#app').classList.remove('hidden');
-  await refreshAll();
-  startMatchLiveRefresh();
+  if(SUPPORT_REQUESTED){
+    const supportRequest=++supportAccessEpoch;
+    if(!window.JobAgentSupport||!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link is invalid. Open the account from the admin app.');return;}
+    try{
+      const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
+      if(supportRequest!==supportAccessEpoch||currentUser?.id!==user.id)return;
+      if(error)throw error;
+      if(!data?.read_only||data.profile?.id!==SUPPORT_TARGET||data.staff_user_id!==user.id)throw new Error('Staff access was not confirmed');
+      supportContext=data;document.body.classList.add('staff-support');state.view='matches';
+      $('#staffSupportName').textContent='Viewing '+(data.profile.full_name||data.profile.dedicated_email||'user account');
+      $('#staffSupportBanner').classList.remove('hidden');window.JobAgentSupport.installUI();
+    }catch(error){if(supportRequest!==supportAccessEpoch)return;showSupportFailure(error.message||'Authorized staff access is required. Sign in through admin.');return;}
+  }
+  $('#supportGate').classList.add('hidden');$('#authWrap').classList.add('hidden');$('#app').classList.remove('hidden');
+  await refreshAll();if(currentSeeker)startMatchLiveRefresh();
 }
 
 async function refreshAll(){
   $('#agentDot').className='dot busy';
   $('#agentText').textContent='checking…';
   await loadProfile();
+  if(SUPPORT_REQUESTED&&!currentSeeker)return;
   await loadMatches();
   await loadApplications();
   await loadDocuments();
@@ -1392,6 +1431,7 @@ function pfGetVal(id, kind){
 }
 
 async function loadProfile(){
+  const profileEpoch=supportAccessEpoch;
   // Reset every simple field
   PF_FIELDS.forEach(([id,,kind]) => pfSetVal(id, null, kind));
   renderLocMenu([]);
@@ -1401,12 +1441,22 @@ async function loadProfile(){
   $('#pfSaveStatus').textContent = '';
   currentSeeker = null;
   // Pre-fill email from auth on a brand-new profile
-  $('#pfEmail').value = currentUser.email;
+  $('#pfEmail').value = SUPPORT_REQUESTED?'':currentUser.email;
   // Blank sub-tables
   emp = []; edu = []; refs = [];
   renderEmpList(); renderEduList(); renderRefList();
 
-  const {data} = await sb.from('job_seekers').select('*').eq('user_id', currentUser.id).maybeSingle();
+  let data;
+  if(SUPPORT_REQUESTED){
+    if(!supportContext){showSupportFailure('Authorized staff access is required.');return;}
+    if(supportContext.profile){data=supportContext.profile;supportContext.profile=null;}
+    else{
+      const response=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
+      if(profileEpoch!==supportAccessEpoch||!supportContext)return;
+      if(response.error||response.data?.profile?.id!==SUPPORT_TARGET){showSupportFailure(response.error?.message||'Staff access could not be refreshed');return;}
+      data=response.data.profile;
+    }
+  }else{const response=await sb.from('job_seekers').select('*').eq('user_id', currentUser.id).maybeSingle();data=response.data;}
   currentSeeker = data;
   if(!data) return;
   PF_FIELDS.forEach(([id, col, kind]) => pfSetVal(id, data[col], kind));
@@ -1420,6 +1470,7 @@ async function loadProfile(){
     sb.from('job_seeker_education').select('*').eq('job_seeker_id', data.id).order('sort_order'),
     sb.from('job_seeker_references').select('*').eq('job_seeker_id', data.id).order('sort_order'),
   ]);
+  if(SUPPORT_REQUESTED&&profileEpoch!==supportAccessEpoch)return;
   emp = e || []; edu = d || []; refs = r || [];
   renderEmpList(); renderEduList(); renderRefList();
 }
@@ -1429,6 +1480,7 @@ async function loadProfile(){
 // empty and tells the user exactly which ones. Everything else may be blank
 // and the profile still saves ("incomplete but saved").
 async function saveProfile(){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   const btn=$('#pfSaveBtn'); const statusEl=$('#pfSaveStatus');
   statusEl.textContent=''; statusEl.style.color='';
 
@@ -2135,6 +2187,7 @@ function updateBulkBar(){
 }
 
 async function bulkDelete(){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   const ids=[...state.selected];
   if(!ids.length) return;
   askConfirm('Delete '+ids.length+' selected '+(ids.length===1?'job':'jobs')+' permanently? This can\u2019t be undone.', async ()=>{
@@ -2331,6 +2384,7 @@ function renderDocuments(){
   ).join('');
 }
 async function addDoc(){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   if(!currentSeeker){ toast('⚠ Save your profile first','warn'); return; }
   const file=$('#docFile').files[0];
   if(!file){ toast('Choose a file first','warn'); return; }
@@ -2367,6 +2421,7 @@ function addBlock(kind){
   inp.value='';
 }
 async function addBlockRaw(kind, val){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   val = (val||'').trim();
   if(!val) return;
   if(!currentSeeker){ toast('⚠ Save your profile first','warn'); return; }
@@ -2382,6 +2437,7 @@ async function addBlockRaw(kind, val){
   if(kind==='companies' && typeof renderApplications==='function' && $('#attnList')) renderApplications();
 }
 async function removeBlock(kind, val){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   const field = kind==='companies' ? 'blocked_companies' : 'blocked_locations';
   const updated = (currentSeeker[field]||[]).filter(b=>b!==val);
   const {error} = await sb.from('job_seekers').update({[field]: updated}).eq('id', currentSeeker.id);
@@ -2420,18 +2476,18 @@ $('#blList').addEventListener('click', e=>{ const b=e.target.closest('button[dat
    Any card marked `.dismissable` with a data-card-id can be hidden by the
    user. Dismissals persist in localStorage per-browser, and a "Show hidden
    cards" link appears so nothing is ever lost permanently. */
-function dismissedCards(){ try{ return JSON.parse(localStorage.getItem('ja_dismissed_cards')||'[]'); }catch{ return []; } }
-function dismissCard(cardId){
+function dismissedCards(){ if(SUPPORT_REQUESTED)return [];try{ return JSON.parse(localStorage.getItem('ja_dismissed_cards')||'[]'); }catch{ return []; } }
+function dismissCard(cardId){ if(SUPPORT_REQUESTED)return;
   const d = new Set(dismissedCards()); d.add(cardId);
   localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
   applyDismissedCards();
 }
-function restoreCard(cardId){
+function restoreCard(cardId){ if(SUPPORT_REQUESTED)return;
   const d = new Set(dismissedCards()); d.delete(cardId);
   localStorage.setItem('ja_dismissed_cards', JSON.stringify([...d]));
   applyDismissedCards();
 }
-function restoreAllCards(){
+function restoreAllCards(){ if(SUPPORT_REQUESTED)return;
   localStorage.setItem('ja_dismissed_cards','[]');
   applyDismissedCards();
 }
@@ -2471,7 +2527,7 @@ async function loadHelpThread(){
   renderHelpThread();
   // Mark any unread admin replies as seen so the nav badge clears.
   const unread = helpMessages.filter(m => m.sender_type==='admin' && !m.read_by_user).map(m=>m.id);
-  if(unread.length){
+  if(unread.length&&!SUPPORT_REQUESTED){
     await sb.from('support_messages').update({read_by_user:true}).in('id', unread);
     helpMessages = helpMessages.map(m => unread.includes(m.id) ? {...m, read_by_user:true} : m);
     updateHelpBadge();
@@ -2504,6 +2560,7 @@ function renderHelpThread(){
 }
 
 async function deleteHelpMessage(id){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   if(!id) return;
   if(!confirm('Remove this message from your view? The support team keeps their own copy.')) return;
   // Soft-delete: only hides from this seeker's own thread. The admin's view
@@ -2522,6 +2579,7 @@ document.addEventListener('click', (e)=>{
 });
 
 async function sendHelpMessage(){
+  if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
   const ta = $('#helpInput'); const status = $('#helpStatus'); const btn = $('#helpSendBtn');
   const body = (ta?.value || '').trim();
   if(!body){ status.textContent = 'Write something first.'; return; }
@@ -2689,6 +2747,12 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // guard that session would win the race against showAuth('newpass') above
   // and drop the user straight into the dashboard instead of the "set a new
   // password" screen.
+  if(SUPPORT_REQUESTED){
+    $('#authWrap').classList.add('hidden');
+    if(!window.JobAgentSupport||!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link is invalid. Open it from admin.');return;}
+    try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
+    return;
+  }
   if(window.location.hash.includes('type=recovery') || resetSessionReady) return;
   const {data:{session}} = await sb.auth.getSession();
   if(session){
