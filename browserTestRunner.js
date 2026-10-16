@@ -20,5 +20,5 @@ exports.run=async function({url,width,height=844,reduced=false,screenshot}){
   const dom=await page('Runtime.evaluate',{expression:'document.documentElement.outerHTML',returnByValue:true});
   if(screenshot){const image=await page('Page.captureScreenshot',{format:'png'});fs.writeFileSync(screenshot,Buffer.from(image.data,'base64'));}
   return {marker,dom:dom.result?.value||''};
- }finally{ws?.close();child.kill('SIGTERM');await new Promise(resolve=>{child.once('exit',resolve);setTimeout(resolve,1500);});fs.rmSync(profile,{recursive:true,force:true});}
+ }finally{ws?.close();child.kill('SIGTERM');await new Promise(resolve=>{child.once('exit',resolve);setTimeout(resolve,1500);});fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 };

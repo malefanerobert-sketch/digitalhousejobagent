@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="application-credits-v7">
+<meta name="jobagent-build" content="admin-documents-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -50,7 +50,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 .pill.red{background:rgba(255,107,107,.14);color:#ff8f8f}
 .modal{position:fixed;inset:0;background:rgba(5,8,18,.72);backdrop-filter:blur(4px);display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:1000;overflow-y:auto}
 .modal.hidden{display:none!important}
-.modal-card{background:linear-gradient(180deg,#121b38,#0f1730);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:720px;width:100%;max-height:calc(100vh - 80px);overflow-y:auto}
+.modal-card{min-width:0;background:linear-gradient(180deg,#121b38,#0f1730);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:720px;width:100%;max-height:calc(100vh - 80px);overflow-y:auto}
 .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
 .modal-head h3{font-size:16px;font-weight:800;margin:0}
 .x-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:0;line-height:1}
@@ -116,6 +116,20 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
   .theme-toggle-btn span{display:none}
 }
 .support-account-link{display:inline-flex;flex-direction:column;gap:3px;margin-top:8px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--accent);text-decoration:none;font-weight:700;font-size:12px}.support-account-link small{color:var(--muted);font-weight:400}.support-account-link:hover{border-color:var(--accent)}
+.application-documents{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:14px;margin-bottom:14px}
+.application-documents h4{font-size:15px;margin-bottom:6px}.application-documents>.sub{margin-bottom:10px}
+.application-file-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding:11px 0}
+.application-file-name{min-width:0;flex:1 1 180px;overflow-wrap:anywhere}.application-file-name b{font-size:14px}.application-file-name .sub{margin-top:4px;font-size:14px}
+.application-file-actions{display:flex;gap:7px;flex-wrap:wrap}.application-file-error{font-size:14px;color:#ffad91;overflow-wrap:anywhere;flex:1 1 100%}
+.application-file-note{font-size:14px;margin:10px 0}.application-file-footer{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:12px}.application-file-footer .sub{font-size:14px;flex:1 1 180px}
+.application-documents>.sub{font-size:14px;line-height:1.5;color:var(--muted)}
+.application-file-actions .btn,.application-file-footer .btn{min-height:44px;font-size:14px;text-decoration:none}
+.application-documents .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.application-copy-value{min-width:0}
+@media(max-width:600px){
+ .application-copy-row{flex-wrap:wrap}
+ .application-copy-label{min-width:0!important;flex:1 1 100%}
+}
 </style>
 </head>
 <body>
@@ -268,7 +282,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · application-credits-v7</p>
+        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · admin-documents-v1</p>
         <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
         <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
         <div id="repAccountView" class="hidden">
@@ -460,7 +474,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
   <div class="modal-card">
     <div class="modal-head">
       <h3>▶ Apply on behalf of seeker</h3>
-      <button type="button" class="x-btn" onclick="closeApplyModal()" aria-label="Close">✕</button>
+      <button type="button" class="x-btn" onclick="closeApplyModal()" aria-label="Close">&times;</button>
     </div>
     <div id="applyBody"></div>
   </div>
@@ -606,6 +620,7 @@ async function doSignin(){
 }
 
 async function signOut(){
+  closeApplyModal();
   await sb.auth.signOut();
   $('#app').classList.add('hidden');
   $('#authWrap').classList.remove('hidden');
@@ -624,7 +639,7 @@ async function enterApp(){
   $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
   const supportReturn=new URLSearchParams(location.search).get('support');
   if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
-    const url=new URL('index.html',location.href);url.searchParams.set('v','application-credits-v7');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
+    const url=new URL('index.html',location.href);url.searchParams.set('v','admin-documents-v1');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -1048,7 +1063,7 @@ function reportLocalDay(value){
 }
 // Job-list payload deliberately excludes profiles, credentials and full descriptions.
 const REPORT_LIST_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email), application_log(notes, attempted_at)';
-const REPORT_DETAIL_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)';
+const REPORT_DETAIL_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, user_id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)';
 async function loadReport(){
   clearTimeout(reportFilterTimer);
   const request=(loadReport.request||0)+1;loadReport.request=request;
@@ -1213,17 +1228,86 @@ function renderReport(){
    company login credentials the agent uses (from job_custom_sources), and
    the seeker's profile fields with click-to-copy chips. Nothing is stored
    or sent — this is a read-only convenience surface. */
+/* Application files are fetched only for the opened review, never for the queue overview. */
+let applyDocumentsContext=null,applyDocumentsRequest=0;
+const APPLICATION_DOCUMENT_LABEL={id:'ID document',certificate:'Certificate',qualification:'Qualification',other:'Other document'};
+function applicationDocumentsActive(context,request){
+ return request===applyDocumentsRequest&&context===applyDocumentsContext&&context.reviewRequest===applyDetailRequest&&context.accountId===reportAccountId&&!$('#applyModal').classList.contains('hidden')&&$('#applyDocuments')?.dataset.seekerId===context.seekerId;
+}
+function applicationDocumentLocation(raw,userId,bucket){
+ if(!raw)return {error:'No file link saved'};
+ try{
+  const url=new URL(raw);if(url.protocol!=='https:'||url.username||url.password)return {error:'Unsupported file link'};
+  if(url.origin!==new URL(SUPABASE_URL).origin)return {external:url.href};
+  const match=url.pathname.match(/^\/storage\/v1\/object\/(?:sign|public|authenticated)\/(resumes|documents)\/(.+)$/);
+  if(!match||match[1]!==bucket)return {error:'Invalid private file location'};
+  const path=decodeURIComponent(match[2]),parts=path.split('/');
+  if(!userId||parts[0]!==userId||parts.some(part=>!part||part==='.'||part==='..'||part.includes('\\')))return {error:'File does not belong to this account'};
+  return {bucket,path};
+ }catch{return {error:'Invalid file link'};}
+}
+async function resolveApplicationDocument(item,context){
+ const location=applicationDocumentLocation(item.url,context.userId,item.bucket);
+ if(location.error)return {...item,error:location.error};
+ if(location.external)return {...item,openUrl:location.external,downloadUrl:location.external,external:true};
+ try{
+  const {data,error}=await sb.storage.from(location.bucket).createSignedUrl(location.path,3600);
+  if(error||!data?.signedUrl)throw Error('File unavailable');
+  const open=new URL(data.signedUrl);
+  if(open.protocol!=='https:'||open.origin!==new URL(SUPABASE_URL).origin)throw Error('Invalid signed link');
+  const download=new URL(open);download.searchParams.set('download',item.fileName||'document');
+  return {...item,openUrl:open.href,downloadUrl:download.href};
+ }catch{return {...item,error:'Could not open this file. Refresh links or ask the user to upload it again.'};}
+}
+function applicationDocumentRow(file){
+ const title=esc(file.label),name=esc(file.fileName||file.label);
+ const links=file.error?'<p class="application-file-error" role="status">'+esc(file.error)+'</p>':
+  '<div class="application-file-actions"><a class="btn btn-sm" href="'+esc(file.openUrl)+'" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open'+(file.external?' / download':'')+'</a>'+(!file.external?'<a class="btn btn-sm" href="'+esc(file.downloadUrl)+'" download="'+name+'" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Download</a>':'')+'</div>';
+ return '<div class="application-file-row"><div class="application-file-name"><b>'+title+'</b><div class="sub">'+name+'</div></div>'+links+'</div>';
+}
+async function loadApplyDocuments(context){
+ if(!context)return;
+ applyDocumentsContext=context;const request=++applyDocumentsRequest;
+ if(!applicationDocumentsActive(context,request))return;
+ $('#applyDocuments').innerHTML='<p role="status" class="sub">Loading this applicant’s documents…</p>';
+ let documents=[],documentError=false,total=null;
+ try{
+  for(let offset=0;;){
+   if(!applicationDocumentsActive(context,request))return;
+   const {data,error,count}=await sb.from('job_seeker_documents').select('id, job_seeker_id, doc_type, file_name, file_url, created_at',offset===0?{count:'exact'}:{}).eq('job_seeker_id',context.seekerId).order('created_at',{ascending:false}).order('id').range(offset,offset+99);
+   if(error)throw error;
+   const rows=data||[];
+   if(rows.some(row=>row.job_seeker_id!==context.seekerId))throw Error('Wrong applicant returned');
+   documents.push(...rows);offset+=rows.length;if(count!=null)total=count;
+   if(!rows.length||(total!=null&&offset>=total)||(total==null&&rows.length<100))break;
+  }
+ }catch{documents=[];documentError=true;}
+ if(!applicationDocumentsActive(context,request))return;
+ const files=[];
+ if(context.resumeUrl){let name='CV / resume';try{name=decodeURIComponent(new URL(context.resumeUrl).pathname.split('/').pop()).replace(/^resume-\d+-/,'')||name;}catch{}files.push({label:'CV / resume',fileName:name,url:context.resumeUrl,bucket:'resumes'});}
+ files.push(...documents.map(doc=>({label:APPLICATION_DOCUMENT_LABEL[doc.doc_type]||'Other document',fileName:doc.file_name||'Document',url:doc.file_url,bucket:'documents'})));
+ const resolved=await Promise.all(files.map(file=>resolveApplicationDocument(file,context)));
+ if(!applicationDocumentsActive(context,request))return;
+ $('#applyDocuments').innerHTML=(context.resumeUrl?'':'<p class="sub application-file-note">No CV uploaded.</p>')+
+  (resolved.length?resolved.map(applicationDocumentRow).join(''):'')+
+  (documentError?'<p role="alert" class="application-file-error">Supporting documents could not be loaded. Retry without closing this application.</p>':!documents.length?'<p class="sub application-file-note">No supporting documents uploaded.</p>':'')+
+  '<div class="application-file-footer"><span class="sub">Private file links expire after 1 hour. Refresh to renew them.</span><button type="button" class="btn btn-sm" data-refresh-application-documents>'+ (documentError?'Retry documents':'Refresh links')+'</button></div>';
+}
+
 async function openApplyOnBehalf(reportId){
   const row=reportRows.find(x=>x.id===reportId);
   if(!row){toast('Job not found — refresh this account and retry','err');return;}
   const request=++applyDetailRequest,accountId=reportAccountId;
+  applyDocumentsRequest++;applyDocumentsContext=null;
   const modal=document.getElementById('applyModal'),body=document.getElementById('applyBody');
   body.innerHTML='<p role="status">Loading this application’s profile and login details…</p>';modal.classList.remove('hidden');
   try{
     const {data,error}=await sb.from('job_matches').select(REPORT_DETAIL_SELECT).eq('id',reportId).is('admin_queue_deleted_at',null).single();
     if(request!==applyDetailRequest||accountId!==reportAccountId||modal.classList.contains('hidden'))return;
     if(error)throw error;if(!data)throw new Error('This job is no longer in the admin queue');
+    if(data.id!==reportId||data.job_seeker_id!==row.job_seeker_id)throw new Error('Application account did not match');
     renderApplyOnBehalf(data);
+    await loadApplyDocuments({reviewRequest:request,accountId,seekerId:data.job_seeker_id,userId:data.job_seekers?.user_id||null,resumeUrl:data.job_seekers?.resume_url||null});
   }catch(error){
     if(request!==applyDetailRequest||modal.classList.contains('hidden'))return;
     body.innerHTML='<p role="alert">Could not load application details: '+esc(error.message||'Connection error')+'</p><button class="btn" data-apply-report="'+esc(reportId)+'">Retry details</button>';
@@ -1289,10 +1373,10 @@ function renderApplyOnBehalf(r){
       '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:10px">👤 Seeker details — click any value to copy</div>'+
       (fields.length ? fields.map(([k,v])=>copyRow(k, String(v))).join('') : '<div class="sub">No profile fields saved for this seeker.</div>')+
       (seeker.bio ? '<div style="margin-top:10px"><div style="font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;margin-bottom:4px">Bio</div><div style="font-size:13px;line-height:1.5;white-space:pre-wrap;background:var(--panel);padding:8px 10px;border-radius:8px;cursor:pointer" title="Click to copy" onclick="copyText(this.textContent)">'+esc(seeker.bio)+'</div></div>' : '')+
-      (seeker.resume_url ? '<div style="margin-top:10px"><a class="btn btn-sm" href="'+esc(seeker.resume_url)+'" target="_blank" rel="noopener">📄 Download CV / resume</a></div>' : '<div style="margin-top:10px;font-size:12.5px;color:var(--muted)">No CV uploaded — check whether the employer needs one before applying.</div>')+
     '</div>';
 
-  document.getElementById('applyBody').innerHTML = header + credsBlock + seekerBlock + adminOutcomeForm(r);
+  const documentsBlock='<section class="application-documents" aria-labelledby="applicationDocumentsTitle"><h4 id="applicationDocumentsTitle">📎 Applicant documents</h4><p class="sub">CV and supporting files for '+esc(seeker.full_name||seeker.dedicated_email||'this applicant')+'. Only attach documents requested by the employer.</p><div id="applyDocuments" data-seeker-id="'+esc(r.job_seeker_id)+'"><p class="sub" role="status">Loading documents…</p></div></section>';
+  document.getElementById('applyBody').innerHTML = header + documentsBlock + credsBlock + seekerBlock + adminOutcomeForm(r);
   document.getElementById('applyModal').classList.remove('hidden');
 }
 
@@ -1356,9 +1440,9 @@ function copyRow(label, value, isSecret){
   if(!value) value = '';
   const sid = 'apv_'+Math.random().toString(36).slice(2,9);
   const shown = isSecret ? value.replace(/./g,'•') : value;
-  return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px">'+
-    '<div style="min-width:140px;color:var(--muted)">'+esc(label)+'</div>'+
-    '<div id="'+sid+'" data-raw="'+esc(value)+'" style="flex:1;padding:5px 9px;background:var(--panel);border-radius:6px;font-family:ui-monospace,monospace;word-break:break-word;cursor:pointer" title="Click to copy" onclick="copyText(this.dataset.raw)">'+esc(shown)+'</div>'+
+  return '<div class="application-copy-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px">'+
+    '<div class="application-copy-label" style="min-width:140px;color:var(--muted)">'+esc(label)+'</div>'+
+    '<div class="application-copy-value" id="'+sid+'" data-raw="'+esc(value)+'" style="flex:1;padding:5px 9px;background:var(--panel);border-radius:6px;font-family:ui-monospace,monospace;word-break:break-word;cursor:pointer" title="Click to copy" onclick="copyText(this.dataset.raw)">'+esc(shown)+'</div>'+
     (isSecret ? '<button type="button" class="btn btn-sm" style="padding:4px 8px" title="Show/hide" onclick="togglePeek(\''+sid+'\')">👁</button>' : '')+
     '<button type="button" class="btn btn-sm" style="padding:4px 8px" title="Copy" onclick="copyText(document.getElementById(\''+sid+'\').dataset.raw)">⧉</button>'+
   '</div>';
@@ -1388,7 +1472,7 @@ async function copyText(txt){
 }
 
 function closeApplyModal(){
-  applyDetailRequest++;
+  applyDetailRequest++;applyDocumentsRequest++;applyDocumentsContext=null;
   const body=document.getElementById('applyBody');if(body)body.innerHTML='';
   const m = document.getElementById('applyModal');
   if(m) m.classList.add('hidden');
@@ -1415,6 +1499,7 @@ document.addEventListener('click', (e)=>{
   if(e.target.closest('button[data-report-back]')){showReportAccounts();return;}
   const del=e.target.closest('button[data-delete-report]');
   if(del){deleteAdminQueueMatch(del.dataset.deleteReport,del);return;}
+  if(e.target.closest('button[data-refresh-application-documents]')){loadApplyDocuments(applyDocumentsContext);return;}
   const btn = e.target.closest('button[data-apply-report]');
   if(btn){ openApplyOnBehalf(btn.dataset.applyReport); return; }
   const sup = e.target.closest('button[data-support-thread]');
@@ -1932,7 +2017,7 @@ function renderAccounts(){
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
         '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
-        '<a class="support-account-link" href="index.html?v=application-credits-v7&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
+        '<a class="support-account-link" href="index.html?v=admin-documents-v1&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
