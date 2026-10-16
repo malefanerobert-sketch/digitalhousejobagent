@@ -1,7 +1,7 @@
 // Shared company Groq pool. Cooldowns are process-local, never a way to bypass organization quotas.
 // Uses built-in fetch (Node 18+); no extra dependencies.
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const SLOT_COUNT = 20;
+const SLOT_COUNT = 100;
 const clean = v => typeof v === 'string' ? v.trim().replace(/^bearer\s+/i, '').replace(/^["']|["']$/g, '').trim() : '';
 function durationMs(value) {
   const s = String(value || '').trim();

@@ -30,6 +30,11 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - name: Verify 100-slot admin and worker pool
+        run: |
+          node test-groq-admin-slots.js
+          node test-groq-pool.js
+
       # Explicit public asset allowlist: never upload worker code or credentials.
       - name: Prepare site directory
         run: |
@@ -38,7 +43,7 @@ jobs:
           mkdir -p _site
           cp index.html admin.html supportAccess.js _site/
           touch _site/.nojekyll
-          node -e 'require("fs").writeFileSync("_site/build.json", JSON.stringify({commit:process.env.GITHUB_SHA,version:"approval-fireworks-v7"})+"\n")'
+          node -e 'require("fs").writeFileSync("_site/build.json", JSON.stringify({commit:process.env.GITHUB_SHA,version:"groq-hundred-slots-v1"})+"\n")'
           node validatePagesBuild.js _site
 
       - name: Upload artifact

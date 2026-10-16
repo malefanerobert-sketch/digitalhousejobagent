@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="approval-fireworks-v7">
+<meta name="jobagent-build" content="groq-hundred-slots-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -62,6 +62,10 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 .field label{display:block;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);margin-bottom:5px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Keep 100 key slots reachable without pushing settings controls far below them. */
+#groqKeyRows{grid-template-columns:repeat(2,minmax(0,1fr));max-height:520px;overflow-y:auto;padding-right:6px;scrollbar-gutter:stable}
+#groqKeyRows .field,#groqKeyRows input{min-width:0}
+@media(max-width:600px){#groqKeyRows{grid-template-columns:minmax(0,1fr)}}
 #toasts{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:200}
 .toast{background:#141f40;border:1px solid var(--line);border-left:4px solid var(--accent2);padding:12px 16px;
   border-radius:10px;font-size:13.5px;font-weight:600;box-shadow:0 10px 26px rgba(0,0,0,.5)}
@@ -282,7 +286,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · approval-fireworks-v7</p>
+        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · groq-hundred-slots-v1</p>
         <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
         <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
         <div id="repAccountView" class="hidden">
@@ -411,7 +415,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         </div>
 
         <div class="card" style="margin-bottom:18px">
-          <h3 style="margin-bottom:6px;font-size:15px">Shared AI keys — 20-slot Groq vault</h3>
+          <h3 style="margin-bottom:6px;font-size:15px">Shared AI keys — 100-slot Groq vault</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
             DigitalHouse-owned AI keys power the Agent for every JobAgent user — match scoring, CV/cover letter/motivational
             letter drafting, reading a user's Watched pages, and applying on their behalf. Users never see or manage this
@@ -431,7 +435,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
             </div>
           </div>
           <div id="groqKeyVault" class="hidden" style="margin-bottom:16px">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Exactly 20 Groq key slots (K1–K20). Fill any number of slots. Every slot uses the same model selected below. The updated Railway worker rotates ready keys and skips keys that hit a limit.</p>
+            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Exactly 100 Groq key slots (K1–K100). Fill any number of slots. Every slot uses the same model selected below. The updated Railway worker rotates ready keys and skips keys that hit a limit.</p>
             <div id="groqKeyRows" class="row2"></div>
             <div class="field" style="margin-top:10px"><label>Fallback cooldown (seconds)</label><input id="setGroqCooldown" type="number" min="10" max="600" step="10" value="60"></div>
             <p style="color:var(--muted);font-size:12px">Provider retry timing takes priority. Keys in the same organization can share limits. These keys are saved to your database, not this browser; restrict dispatch_settings to authorized admins and the worker.</p>
@@ -439,7 +443,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           <div class="field">
             <label>Model</label>
             <select id="setModel"></select>
-            <div id="groqModelTools" class="hidden" style="margin-top:8px"><button type="button" class="btn btn-sm" id="refreshGroqModelsBtn" onclick="refreshGroqModels()">↻ Refresh Groq models</button><p id="groqModelStatus" style="color:var(--muted);font-size:12px;margin-top:6px">All twenty slots use the selected model. Refresh to check live model availability.</p></div>
+            <div id="groqModelTools" class="hidden" style="margin-top:8px"><button type="button" class="btn btn-sm" id="refreshGroqModelsBtn" onclick="refreshGroqModels()">↻ Refresh Groq models</button><p id="groqModelStatus" style="color:var(--muted);font-size:12px;margin-top:6px">All 100 slots use the selected model. Refresh to check live model availability.</p></div>
             <p style="color:var(--muted);font-size:12px;margin-top:6px">
               Used for match scoring and reading a user's Watched pages. Anthropic retires older snapshots
               periodically — if scoring or page-reading stops working, pick a newer model here.
@@ -447,7 +451,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <button class="btn btn-primary" id="setSaveBtn" onclick="saveSettings()">💾 Save</button>
           <p style="color:var(--muted);font-size:12px;margin-top:14px">
-            Settings are stored in <code>dispatch_settings</code>. For 20-key rotation, install migration_groq_twenty_slots.sql, updated <code>aiMatch.js</code>, and <code>groqKeyPool.js</code>, then redeploy the Railway worker. The admin page alone cannot rotate worker requests.</p>
+            Settings are stored in <code>dispatch_settings</code>. For 100-key rotation, install migration_groq_hundred_slots.sql, updated <code>aiMatch.js</code>, and <code>groqKeyPool.js</code>, then redeploy the Railway worker. The admin page alone cannot rotate worker requests.</p>
         </div>
         <div class="card">
           <h3 style="margin-bottom:6px;font-size:15px">Agent instructions</h3>
@@ -639,7 +643,7 @@ async function enterApp(){
   $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
   const supportReturn=new URLSearchParams(location.search).get('support');
   if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
-    const url=new URL('index.html',location.href);url.searchParams.set('v','approval-fireworks-v7');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
+    const url=new URL('index.html',location.href);url.searchParams.set('v','groq-hundred-slots-v1');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -1636,7 +1640,7 @@ const MODEL_OPTIONS = {
   ],
   none: []
 };
-const GROQ_SLOT_COUNT = 20;
+const GROQ_SLOT_COUNT = 100;
 function cleanGroqKey(value){ return String(value || '').trim().replace(/^bearer\s+/i,'').replace(/^["']|["']$/g,'').trim(); }
 function renderGroqSlots(keys){
   const padded=Array.from({length:GROQ_SLOT_COUNT},(_,i)=>cleanGroqKey(Array.isArray(keys)?keys[i]:''));
@@ -2017,7 +2021,7 @@ function renderAccounts(){
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
         '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
-        '<a class="support-account-link" href="index.html?v=approval-fireworks-v7&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
+        '<a class="support-account-link" href="index.html?v=groq-hundred-slots-v1&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
