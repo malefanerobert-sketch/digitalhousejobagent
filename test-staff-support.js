@@ -1,6 +1,6 @@
 'use strict';
-const fs=require('fs'),vm=require('vm'),cp=require('child_process'),assert=require('assert/strict');const root=__dirname;
-const input=fs.readFileSync(root+'/index.html','utf8'),admin=fs.readFileSync(root+'/admin.html','utf8');
+const fs=require('fs'),vm=require('vm'),cp=require('child_process'),assert=require('assert/strict');const root=__dirname,site=process.env.PUBLIC_SITE_DIR||root;
+const input=fs.readFileSync(site+'/index.html','utf8'),admin=fs.readFileSync(site+'/admin.html','utf8');
 for(const html of [input,admin])for(const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
 const TARGET='11111111-1111-4111-8111-111111111111',STAFF='22222222-2222-4222-8222-222222222222',OWNER='33333333-3333-4333-8333-333333333333';
 const setup=String.raw`
@@ -21,8 +21,8 @@ window.supabase={createClient:(url,key,options)=>{window.storageRead=options.aut
 const tests=String.raw`
 (async()=>{
  const check=(v,m)=>{if(!v)throw Error(m);},tick=()=>new Promise(r=>setTimeout(r,0));for(let i=0;i<30&&!currentSeeker&&document.querySelector('#supportGate').classList.contains('hidden');i++)await tick();
- if(['denied','anonymous','invalid'].includes(scenario)){
-  check(!document.querySelector('#supportGate').classList.contains('hidden'),'Unauthorized/invalid support link denied');check(document.querySelector('#app').classList.contains('hidden'),'No user app displayed');check(!calls.some(c=>c.table==='job_matches'),'No job data fetched before authorization');check(!currentSeeker,'No target account loaded');check(document.querySelector('#authWrap').classList.contains('hidden'),'Never ask for target user password');
+ if(['denied','anonymous','invalid','missing-helper'].includes(scenario)){
+  check(!document.querySelector('#supportGate').classList.contains('hidden'),'Unauthorized/invalid support link denied');check(document.querySelector('#app').classList.contains('hidden'),'No user app displayed');check(!calls.some(c=>c.table==='job_matches'),'No job data fetched before authorization');check(!currentSeeker,'No target account loaded');if(scenario==='missing-helper')check(document.querySelector('#supportGateMessage').textContent.includes('component did not load'),'Missing asset error is not mislabeled invalid account link');check(document.querySelector('#authWrap').classList.contains('hidden'),'Never ask for target user password');
  }else if(scenario==='normal'){
   check(currentUser.id===ownerId&&currentSeeker.id===targetId,'Normal user identity unchanged');check(!SUPPORT_REQUESTED&&!calls.some(c=>c.rpc==='admin_open_user_support'),'Normal flow does not call staff RPC');check(document.querySelector('#staffSupportBanner').classList.contains('hidden'),'No staff banner for normal user');await sb.from('job_seekers').update({full_name:'Own-profile fixture update'}).eq('id',targetId);check(writeCalls.length===1,'Normal own-account client not read-only');
  }else{
@@ -42,22 +42,22 @@ const tests=String.raw`
  const marker=document.createElement('pre');marker.id='test-result';marker.hidden=true;marker.textContent='PASS '+scenario+' authorized routing; correct account; no impersonation/password; session reuse; read-only controls/transport; real job viewer/profile/docs/contact; no read receipts; scoped refresh; denial/expiry; normal flow';document.body.append(marker);
 })().catch(e=>{const marker=document.createElement('pre');marker.id='test-result';marker.textContent='FAIL '+e.message+' '+e.stack;document.body.append(marker);});
 `;
-let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');fixture=fixture.replace('<script src="supportAccess.js"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="supportAccess.js"></script>`);fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/fixture.html',fixture);
-for(const [scenario,width] of [['staff',1280],['staff-tab',390],['denied',390],['anonymous',1280],['invalid',1280],['expired',390],['switched',390],['normal',1280]]){
+let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');fixture=fixture.replace('<script src="supportAccess.js?v=staff-support-v2"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script>if(new URLSearchParams(location.search).get('scenario')!=='missing-helper')document.write('<script src="${site}/supportAccess.js?v=staff-support-v2"><\\/script>');</script>`);fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/fixture.html',fixture);
+for(const [scenario,width] of [['staff',1280],['staff-tab',390],['denied',390],['anonymous',1280],['invalid',1280],['missing-helper',1280],['expired',390],['switched',390],['normal',1280]]){
  const id=scenario==='invalid'?'bad-id':TARGET;const q=scenario==='normal'?`scenario=normal`:`support=${id}&scenario=${scenario}`;
  const r=cp.spawnSync(process.env.CHROMIUM_PATH||'/usr/local/bin/chromium',['--headless','--no-sandbox','--disable-gpu','--no-proxy-server','--disable-background-networking','--allow-file-access-from-files','--virtual-time-budget=4000',`--window-size=${width},900`,`--screenshot=${root}/${scenario}-${width}.png`,'--dump-dom',`file://${root}/fixture.html?${q}`],{encoding:'utf8',timeout:30000,maxBuffer:8*1024*1024});fs.writeFileSync(root+'/'+scenario+'.dom.html',r.stdout||'');const marker=(r.stdout||'').match(/<pre id="test-result"[^>]*>([^<]*)<\/pre>/)?.[1];assert(marker?.startsWith('PASS'),marker||r.error?.message||'Browser did not finish');console.log(marker);
 }
 // Render actual account rows to verify the staff link is scoped, credential-free
 // and same-tab (required for sessionStorage-only staff sessions).
 const fn=admin.slice(admin.indexOf('function renderAccounts(){'),admin.indexOf("  el.querySelectorAll('[data-toggle-details]",admin.indexOf('function renderAccounts(){')))+ '\n}';
-let rendered='';const list={set innerHTML(v){rendered=v;}};vm.runInNewContext(fn+';renderAccounts();',{accounts:[{id:TARGET,full_name:'Robert',dedicated_email:'r@example.test'}],supportUnreadBy:{},$:s=>s==='#acctSearch'?{value:''}:list,esc:s=>String(s||''),encodeURIComponent});assert(rendered.includes('index.html?support='+TARGET));assert(!rendered.includes('access_token')&&!rendered.includes('target="_blank"'));console.log('PASS admin account card contains same-tab, scoped, token-free Open user app link');
+let rendered='';const list={set innerHTML(v){rendered=v;}};vm.runInNewContext(fn+';renderAccounts();',{accounts:[{id:TARGET,full_name:'Robert',dedicated_email:'r@example.test'}],supportUnreadBy:{},$:s=>s==='#acctSearch'?{value:''}:list,esc:s=>String(s||''),encodeURIComponent});assert(rendered.includes('index.html?v=staff-support-v2&amp;support='+TARGET));assert(!rendered.includes('access_token')&&!rendered.includes('target="_blank"'));console.log('PASS admin account card contains same-tab, scoped, token-free Open user app link');
 (async()=>{
  const entry=admin.slice(admin.indexOf('async function enterApp(){'),admin.indexOf('\nfunction setTab('));
  for(const allowed of [false,true])for(const returning of [false,true]){
   const classes={},loads=[],redirects=[];
   const elements={};const $=selector=>elements[selector]||(elements[selector]={classList:{add:name=>{classes[selector+':'+name]=true;},remove:name=>{classes[selector+':'+name]=false;}}});
   const ctx={$,URL,URLSearchParams,location:{href:'https://example.test/app/admin.html'+(returning?'?support='+TARGET:''),search:returning?'?support='+TARGET:'',replace:url=>redirects.push(url)},sb:{auth:{getSession:async()=>({data:{session:{user:{id:STAFF}}}})},from:table=>{assert.equal(table,'dispatch_admins');const q={select:()=>q,eq:()=>q,maybeSingle:async()=>({data:allowed?{user_id:STAFF}:null})};return q;}},loadAccounts:async()=>loads.push('accounts'),loadSettings:async()=>loads.push('settings'),loadSources:async()=>loads.push('sources'),loadCompanies:async()=>loads.push('companies')};
-  vm.createContext(ctx);vm.runInContext(entry,ctx);await ctx.enterApp();if(!allowed){assert.equal(loads.length,0);assert.equal(redirects.length,0);assert.equal(classes['#deniedBox:hidden'],false);}else if(returning){assert.equal(loads.length,0);assert(redirects[0].endsWith('index.html?support='+TARGET));}else assert.equal(loads.length,4);
+  vm.createContext(ctx);vm.runInContext(entry,ctx);await ctx.enterApp();if(!allowed){assert.equal(loads.length,0);assert.equal(redirects.length,0);assert.equal(classes['#deniedBox:hidden'],false);}else if(returning){assert.equal(loads.length,0);assert(new URL(redirects[0]).searchParams.get('support')===TARGET&&new URL(redirects[0]).searchParams.get('v')==='staff-support-v2');}else assert.equal(loads.length,4);
  }
  console.log('PASS admin gate checks membership, rejects ordinary profile owners, and resumes a scoped staff link only after authorization');
 })().catch(error=>{console.error(error);process.exitCode=1;});

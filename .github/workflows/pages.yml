@@ -1,4 +1,4 @@
-# Auto-deploy admin.html + index.html to GitHub Pages on every push to main.
+# Auto-deploy only the public frontend and its required assets on pushes to main.
 # Pages must be enabled in repo Settings → Pages → Source = GitHub Actions.
 name: Deploy to GitHub Pages
 
@@ -12,7 +12,7 @@ permissions:
   pages: write
   id-token: write
 
-# Only run one deploy at a time; cancel in-progress if a newer push arrives.
+# Serialize deploys. Newer releases must not be overwritten by older runs.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -30,13 +30,16 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # Only ship the two frontend HTML files — the Node worker files
-      # (apply.js, discoverAuto.js, etc.) stay in the repo but aren't
-      # served at the site URL.
+      # Explicit public asset allowlist: never upload worker code or credentials.
       - name: Prepare site directory
         run: |
+          set -euo pipefail
+          rm -rf _site
           mkdir -p _site
-          cp index.html admin.html _site/
+          cp index.html admin.html supportAccess.js _site/
+          touch _site/.nojekyll
+          node -e 'require("fs").writeFileSync("_site/build.json", JSON.stringify({commit:process.env.GITHUB_SHA,version:"staff-support-v2"})+"\n")'
+          node validatePagesBuild.js _site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -46,3 +49,22 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify published frontend assets
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          verify_dir=$(mktemp -d)
+          base="${PAGE_URL%/}"
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --location "$base/build.json?release=$GITHUB_SHA" -o "$verify_dir/build.json" && EXPECTED_PAGES_SHA="$GITHUB_SHA" node -e 'const b=require(process.argv[1]);if(b.commit!==process.env.EXPECTED_PAGES_SHA)process.exit(1)' "$verify_dir/build.json"; then
+              break
+            fi
+            sleep 5
+          done
+          for file in index.html admin.html supportAccess.js; do
+            curl --fail --silent --show-error --location --retry 3 "$base/$file?release=$GITHUB_SHA" -o "$verify_dir/$file"
+          done
+          touch "$verify_dir/.nojekyll"
+          EXPECTED_PAGES_SHA="$GITHUB_SHA" node validatePagesBuild.js "$verify_dir"
