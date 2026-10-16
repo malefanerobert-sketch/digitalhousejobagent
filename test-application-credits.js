@@ -48,12 +48,14 @@ const tests=String.raw`
   if(mode==='retry'){check(!document.querySelector('.token-burst'),'Idempotent retry does not show a second charge');}
   else{
    const effect=document.querySelector('.token-burst');check(!!effect,'Firework sparks rendered');
-   check(effect.textContent==='−1 token'&&effect.querySelector('.token-spend-label')&&!effect.querySelector('b,em'),'One small token phrase, without emoji or flames');
+   check(effect.textContent==='−1 tokenSuccessfully submitted'&&effect.querySelector('.token-spend-label')&&!effect.querySelector('b,em'),'Both small phrases, without emoji or flames');
    check(effect.querySelectorAll('i').length===20,'Two radial rings of small firework sparks');
    const style=getComputedStyle(effect),sparkStyle=getComputedStyle(effect.querySelector('i'));
    check(style.backgroundColor==='rgba(0, 0, 0, 0)'&&style.borderTopWidth==='0px'&&style.width==='0px','No visible badge, card or box');
    check(parseFloat(sparkStyle.width)===4&&parseFloat(sparkStyle.height)===9,'Slightly larger sparks rather than flame shapes');
-   const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(232, 120, 23)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
+   const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(255, 79, 0)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
+   const submitted=effect.querySelector('.token-submit-text'),ss=getComputedStyle(submitted);check(submitted.textContent==='Successfully submitted'&&ss.fontSize==='10px'&&ss.fontWeight==='400'&&ss.color==='rgb(255, 79, 0)','Small regular-weight volcano-orange success phrase');
+   if(!params.has('reduced')){const lr=label.getBoundingClientRect();check(lr.left>=0&&lr.right<=innerWidth,'Both floating phrases fit viewport');}
    if(!params.has('reduced'))check(ls.animationName==='token-spend-drift'&&ls.animationDuration==='8s','Token phrase drifts out slowly');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
    else check(sparkStyle.animationName==='token-firework'&&sparkStyle.animationDuration==='8s','Slow radial firework motion');
@@ -68,10 +70,10 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v4"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v5"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
-for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['success',390,true]]){
+for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['snapshot',320],['snapshot',390,true],['success',390,true]]){
  if(process.env.CREDIT_PREVIEW_ONLY&&mode!=='snapshot')continue;
  const label=mode+'-'+width+(reduced?'-reduced':'');
  const {marker,dom}=await require('./browserTestRunner').run({url:`file://${root}/credits-fixture.html?scenario=normal&creditMode=${mode}&viewportWidth=${width}${reduced?'&reduced=1':''}`,width,reduced,screenshot:root+'/credits-'+label+'.png'});
