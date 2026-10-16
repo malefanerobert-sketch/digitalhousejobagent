@@ -53,7 +53,7 @@ const tests=String.raw`
    const style=getComputedStyle(effect),sparkStyle=getComputedStyle(effect.querySelector('i'));
    check(style.backgroundColor==='rgba(0, 0, 0, 0)'&&style.borderTopWidth==='0px'&&style.width==='0px','No visible badge, card or box');
    check(parseFloat(sparkStyle.width)===4&&parseFloat(sparkStyle.height)===9,'Slightly larger sparks rather than flame shapes');
-   const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='14px'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
+   const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='11px'&&ls.fontWeight==='400'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
    if(!params.has('reduced'))check(ls.animationName==='token-spend-drift'&&ls.animationDuration==='8s','Token phrase drifts out slowly');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
    else check(sparkStyle.animationName==='token-firework'&&sparkStyle.animationDuration==='8s','Slow radial firework motion');
@@ -68,10 +68,11 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v2"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v3"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['success',390,true]]){
+ if(process.env.CREDIT_PREVIEW_ONLY&&mode!=='snapshot')continue;
  const label=mode+'-'+width+(reduced?'-reduced':'');
  const {marker,dom}=await require('./browserTestRunner').run({url:`file://${root}/credits-fixture.html?scenario=normal&creditMode=${mode}&viewportWidth=${width}${reduced?'&reduced=1':''}`,width,reduced,screenshot:root+'/credits-'+label+'.png'});
  fs.writeFileSync(root+'/credits-'+label+'.dom.html',dom);
