@@ -48,14 +48,16 @@ const tests=String.raw`
   if(mode==='retry'){check(!document.querySelector('.token-burst'),'Idempotent retry does not show a second charge');}
   else{
    const effect=document.querySelector('.token-burst');check(!!effect,'Firework sparks rendered');
-   check(effect.textContent===''&&!effect.querySelector('b,em'),'Sparks only: no token text, emoji or flames');
+   check(effect.textContent==='−1 token'&&effect.querySelector('.token-spend-label')&&!effect.querySelector('b,em'),'One small token phrase, without emoji or flames');
    check(effect.querySelectorAll('i').length===20,'Two radial rings of small firework sparks');
    const style=getComputedStyle(effect),sparkStyle=getComputedStyle(effect.querySelector('i'));
    check(style.backgroundColor==='rgba(0, 0, 0, 0)'&&style.borderTopWidth==='0px'&&style.width==='0px','No visible badge, card or box');
-   check(parseFloat(sparkStyle.width)<=3&&parseFloat(sparkStyle.height)<=7,'Small sparks rather than flame shapes');
+   check(parseFloat(sparkStyle.width)===4&&parseFloat(sparkStyle.height)===9,'Slightly larger sparks rather than flame shapes');
+   const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='14px'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
+   if(!params.has('reduced'))check(ls.animationName==='token-spend-drift'&&ls.animationDuration==='8s','Token phrase drifts out slowly');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
    else check(sparkStyle.animationName==='token-firework'&&sparkStyle.animationDuration==='8s','Slow radial firework motion');
-   if(mode!=='snapshot'){await wait(1600);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');await wait(3000);check(!!document.querySelector('.token-burst'),'Sparks remain beyond three seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Sparks removed after about eight seconds');}
+   if(mode!=='snapshot'){await wait(1600);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');await wait(3000);check(!!document.querySelector('.token-burst'),'Sparks remain beyond three seconds');if(!params.has('reduced'))check(parseFloat(getComputedStyle(label).opacity)>.5,'Token phrase remains readable beyond four seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Sparks removed after about eight seconds');}
 
   }
  }
@@ -66,7 +68,7 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=admin-documents-v1"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v2"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['success',390,true]]){
