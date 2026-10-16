@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="approval-fireworks-v3">
+<meta name="jobagent-build" content="approval-fireworks-v4">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -282,7 +282,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · approval-fireworks-v3</p>
+        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · approval-fireworks-v4</p>
         <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
         <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
         <div id="repAccountView" class="hidden">
@@ -639,7 +639,7 @@ async function enterApp(){
   $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
   const supportReturn=new URLSearchParams(location.search).get('support');
   if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
-    const url=new URL('index.html',location.href);url.searchParams.set('v','approval-fireworks-v3');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
+    const url=new URL('index.html',location.href);url.searchParams.set('v','approval-fireworks-v4');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -2017,7 +2017,7 @@ function renderAccounts(){
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
         '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
-        '<a class="support-account-link" href="index.html?v=approval-fireworks-v3&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
+        '<a class="support-account-link" href="index.html?v=approval-fireworks-v4&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
