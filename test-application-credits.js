@@ -26,7 +26,7 @@ const tests=String.raw`
  await loadCredits();setView('matches');
  const dock=document.querySelector('#creditDock');let button=document.querySelector('[data-action="apply"]');
  check(!!button,'Approval control exists');check(dock.textContent.includes(mode==='zero'?'0 tokens':mode==='retry'?'599 tokens':'600 tokens'),'Server wallet balance rendered');
- check(button.textContent.includes('1 token'),'Approval price is disclosed');
+ check(button.textContent.trim()==='Approve','Approve button has no play icon or token label');check(!button.title.includes('token'),'No token wording in approval tooltip');check(dock.tagName==='DIV'&&!dock.hasAttribute('onclick')&&!dock.hasAttribute('tabindex')&&dock.getAttribute('role')!=='button','Indicator is display-only, not clickable');check(!dock.querySelector('small')&&!dock.textContent.includes('approval'),'No explanatory text on indicator');check(!document.querySelector('#creditModal')&&!document.body.innerText.includes('does not guarantee an application'),'Token pop-up and its entire statement removed');
  check(dock.closest('#sidebar')&&dock.parentElement.classList.contains('side-foot'),'Token card is in sidebar footer');
  check(dock===dock.parentElement.firstElementChild&&dock.nextElementSibling.classList.contains('agent-pill'),'Token card is immediately above On watch and Sign out');
  check(!!(document.querySelector('#sidebar [data-view="help"]').compareDocumentPosition(dock)&Node.DOCUMENT_POSITION_FOLLOWING),'Token card follows Contact us');
@@ -53,13 +53,13 @@ const tests=String.raw`
   }
  }
  if(mode!=='snapshot'){
-  if(innerWidth<=920)openDrawer();dock.scrollIntoView({block:'center'});dock.click();check(!document.querySelector('#sidebar').classList.contains('open'),'Mobile drawer closes for token details');await wait(10);check(!document.querySelector('#creditModal').classList.contains('hidden'),'Token card opens balance details');check(document.querySelector('#creditModal').textContent.includes('600 free tokens')&&document.querySelector('#creditModal').textContent.includes('not available yet'),'Welcome grant and no payments yet explained');closeModal('creditModal');
+  if(innerWidth<=920)openDrawer();dock.scrollIntoView({block:'center'});const wasOpen=document.querySelector('#sidebar').classList.contains('open');dock.click();await wait(10);check(document.querySelector('#sidebar').classList.contains('open')===wasOpen,'Click on display-only balance has no effect');check(!document.querySelector('.modal:not(.hidden)'),'No modal opens from token indicator');
  }
- const out=document.createElement('pre');out.id='test-result';out.hidden=true;out.textContent='PASS '+mode+' '+innerWidth+': server balance, price, pending lock, no double charge, success/error/retry behavior, sparks and cleanup, token details, mobile layout';document.body.append(out);
+ const out=document.createElement('pre');out.id='test-result';out.hidden=true;out.textContent='PASS '+mode+' '+innerWidth+': server balance, plain Approve button, pending lock, no double charge, success/error/retry behavior, sparks and cleanup, compact display-only indicator, mobile layout';document.body.append(out);
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=application-credits-v4"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=application-credits-v5"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['success',390,true]]){

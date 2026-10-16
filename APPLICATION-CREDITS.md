@@ -1,7 +1,7 @@
 # Application credits — initial release
 
 ## User behavior
-- Gear card shows the authoritative token balance in the sidebar footer below Contact us and immediately above On watch and Sign out. On mobile it is inside the More/menu drawer; opening token details closes the drawer. It is not in Dashboard content or floating over matches.
+- Compact, non-clickable gear indicator shows only the authoritative token balance in the sidebar footer below Contact us and immediately above On watch and Sign out. On mobile it is inside the More/menu drawer. There is no token pop-up, explanatory copy or subtitle. The blue action reads only Approve, without a play icon or price label. It is not in Dashboard content or floating over matches.
 - One token is charged when an applicant successfully approves a job for the admin queue. Viewing and discovery remain free. Approval is not a confirmed application or job offer.
 - A larger fire-spark “−1 token used” effect appears only after a confirmed debit and remains for ~8 seconds before cleanup at 8.2 seconds; particles move slowly with linear timing. Reduced-motion users get a static label for the same duration.
 - Every auth identity receives 600 welcome tokens. Existing identities received the same one-time launch grant. Old requests are not charged retroactively.
@@ -21,8 +21,8 @@ Apply `migration_application_credits.sql` once via Supabase migrations.
 
 ## Verification
 - `test-credits-db.sql`: real PostgreSQL tests using temporary auth accounts and matches in a transaction; all fixtures rolled back. Covers signup, wallet writes denied, RLS/cross-account/anonymous rejection, duplicate requests, zero balance, blocked company, legacy jobs, direct-status bypass, profile saves and recreation.
-- `node test-application-credits.js`: actual HTML in offline Chromium, mocked network only; desktop/mobile, success/failure, in-flight duplicate click, retry, zero, spark removal, reduced motion, modal and viewport checks.
+- `node test-application-credits.js`: actual HTML in offline Chromium, mocked network only; desktop/mobile, success/failure, in-flight duplicate click, retry, zero, spark removal, reduced motion, display-only indicator, plain approval labels and viewport checks.
 - `node test-staff-support.js`: existing staff authorization/read-only suite plus target-wallet scoping.
 - `node test-lazy-queue.js`: admin queue regression.
 - `PUBLIC_SITE_DIR=/path/to/_site node test-application-credits.js` and staff suite validate the actual deploy bundle.
-- Pages build/public asset validator and postdeployment manifest checks retained. Release marker: `application-credits-v4`.
+- Pages build/public asset validator and postdeployment manifest checks retained. Release marker: `application-credits-v5`.
