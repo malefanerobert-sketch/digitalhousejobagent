@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="staff-support-v2">
+<meta name="jobagent-build" content="application-credits-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent — your job agent working even while you sleep</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
@@ -420,6 +420,20 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 .support-banner .sub2{margin-top:4px}
 #supportGate{max-width:600px;margin:12vh auto;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
+/* Credit balance stays above mobile navigation and never blocks card actions. */
+.credit-dock{position:fixed;right:22px;bottom:20px;z-index:115;display:flex;align-items:center;gap:10px;padding:11px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);box-shadow:0 8px 24px rgba(0,0,0,.25);cursor:pointer;font:inherit;text-align:left}
+.credit-dock .credit-gear{font-size:24px;color:var(--accent)}
+.credit-dock b{font-size:15px}.credit-dock small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.credit-dock.low{border-color:#ff9d36}.credit-dock[aria-busy="true"]{opacity:.8}
+#app main{padding-bottom:110px;min-width:0}
+#app .match-grid{grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr))}
+.token-burst{position:fixed;z-index:250;pointer-events:none;transform:translate(-50%,-50%);white-space:nowrap;isolation:isolate}
+.token-burst b{display:block;padding:9px 12px;border-radius:18px;background:#351d0a;color:#ffe5b5;border:1px solid #ffa13c;text-shadow:0 0 8px #ff6500;font-size:13px;animation:token-label 1s ease-out forwards}
+.token-burst i{position:absolute;left:50%;top:50%;width:5px;height:9px;border-radius:70% 30% 65% 35%;background:#ffbe43;box-shadow:0 0 8px #ff5a16;animation:token-spark .9s ease-out forwards}
+@keyframes token-label{0%{opacity:0;transform:translateY(8px) scale(.9)}20%,65%{opacity:1}100%{opacity:0;transform:translateY(-28px) scale(1.03)}}
+@keyframes token-spark{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.1)}}
+@media(max-width:920px){.credit-dock{right:16px;bottom:calc(78px + env(safe-area-inset-bottom,0px));padding:9px 12px}#app main{padding-bottom:175px}#toasts{bottom:150px;right:16px;max-width:calc(100vw - 32px)}}
+@media(prefers-reduced-motion:reduce){.token-burst i{display:none}.token-burst b{animation:none}.token-burst{transition:none}}
 </style>
 </head>
 <body>
@@ -500,9 +514,10 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
-<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=staff-support-v2">Return to admin / staff sign-in</a></section>
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=application-credits-v1">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
+  <button id="creditDock" class="credit-dock" onclick="openCredits()" aria-label="View application token balance" aria-busy="true"><span class="credit-gear" aria-hidden="true">⚙</span><span><b id="creditBalance" role="status" aria-live="polite">Loading tokens…</b><small>1 approval = 1 token</small></span></button>
   <div class="shell">
     <aside id="sidebar">
       <div class="side-brand"><span class="logo">📡</span>
@@ -530,7 +545,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <div class="topbar-right"></div>
       </div>
 
-      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=staff-support-v2">← Return to admin</a></div>
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=application-credits-v1">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -919,9 +934,14 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
+<div class="modal hidden" id="creditModal" role="dialog" aria-modal="true" aria-labelledby="creditTitle">
+ <div class="modal-card" style="max-width:420px"><div class="modal-head"><h3 id="creditTitle">⚙ Application tokens</h3><button class="x-btn" onclick="closeModal('creditModal')" aria-label="Close token details">✕</button></div>
+ <p id="creditDetails" style="margin-bottom:14px"></p><p class="section-note">Accounts start with 600 free tokens. Approving a job costs 1 token and sends it to the application queue; it does not guarantee an application or a job. Viewing matches is free. Repeated clicks on the same approval do not cost extra.</p><p class="sub2">Online top-ups are not available yet.</p>
+ <button class="btn btn-sm" style="margin-top:16px" onclick="loadCredits()">Refresh balance</button></div>
+</div>
 <div id="toasts"></div>
 
-<script src="supportAccess.js?v=staff-support-v2"></script>
+<script src="supportAccess.js?v=application-credits-v1"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -1017,6 +1037,37 @@ $$('.pw-toggle').forEach(btn=>{
     btn.innerHTML=showing?EYE_OPEN:EYE_CLOSED;
   });
 });
+
+/* ================= APPLICATION CREDITS ================= */
+let creditBalance=null,creditReadEpoch=0;
+const approvalInFlight=new Set();
+function renderCredits(){
+ const ready=Number.isInteger(creditBalance),dock=$('#creditDock');
+ $('#creditBalance').textContent=ready?creditBalance.toLocaleString()+' tokens':'Balance unavailable';
+ dock.setAttribute('aria-busy','false');dock.classList.toggle('low',ready&&creditBalance<10);
+ $('#creditDetails').textContent=ready?'Available balance: '+creditBalance.toLocaleString()+' tokens.':'Your balance could not be loaded. Refresh to try again.';
+}
+function resetCredits(){creditReadEpoch++;creditBalance=null;approvalInFlight.clear();renderCredits();closeModal('creditModal');document.querySelectorAll('.token-burst').forEach(el=>el.remove());}
+async function loadCredits(){
+ const userId=SUPPORT_REQUESTED?currentSeeker?.user_id:currentUser?.id,epoch=++creditReadEpoch;
+ if(!userId){creditBalance=null;renderCredits();return;}
+ $('#creditDock').setAttribute('aria-busy','true');
+ try{
+  const {data,error}=await sb.from('application_credit_wallets').select('balance').eq('user_id',userId).maybeSingle();
+  if(epoch!==creditReadEpoch||userId!==(SUPPORT_REQUESTED?currentSeeker?.user_id:currentUser?.id))return;
+  if(error||!Number.isInteger(data?.balance))throw Error('Balance unavailable');
+  creditBalance=data.balance;renderCredits();
+ }catch(error){if(epoch!==creditReadEpoch)return;creditBalance=null;renderCredits();}
+}
+function openCredits(){$('#creditModal').classList.remove('hidden');$('#creditModal .x-btn').focus();loadCredits();}
+function showTokenSpark(rect){
+ const el=document.createElement('div');el.className='token-burst';el.setAttribute('aria-hidden','true');
+ el.style.left=Math.max(90,Math.min(innerWidth-90,rect.left+rect.width/2))+'px';
+ el.style.top=Math.max(55,Math.min(innerHeight-110,rect.top))+'px';
+ const label=document.createElement('b');label.textContent='🔥 −1 token used';el.append(label);
+ for(let i=0;i<10;i++){const spark=document.createElement('i'),angle=Math.PI*2*i/10;spark.style.setProperty('--dx',Math.round(Math.cos(angle)*65)+'px');spark.style.setProperty('--dy',Math.round(Math.sin(angle)*45-20)+'px');el.append(spark);}
+ document.body.append(el);setTimeout(()=>el.remove(),1100);
+}
 
 /* ================= AUTH ================= */
 function showAuth(name){['signin','signup','forgot','newpass'].forEach(p=>$('#p-'+p).classList.add('hidden'));
@@ -1159,7 +1210,7 @@ async function signOut(){
   stopMatchLiveRefresh();
   if(SUPPORT_REQUESTED){await sb.auth.signOut();showSupportFailure('Staff session ended. Return to admin to sign in.');return;}
   await sb.auth.signOut();
-  currentUser=null; currentSeeker=null;
+  resetCredits();currentUser=null; currentSeeker=null;
   $('#app').classList.add('hidden');
   $('#authWrap').classList.remove('hidden');
   showAuth('signin');
@@ -1167,21 +1218,21 @@ async function signOut(){
 
 /* ================= APP ENTRY ================= */
 function showSupportFailure(message){
-  supportAccessEpoch++;
+  supportAccessEpoch++;resetCredits();
   stopMatchLiveRefresh();currentSeeker=null;currentUser=null;supportContext=null;matches=[];applications=[];documents=[];
   $('#app').classList.add('hidden');$('#authWrap').classList.add('hidden');$('#supportGate').classList.remove('hidden');
   ['#matchGrid','#appList','#docList','#helpThread','#actList'].forEach(selector=>{$(selector).innerHTML='';});
   PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
   $('#staffSupportName').textContent='';
   $('#supportGateMessage').textContent=message;
-  const url=new URL('admin.html',location.href);url.searchParams.set('v','staff-support-v2');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  const url=new URL('admin.html',location.href);url.searchParams.set('v','application-credits-v1');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
   $('#supportAdminLink').href=url.href;
 }
 async function enterApp(user){
-  currentUser=user;
+  resetCredits();currentUser=user;
   if(SUPPORT_REQUESTED){
     const supportRequest=++supportAccessEpoch;
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: staff-support-v2.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open the account from the admin app.');return;}
     try{
       const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
@@ -1202,7 +1253,7 @@ async function refreshAll(){
   $('#agentText').textContent='checking…';
   await loadProfile();
   if(SUPPORT_REQUESTED&&!currentSeeker)return;
-  await loadMatches();
+  await Promise.all([loadCredits(),loadMatches()]);
   await loadApplications();
   await loadDocuments();
   updateHelpBadge();
@@ -1232,7 +1283,7 @@ async function refreshLiveMatchLists(){
     const results=await Promise.all([loadMatches({silent:true,signal:controller.signal}),loadApplications({silent:true,signal:controller.signal})]);
     if(results.some(ok=>ok===false)||controller.signal.aborted||epoch!==matchRefreshEpoch||currentUser?.id!==userId||currentSeeker?.id!==seekerId)return;
     // Refresh record views and counters only. Never reload or overwrite profile form edits.
-    renderDashboard();updateAgentPill();
+    loadCredits();renderDashboard();updateAgentPill();
     if(state.view==='matches'||state.view==='skipped')renderMatches();
     if(state.view==='applications')renderApplications();
   }catch(error){console.warn('Match refresh unavailable; keeping displayed results.');}
@@ -2162,7 +2213,7 @@ function renderMatches(){
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
-      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Request agent review for this application">▶ Approve</button>' : '')+
+      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Approve this job for 1 token" '+(approvalInFlight.has(m.id)?'disabled':'')+'>▶ Approve · 1 token</button>' : '')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
@@ -2237,11 +2288,27 @@ $('#matchGrid').addEventListener('click', async (e)=>{
   const mm = matches.find(x=>x.id===id);
   if(action==='view'){ if(mm) openJobView(mm); return; }
   if(action==='apply'){
-    btn.disabled=true;
-    const {error}=await sb.rpc('request_job_application',{p_match_id:id});
-    if(error){toast('⚠ '+error.message,'err');btn.disabled=false;return;}
-    if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
-    toast('Your request has been successfully submitted and is waiting for the agent on the next run.','ok queue-success');renderMatches();renderDashboard();return;
+    if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
+    if(approvalInFlight.has(id))return;
+    const rect=btn.getBoundingClientRect(),userId=currentUser?.id,seekerId=currentSeeker?.id;
+    approvalInFlight.add(id);btn.disabled=true;btn.textContent='Submitting…';
+    try{
+      const {data,error}=await sb.rpc('request_job_application',{p_match_id:id});
+      if(userId!==currentUser?.id||seekerId!==currentSeeker?.id)return;
+      if(error)throw error;
+      if(data?.status!=='approved'||data.id!==id)throw Error('Approval was not confirmed. Refresh and try again.');
+      creditReadEpoch++;
+      if(Number.isInteger(data.credit_balance)){creditBalance=data.credit_balance;renderCredits();}else{await loadCredits();}
+      if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
+      if(data.charged===true&&data.tokens_used===1)showTokenSpark(rect);
+      toast('Approval queued'+(data.charged?' · 1 token used.':'. No additional token charged.'),'ok queue-success');
+      renderMatches();renderDashboard();loadCredits();
+    }catch(error){
+      if(userId!==currentUser?.id||seekerId!==currentSeeker?.id)return;
+      toast('⚠ '+(error.message||'Could not confirm approval. Please refresh before retrying.'),'err');
+      await loadCredits();
+    }finally{approvalInFlight.delete(id);if(userId===currentUser?.id&&seekerId===currentSeeker?.id)renderMatches();}
+    return;
   }
   if(action==='delete'){
     if(!confirm('Delete this job permanently? This can\'t be undone.')) return;
@@ -2751,7 +2818,7 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // password" screen.
   if(SUPPORT_REQUESTED){
     $('#authWrap').classList.add('hidden');
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: staff-support-v2.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open it from admin.');return;}
     try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
     return;
