@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="approval-fireworks-v6">
+<meta name="jobagent-build" content="approval-fireworks-v7">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent — your job agent working even while you sleep</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
@@ -421,9 +421,9 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 #supportGate{max-width:600px;margin:12vh auto;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 /* Token balance sits below Contact us, immediately above On watch / Sign out. */
-.credit-dock{position:relative;width:100%;margin:0 0 12px;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 34px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font:inherit;text-align:center}
-.credit-dock .credit-gear{position:absolute;left:12px;font-size:20px;color:var(--accent)}
-.credit-dock b{font-size:14px}
+.credit-dock{position:relative;width:100%;margin:0 0 12px;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font:inherit;text-align:center}
+.credit-dock .credit-gear{position:static;flex:none;font-size:20px;line-height:1;color:var(--accent)}
+.credit-dock #creditBalance{font-size:14px;font-weight:400;color:#34d399}
 .credit-dock.low{border-color:#ff9d36}.credit-dock[aria-busy="true"]{opacity:.8}
 #app main{min-width:0}
 #app .match-grid{grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr))}
@@ -431,12 +431,10 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 .token-burst i{position:absolute;left:0;top:0;width:4px;height:9px;border-radius:50%;color:#ffd65c;background:currentColor;box-shadow:0 0 4px currentColor,0 0 9px currentColor;animation:token-firework 8s cubic-bezier(.2,.55,.5,1) forwards}
 .token-burst i:nth-child(3n){color:#ff7355}.token-burst i:nth-child(4n){color:#fff1a6;width:3px;height:7px}
 .token-burst i::after{content:"";position:absolute;left:1px;top:1px;width:1px;height:3px;border-radius:50%;background:#fff8d0}
-.token-spend-label,.token-submit-text{position:absolute;left:0;top:0;display:block;white-space:nowrap;text-align:center;color:#fff1bf;font-size:10px;font-weight:400;line-height:1.2;text-shadow:-1px -1px 1px #0a0f1e,1px -1px 1px #0a0f1e,-1px 1px 1px #0a0f1e,1px 1px 1px #0a0f1e,0 0 7px rgba(255,174,54,.6);animation:token-spend-drift 8s ease-out forwards}
-.token-submit-text{animation-name:token-submit-drift}
+.token-spend-label{position:absolute;left:0;top:0;display:block;white-space:nowrap;text-align:center;color:#fff1bf;font-size:10px;font-weight:400;line-height:1.2;text-shadow:-1px -1px 1px #0a0f1e,1px -1px 1px #0a0f1e,-1px 1px 1px #0a0f1e,1px 1px 1px #0a0f1e,0 0 7px rgba(255,174,54,.6);animation:token-spend-drift 8s ease-out forwards}
 @keyframes token-spend-drift{0%{opacity:0;transform:translate(calc(-50% + 90px),-40px) scale(.85)}8%{opacity:1;transform:translate(calc(-50% + 82px),-50px) scale(1)}24%{transform:translate(calc(-50% + 70px),-60px) scale(1)}65%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + 50px),-84px) scale(.95)}}
-@keyframes token-submit-drift{0%{opacity:0;transform:translate(calc(-50% + 90px),-18px) scale(.85)}8%{opacity:1;transform:translate(calc(-50% + 110px),-28px) scale(1)}24%{transform:translate(calc(-50% + 115px),-36px) scale(1)}65%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + 120px),-60px) scale(.95)}}
 @keyframes token-firework{0%{opacity:0;transform:translate(0,0) rotate(var(--angle)) scale(.3)}6%,60%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--angle)) scale(.3)}}
-@media(max-width:920px){.credit-dock{padding:8px 34px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
+@media(max-width:920px){.credit-dock{padding:8px 12px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
 @media(prefers-reduced-motion:reduce){.token-burst{display:none}}
 </style>
 </head>
@@ -518,7 +516,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
-<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=approval-fireworks-v6">Return to admin / staff sign-in</a></section>
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=approval-fireworks-v7">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
   <div class="shell">
@@ -537,7 +535,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <button class="nav-btn" data-view="help" onclick="setView('help')"><span class="ico">✉️</span>Contact us <span class="nav-badge hidden" id="navHelpCount">0</span></button>
       </nav>
       <div class="side-foot">
-        <div id="creditDock" class="credit-dock" aria-label="Application token balance" aria-busy="true"><span class="credit-gear" aria-hidden="true">⚙</span><b id="creditBalance" role="status" aria-live="polite">Loading tokens…</b></div>
+        <div id="creditDock" class="credit-dock" aria-label="Application token balance" aria-busy="true"><span class="credit-gear" aria-hidden="true">⚙</span><span id="creditBalance" role="status" aria-live="polite">Loading tokens…</span></div>
         <div class="agent-pill"><span class="dot idle" id="agentDot"></span><span id="agentText">waking up…</span></div>
         <button class="btn btn-ghost btn-sm btn-block" onclick="signOut()">Sign out</button>
       </div>
@@ -549,7 +547,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <div class="topbar-right"></div>
       </div>
 
-      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=approval-fireworks-v6">← Return to admin</a></div>
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=approval-fireworks-v7">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -940,7 +938,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 
 <div id="toasts"></div>
 
-<script src="supportAccess.js?v=approval-fireworks-v6"></script>
+<script src="supportAccess.js?v=approval-fireworks-v7"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -1069,7 +1067,7 @@ function showTokenSpark(rect){
  }
  const label=document.createElement('span');label.className='token-spend-label';label.textContent='−1 token';
  label.style.left=Math.min(0,innerWidth-70-parseFloat(el.style.left)-120)+'px';
- const submitted=document.createElement('span');submitted.className='token-submit-text';submitted.textContent='Successfully submitted';submitted.style.left=label.style.left;el.append(label,submitted);
+ el.append(label);
  document.body.append(el);setTimeout(()=>el.remove(),8200);
 }
 
@@ -1229,14 +1227,14 @@ function showSupportFailure(message){
   PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
   $('#staffSupportName').textContent='';
   $('#supportGateMessage').textContent=message;
-  const url=new URL('admin.html',location.href);url.searchParams.set('v','approval-fireworks-v6');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  const url=new URL('admin.html',location.href);url.searchParams.set('v','approval-fireworks-v7');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
   $('#supportAdminLink').href=url.href;
 }
 async function enterApp(user){
   resetCredits();currentUser=user;
   if(SUPPORT_REQUESTED){
     const supportRequest=++supportAccessEpoch;
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fireworks-v6.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fireworks-v7.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open the account from the admin app.');return;}
     try{
       const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
@@ -2822,7 +2820,7 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // password" screen.
   if(SUPPORT_REQUESTED){
     $('#authWrap').classList.add('hidden');
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fireworks-v6.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fireworks-v7.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open it from admin.');return;}
     try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
     return;

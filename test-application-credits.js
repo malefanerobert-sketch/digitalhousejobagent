@@ -33,7 +33,7 @@ const tests=String.raw`
  check(!document.querySelector('#view-dashboard').contains(dock),'No token card in Dashboard content');
  if(innerWidth<=920)openDrawer();dock.scrollIntoView({block:'center'});await wait(300);
  const r=dock.getBoundingClientRect();check(r.left>=-1&&r.right<=innerWidth,'Sidebar token card fits viewport');
- check(getComputedStyle(dock).position==='relative','Indicator stays in sidebar flow, not floating');const br=document.querySelector('#creditBalance').getBoundingClientRect();check(Math.abs((br.left+br.width/2)-(r.left+r.width/2))<1,'Live balance text centered exactly inside box');
+ check(getComputedStyle(dock).position==='relative','Indicator stays in sidebar flow, not floating');const balance=document.querySelector('#creditBalance'),br=balance.getBoundingClientRect(),gear=dock.querySelector('.credit-gear'),gr=gear.getBoundingClientRect(),bs=getComputedStyle(balance);check(bs.fontWeight==='400'&&bs.color==='rgb(52, 211, 153)'&&balance.tagName==='SPAN','Balance is green and non-bold');check(getComputedStyle(gear).position==='static'&&Math.abs(br.left-gr.right-6)<1,'Gear sits 6px from live balance');check(Math.abs((gr.left+br.right)/2-(r.left+r.width/2))<1,'Gear and live balance centered together');
  check(innerWidth===Number(params.get('viewportWidth')),'Exact target viewport');check(document.documentElement.scrollWidth<=document.documentElement.clientWidth,'No horizontal overflow');
  if(mode==='dashboard'){const out=document.createElement('pre');out.id='test-result';out.hidden=true;out.textContent='PASS Sidebar token placement below Contact us / above On watch '+innerWidth;document.body.append(out);return;}
  closeDrawer();setView('matches');button=document.querySelector('[data-action="apply"]');button.scrollIntoView({block:'center'});
@@ -48,19 +48,18 @@ const tests=String.raw`
   if(mode==='retry'){check(!document.querySelector('.token-burst'),'Idempotent retry does not show a second charge');}
   else{
    const effect=document.querySelector('.token-burst');check(!!effect,'Firework sparks rendered');
-   check(effect.textContent==='−1 tokenSuccessfully submitted'&&effect.querySelector('.token-spend-label')&&!effect.querySelector('b,em'),'Both small phrases, without emoji or flames');
+   check(effect.textContent==='−1 token'&&!effect.querySelector('.token-submit-text')&&effect.querySelector('.token-spend-label')&&!effect.querySelector('b,em'),'Only small token phrase; no submitted phrase, emoji or flames');
    check(effect.querySelectorAll('i').length===20,'Two radial rings of small firework sparks');
    const style=getComputedStyle(effect),sparkStyle=getComputedStyle(effect.querySelector('i'));
    check(style.backgroundColor==='rgba(0, 0, 0, 0)'&&style.borderTopWidth==='0px'&&style.width==='0px','No visible badge, card or box');
    check(parseFloat(sparkStyle.width)===4&&parseFloat(sparkStyle.height)===9,'Slightly larger sparks rather than flame shapes');
    const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(255, 241, 191)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
-   const submitted=effect.querySelector('.token-submit-text'),ss=getComputedStyle(submitted);check(submitted.textContent==='Successfully submitted'&&ss.fontSize==='10px'&&ss.fontWeight==='400'&&ss.color==='rgb(255, 241, 191)','Small regular-weight original pale-gold success phrase');
-   const center=el=>{const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};const tokenInitial=center(label),submittedInitial=center(submitted);
-   if(!params.has('reduced')){for(const text of [label,submitted]){const r=text.getBoundingClientRect();check(r.left>=0&&r.right<=innerWidth,'Both floating phrases fit viewport');}check(label.parentElement===effect&&submitted.parentElement===effect,'Phrases are independent siblings, not one moving label');check(ss.animationName==='token-submit-drift'&&ls.animationName!==ss.animationName,'Different text movement paths');}
+   const center=el=>{const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};const tokenInitial=center(label);
+   if(!params.has('reduced')){const r=label.getBoundingClientRect();check(r.left>=0&&r.right<=innerWidth,'Token phrase fits viewport');}
    if(!params.has('reduced'))check(ls.animationName==='token-spend-drift'&&ls.animationDuration==='8s','Token phrase drifts out slowly');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
    else check(sparkStyle.animationName==='token-firework'&&sparkStyle.animationDuration==='8s','Slow radial firework motion');
-   if(mode!=='snapshot'){await wait(1600);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');if(!params.has('reduced')){const a=center(label),b=center(submitted);check(a.x<tokenInitial.x&&b.x>submittedInitial.x,'Token phrase moves left and success phrase moves right');check(Math.hypot(a.x-b.x,a.y-b.y)<110,'Different paths stay close together');}await wait(3000);check(!!document.querySelector('.token-burst'),'Sparks remain beyond three seconds');if(!params.has('reduced'))check(parseFloat(getComputedStyle(label).opacity)>.5,'Token phrase remains readable beyond four seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Sparks removed after about eight seconds');}
+   if(mode!=='snapshot'){await wait(1600);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');if(!params.has('reduced')){const a=center(label);check(a.x<tokenInitial.x,'Token phrase keeps its gentle leftward drift');}await wait(3000);check(!!document.querySelector('.token-burst'),'Sparks remain beyond three seconds');if(!params.has('reduced'))check(parseFloat(getComputedStyle(label).opacity)>.5,'Token phrase remains readable beyond four seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Sparks removed after about eight seconds');}
 
   }
  }
@@ -71,11 +70,11 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v6"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=approval-fireworks-v7"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['snapshot',320],['snapshot',390,true],['success',390,true]]){
- if(process.env.CREDIT_PREVIEW_ONLY&&mode!=='snapshot')continue;
+ if(process.env.CREDIT_PREVIEW_ONLY&&!['snapshot','dashboard'].includes(mode))continue;
  const label=mode+'-'+width+(reduced?'-reduced':'');
  const {marker,dom}=await require('./browserTestRunner').run({url:`file://${root}/credits-fixture.html?scenario=normal&creditMode=${mode}&viewportWidth=${width}${reduced?'&reduced=1':''}`,width,reduced,screenshot:root+'/credits-'+label+'.png'});
  fs.writeFileSync(root+'/credits-'+label+'.dom.html',dom);
