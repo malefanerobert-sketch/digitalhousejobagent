@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="application-credits-v5">
+<meta name="jobagent-build" content="application-credits-v6">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent — your job agent working even while you sleep</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
@@ -421,19 +421,23 @@ main{padding:26px 30px 60px;max-width:1200px;width:100%}
 #supportGate{max-width:600px;margin:12vh auto;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 /* Token balance sits below Contact us, immediately above On watch / Sign out. */
-.credit-dock{width:100%;margin:0 0 12px;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font:inherit;text-align:left}
-.credit-dock .credit-gear{font-size:20px;color:var(--accent)}
+.credit-dock{position:relative;width:100%;margin:0 0 12px;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 34px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font:inherit;text-align:center}
+.credit-dock .credit-gear{position:absolute;left:12px;font-size:20px;color:var(--accent)}
 .credit-dock b{font-size:14px}
 .credit-dock.low{border-color:#ff9d36}.credit-dock[aria-busy="true"]{opacity:.8}
 #app main{min-width:0}
 #app .match-grid{grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr))}
-.token-burst{position:fixed;z-index:250;pointer-events:none;transform:translate(-50%,-50%);white-space:nowrap;isolation:isolate}
-.token-burst b{position:relative;z-index:2;display:block;padding:14px 20px;border-radius:22px;background:#351d0a;color:#ffe5b5;border:1px solid #ffa13c;text-shadow:0 0 8px #ff6500;font-size:17px;animation:token-label 8s ease-out forwards}
-.token-burst i{position:absolute;z-index:1;left:50%;top:50%;width:8px;height:14px;border-radius:70% 30% 65% 35%;background:#ffbe43;box-shadow:0 0 8px #ff5a16;animation:token-spark 8s linear forwards}
-@keyframes token-label{0%{opacity:0;transform:translateY(8px) scale(.9)}5%,85%{opacity:1}100%{opacity:0;transform:translateY(-34px) scale(1.05)}}
-@keyframes token-spark{0%{opacity:1;transform:translate(0,0) scale(1)}65%{opacity:.9}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.15)}}
-@media(max-width:920px){.credit-dock{padding:8px 12px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
-@media(prefers-reduced-motion:reduce){.token-burst i{display:none}.token-burst b{animation:none}.token-burst{transition:none}}
+.token-burst{position:fixed;z-index:250;pointer-events:none;width:190px;height:150px;transform:translate(-50%,-50%);white-space:nowrap;isolation:isolate;animation:token-lifetime 8s linear forwards}
+.token-burst::before{content:"";position:absolute;inset:auto 30px 22px;height:65px;background:radial-gradient(ellipse at 50% 75%,rgba(255,227,87,.7),rgba(255,91,7,.4) 45%,transparent 75%);filter:blur(9px)}
+.token-burst b{position:absolute;z-index:3;inset:0;display:flex;align-items:center;justify-content:center;background:none;border:0;padding:0;color:#fff7d6;font-size:19px;font-weight:900;text-shadow:0 2px 4px #351200,0 0 9px #682400;animation:token-text 2.6s ease-in-out infinite}
+.token-burst i{position:absolute;z-index:1;bottom:25px;left:calc(50% + var(--x));width:var(--w);height:var(--h);border-radius:60% 25% 45% 40%;background:linear-gradient(to top,#fff8a0 2%,#ffd33d 35%,#ff811a 67%,#ef3d08 83%,transparent);transform-origin:50% 100%;filter:drop-shadow(0 0 5px #ff6d13);animation:token-flame 1.8s ease-in-out var(--delay) infinite alternate}
+.token-burst em{position:absolute;z-index:2;bottom:35px;left:calc(50% + var(--x));width:3px;height:5px;border-radius:50%;background:#ffe986;box-shadow:0 0 6px #ff8b16;animation:token-ember 2.6s linear var(--delay) infinite}
+@keyframes token-lifetime{0%,100%{opacity:0}5%,85%{opacity:1}}
+@keyframes token-text{0%,100%{opacity:0}18%,72%{opacity:1}}
+@keyframes token-flame{0%{opacity:.75;transform:translate(-50%,0) rotate(-6deg) scale(.8,.85)}100%{opacity:1;transform:translate(-50%,-10px) rotate(6deg) scale(1.1,1.06)}}
+@keyframes token-ember{0%{opacity:0;transform:translate(0,0) scale(1)}15%{opacity:1}100%{opacity:0;transform:translate(var(--drift),-115px) scale(.2)}}
+@media(max-width:920px){.credit-dock{padding:8px 34px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
+@media(prefers-reduced-motion:reduce){.token-burst i,.token-burst em{display:none}.token-burst b{animation:none}.token-burst{animation:none;transition:none}}
 </style>
 </head>
 <body>
@@ -514,7 +518,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
-<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=application-credits-v5">Return to admin / staff sign-in</a></section>
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=application-credits-v6">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
   <div class="shell">
@@ -545,7 +549,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <div class="topbar-right"></div>
       </div>
 
-      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=application-credits-v5">← Return to admin</a></div>
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=application-credits-v6">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -936,7 +940,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 
 <div id="toasts"></div>
 
-<script src="supportAccess.js?v=application-credits-v5"></script>
+<script src="supportAccess.js?v=application-credits-v6"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -1057,8 +1061,9 @@ function showTokenSpark(rect){
  const el=document.createElement('div');el.className='token-burst';el.setAttribute('aria-hidden','true');
  el.style.left=Math.max(120,Math.min(innerWidth-120,rect.left+rect.width/2))+'px';
  el.style.top=Math.max(55,Math.min(innerHeight-110,rect.top))+'px';
- const label=document.createElement('b');label.textContent='🔥 −1 token used';el.append(label);
- for(let i=0;i<10;i++){const spark=document.createElement('i'),angle=Math.PI*2*i/10;spark.style.setProperty('--dx',Math.round(Math.cos(angle)*92)+'px');spark.style.setProperty('--dy',Math.round(Math.sin(angle)*65-20)+'px');el.append(spark);}
+ const label=document.createElement('b');label.textContent='−1 token';el.append(label);
+ for(let i=0;i<10;i++){const flame=document.createElement('i');flame.style.setProperty('--x',((i-4.5)*9)+'px');flame.style.setProperty('--w',(22+(i%3)*5)+'px');flame.style.setProperty('--h',(55+Math.round(40*(1-Math.abs(i-4.5)/5)))+'px');flame.style.setProperty('--delay',(-i*.23)+'s');el.append(flame);}
+ for(let i=0;i<12;i++){const ember=document.createElement('em');ember.style.setProperty('--x',((i-5.5)*7)+'px');ember.style.setProperty('--drift',((i%2?1:-1)*(10+i*2))+'px');ember.style.setProperty('--delay',(-i*.29)+'s');el.append(ember);}
  document.body.append(el);setTimeout(()=>el.remove(),8200);
 }
 
@@ -1218,14 +1223,14 @@ function showSupportFailure(message){
   PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
   $('#staffSupportName').textContent='';
   $('#supportGateMessage').textContent=message;
-  const url=new URL('admin.html',location.href);url.searchParams.set('v','application-credits-v5');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  const url=new URL('admin.html',location.href);url.searchParams.set('v','application-credits-v6');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
   $('#supportAdminLink').href=url.href;
 }
 async function enterApp(user){
   resetCredits();currentUser=user;
   if(SUPPORT_REQUESTED){
     const supportRequest=++supportAccessEpoch;
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v5.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v6.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open the account from the admin app.');return;}
     try{
       const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
@@ -2811,7 +2816,7 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // password" screen.
   if(SUPPORT_REQUESTED){
     $('#authWrap').classList.add('hidden');
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v5.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: application-credits-v6.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open it from admin.');return;}
     try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
     return;

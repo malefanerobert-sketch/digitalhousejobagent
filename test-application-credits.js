@@ -33,7 +33,7 @@ const tests=String.raw`
  check(!document.querySelector('#view-dashboard').contains(dock),'No token card in Dashboard content');
  if(innerWidth<=920)openDrawer();dock.scrollIntoView({block:'center'});await wait(300);
  const r=dock.getBoundingClientRect();check(r.left>=-1&&r.right<=innerWidth,'Sidebar token card fits viewport');
- check(getComputedStyle(dock).position==='static','Token card is in normal sidebar flow');
+ check(getComputedStyle(dock).position==='relative','Indicator stays in sidebar flow, not floating');const br=document.querySelector('#creditBalance').getBoundingClientRect();check(Math.abs((br.left+br.width/2)-(r.left+r.width/2))<1,'Live balance text centered exactly inside box');
  check(innerWidth===Number(params.get('viewportWidth')),'Exact target viewport');check(document.documentElement.scrollWidth<=document.documentElement.clientWidth,'No horizontal overflow');
  if(mode==='dashboard'){const out=document.createElement('pre');out.id='test-result';out.hidden=true;out.textContent='PASS Sidebar token placement below Contact us / above On watch '+innerWidth;document.body.append(out);return;}
  closeDrawer();setView('matches');button=document.querySelector('[data-action="apply"]');button.scrollIntoView({block:'center'});
@@ -47,9 +47,10 @@ const tests=String.raw`
   check(matches[0].status==='approved','Successful approval queued');check(document.querySelector('#creditBalance').textContent.includes('599'),'Authoritative remaining balance shown');
   if(mode==='retry'){check(!document.querySelector('.token-burst'),'Idempotent retry does not show a second charge');}
   else{
-   check(document.querySelector('.token-burst b')?.textContent==='🔥 −1 token used','Fire-spark debit label rendered');check(document.querySelectorAll('.token-burst i').length===10,'Small spark particles rendered');
+   check(document.querySelector('.token-burst b')?.textContent==='−1 token','Fire-spark debit label rendered');check(document.querySelectorAll('.token-burst i').length===10,'Animated flames rendered');
+   check(document.querySelectorAll('.token-burst em').length===12,'Rising fire embers rendered');check(getComputedStyle(document.querySelector('.token-burst b')).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(document.querySelector('.token-burst b')).borderTopWidth==='0px','No badge background or border');check(getComputedStyle(document.querySelector('.token-burst b')).transform==='none','Token text does not fly as a moving card');if(!params.has('reduced'))check(getComputedStyle(document.querySelector('.token-burst b')).animationName==='token-text','Token text appears and fades inside fire');
    if(params.has('reduced'))check(getComputedStyle(document.querySelector('.token-burst i')).display==='none','Reduced-motion preference respected');
-   if(mode!=='snapshot'){check(parseFloat(getComputedStyle(document.querySelector('.token-burst b')).fontSize)>=17,'Larger readable token label');await wait(1600);check(!!document.querySelector('.token-burst'),'Effect still visible after the old one-second cutoff');check(parseFloat(getComputedStyle(document.querySelector('.token-burst b')).opacity)>=.9,'Token label stays fully readable during hold');await wait(3000);check(!!document.querySelector('.token-burst'),'Effect remains visible well beyond three seconds');check(parseFloat(getComputedStyle(document.querySelector('.token-burst b')).opacity)>=.9,'Label still readable after four seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Effect cleaned up after about eight seconds');}
+   if(mode!=='snapshot'){check(parseFloat(getComputedStyle(document.querySelector('.token-burst b')).fontSize)>=17,'Larger readable token label');await wait(1600);check(!!document.querySelector('.token-burst'),'Effect still visible after the old one-second cutoff');check(parseFloat(getComputedStyle(document.querySelector('.token-burst')).opacity)>=.9,'Fire stays visible during hold');await wait(3000);check(!!document.querySelector('.token-burst'),'Effect remains visible well beyond three seconds');check(parseFloat(getComputedStyle(document.querySelector('.token-burst')).opacity)>=.9,'Fire remains visible after four seconds');await wait(3700);check(!document.querySelector('.token-burst'),'Effect cleaned up after about eight seconds');}
   }
  }
  if(mode!=='snapshot'){
@@ -59,7 +60,7 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=application-credits-v5"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=application-credits-v6"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['success',390,true]]){

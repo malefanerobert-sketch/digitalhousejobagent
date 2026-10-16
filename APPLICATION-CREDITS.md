@@ -1,9 +1,9 @@
 # Application credits — initial release
 
 ## User behavior
-- Compact, non-clickable gear indicator shows only the authoritative token balance in the sidebar footer below Contact us and immediately above On watch and Sign out. On mobile it is inside the More/menu drawer. There is no token pop-up, explanatory copy or subtitle. The blue action reads only Approve, without a play icon or price label. It is not in Dashboard content or floating over matches.
+- Compact, non-clickable gear indicator shows only the authoritative token balance, with its text centered within the box in the sidebar footer below Contact us and immediately above On watch and Sign out. On mobile it is inside the More/menu drawer. There is no token pop-up, explanatory copy or subtitle. The blue action reads only Approve, without a play icon or price label. It is not in Dashboard content or floating over matches.
 - One token is charged when an applicant successfully approves a job for the admin queue. Viewing and discovery remain free. Approval is not a confirmed application or job offer.
-- A larger fire-spark “−1 token used” effect appears only after a confirmed debit and remains for ~8 seconds before cleanup at 8.2 seconds; particles move slowly with linear timing. Reduced-motion users get a static label for the same duration.
+- A stationary, card-free fire effect appears only after a confirmed debit and remains for ~8 seconds before cleanup at 8.2 seconds. Animated flames and rising embers surround “−1 token” text that appears and fades in place; no fire emoji, pill background, border or flying label is used. Reduced-motion users get a static label for the same duration.
 - Every auth identity receives 600 welcome tokens. Existing identities received the same one-time launch grant. Old requests are not charged retroactively.
 - Retries/repeated clicks on the same match never debit again. An already queued legacy match remains free to retry. Zero tokens prevents a new approval, but not viewing matches.
 - Staff support mode can read the selected user's balance; it remains read-only and keeps the staff identity.
@@ -25,4 +25,4 @@ Apply `migration_application_credits.sql` once via Supabase migrations.
 - `node test-staff-support.js`: existing staff authorization/read-only suite plus target-wallet scoping.
 - `node test-lazy-queue.js`: admin queue regression.
 - `PUBLIC_SITE_DIR=/path/to/_site node test-application-credits.js` and staff suite validate the actual deploy bundle.
-- Pages build/public asset validator and postdeployment manifest checks retained. Release marker: `application-credits-v5`.
+- Pages build/public asset validator and postdeployment manifest checks retained. Release marker: `application-credits-v6`.
