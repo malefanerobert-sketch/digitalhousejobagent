@@ -248,18 +248,18 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         <div class="card" style="margin-bottom:18px">
           <h3 style="margin-bottom:6px;font-size:15px">📋 Admin application queue</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Choose an account to see and manage its jobs. Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
+            Choose an account to see and manage its jobs. Account cards load first; jobs and application details load when opened. Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
           </p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="renderReport()" style="flex:1;min-width:min(260px,100%);max-width:none;margin-bottom:0">
-            <select id="repFilter" onchange="renderReport()" style="width:auto;max-width:100%;padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
+            <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="onReportFiltersChanged(true)" style="flex:1;min-width:min(260px,100%);max-width:none;margin-bottom:0">
+            <select id="repFilter" onchange="onReportFiltersChanged()" style="width:auto;max-width:100%;padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
               <option value="queue">Open application work</option><option value="all">All saved matches</option><option value="pending">New discoveries</option><option value="approved">User requests</option><option value="skipped">Skipped by agent</option><option value="applied">Completed applications</option>
               <option value="failed">Failed</option>
               <option value="needs_manual_action">Needs manual action</option>
               <option value="captcha_blocked">CAPTCHA blocked</option>
               <option value="submission_unverified">Submission not verified</option>
             </select>
-            <select id="repDateFilter" onchange="renderReport()" aria-label="Discovery date" style="width:auto;max-width:100%">
+            <select id="repDateFilter" onchange="onReportFiltersChanged()" aria-label="Discovery date" style="width:auto;max-width:100%">
               <option value="all">All dates · newest first</option><option value="today">Today (SA time)</option>
             </select>
             <button class="btn" onclick="loadReport()">🔄 Refresh</button>
@@ -985,7 +985,22 @@ function renderHealth(){
 /* ================= APPLICATION QUEUE (account-first view) =================
    Account cards group by seeker ID, never by display name/email. Job actions,
    filtering, saved outcomes and queue removal keep their existing semantics. */
-let reportRows = [];
+let reportRows = []; // Only the currently opened account; never the global job pool.
+let reportOverview = null;
+let reportAccountLoading = false;
+let reportFilterTimer = null;
+let applyDetailRequest = 0;
+function reportFilters(){return {p_status:$('#repFilter')?.value||'queue',p_today:$('#repDateFilter')?.value==='today',p_search:($('#repSearch')?.value||'').trim().toLowerCase()};}
+function reportFilterKey(){return JSON.stringify(reportFilters());}
+function onReportFiltersChanged(debounce=false){
+  clearTimeout(reportFilterTimer);
+  if(reportAccountId){renderReport();return;}
+  // Invalidate in-flight summaries immediately, not after the debounce delay.
+  loadReport.request=(loadReport.request||0)+1;
+  renderReport();
+  if(debounce)reportFilterTimer=setTimeout(()=>loadReport(),250);else return loadReport();
+}
+
 let reportAccountId = null;
 let reportAccountName = '';
 let reportAccountEmail = '';
@@ -1000,19 +1015,21 @@ function groupReportAccounts(rows){
   return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'})||a.id.localeCompare(b.id));
 }
 function openReportAccount(id){
-  const group=groupReportAccounts(reportRows).find(g=>g.id===id);
+  const group=reportOverview?.accounts?.find(g=>String(g.id||'unassigned')===id);
   if(!group)return;
+  clearTimeout(reportFilterTimer);closeApplyModal();
   reportAccountId=id;reportAccountName=group.name;reportAccountEmail=group.email;
-  // Account lookup search must not silently hide that account's job list.
+  reportRows=[];reportAccountLoading=true;
   const search=$('#repSearch');if(search)search.value='';
-  renderReport();$('#repAccountName')?.focus();
-  return loadReport();
+  renderReport();$('#repAccountName')?.focus();return loadReport();
 }
-function showReportAccounts(){
-  const previous=reportAccountId;loadReport.request=(loadReport.request||0)+1;
-  const loading=$('#repLoadStatus');if(loading)loading.textContent='';
-  reportAccountId=null;reportAccountName='';reportAccountEmail='';renderReport();
-  [...($('#repAccounts')?.querySelectorAll('button[data-report-account]')||[])].find(button=>button.dataset.reportAccount===previous)?.focus();
+async function showReportAccounts(){
+  const previous=reportAccountId;
+  clearTimeout(reportFilterTimer);closeApplyModal();
+  loadReport.request=(loadReport.request||0)+1;
+  reportAccountId=null;reportAccountName='';reportAccountEmail='';reportRows=[];reportAccountLoading=false;
+  renderReport();await loadReport();
+  if(!reportAccountId)[...($('#repAccounts')?.querySelectorAll('button[data-report-account]')||[])].find(button=>button.dataset.reportAccount===previous)?.focus();
 }
 
 
@@ -1023,47 +1040,90 @@ function reportLocalDay(value){
     return get('year')+'-'+get('month')+'-'+get('day');
   }catch{return '';}
 }
-const REPORT_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)';
+// Job-list payload deliberately excludes profiles, credentials and full descriptions.
+const REPORT_LIST_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email), application_log(notes, attempted_at)';
+const REPORT_DETAIL_SELECT='id, job_seeker_id, job_title, company_name, employer_name, job_url, location, status, skip_reason, agent_skipped_at, admin_application_requested_at, admin_applied_at, decided_at, discovered_at, job_custom_source_id, job_seekers(id, full_name, dedicated_email, phone, phone_alt, id_type, id_number, nationality, physical_address, city, province, postal_code, highest_qualification, field_of_study, current_employer, current_position, years_experience, skills, languages, drivers_license, bio, resume_url), job_custom_sources(id, company_name, login_url, admin_username, admin_password, login_notes), application_log(result, notes, attempted_at, verification_status, confirmation_text, confirmation_url, confirmation_reference)';
 async function loadReport(){
+  clearTimeout(reportFilterTimer);
   const request=(loadReport.request||0)+1;loadReport.request=request;
-  const accountId=reportAccountId;
-  const loading=$('#repLoadStatus');if(loading)loading.textContent=accountId?'Fetching this account’s latest jobs…':'Loading application queue accounts…';
-  const all=[];const size=300;let offset=0;let expected=null;
+  const accountId=reportAccountId,key=reportFilterKey();
+  const loading=$('#repLoadStatus');if(loading)loading.textContent=accountId?'Fetching this account’s latest jobs…':'Loading account names and job counts…';
   try{
+    if(!accountId){
+      const {data,error}=await sb.rpc('admin_queue_account_summaries',reportFilters());
+      if(request!==loadReport.request||reportAccountId||key!==reportFilterKey())return;
+      if(error)throw error;
+      if(!data||!Array.isArray(data.accounts))throw new Error('The server did not return account summaries');
+      reportOverview={...data,key};renderReport();
+      if(loading)loading.textContent='Loaded '+data.accounts.length+' account cards. Jobs load when you open an account.';
+      return;
+    }
+    reportAccountLoading=true;
+    const all=[];const size=300;let offset=0;let expected=null;
     for(;;){
-      let query=sb.from('job_matches').select(REPORT_SELECT,{count:'exact'}).is('admin_queue_deleted_at',null);
-      if(accountId)query=query.eq('job_seeker_id',accountId);
+      let query=sb.from('job_matches').select(REPORT_LIST_SELECT,offset===0?{count:'exact'}:{}).is('admin_queue_deleted_at',null);
+      query=accountId==='unassigned'?query.is('job_seeker_id',null):query.eq('job_seeker_id',accountId);
       const {data,error,count}=await query.order('discovered_at',{ascending:false}).order('id',{ascending:true}).range(offset,offset+size-1);
-      if(request!==loadReport.request)return;
+      if(request!==loadReport.request||accountId!==reportAccountId)return;
       if(error)throw error;
       if(Number.isFinite(count))expected=count;
       const page=data||[];
       if(!page.length){
-        if(expected!==null&&offset<expected)throw new Error('The server returned only part of the queue. Please retry; the list has not been replaced with incomplete data.');
+        if(expected!==null&&offset<expected)throw new Error('The server returned only part of this account’s queue. Please retry.');
         break;
       }
-      all.push(...page);
-      // A server may return fewer rows than requested. Advance by the actual
-      // response size; a short page is not proof that the queue has ended.
-      offset+=page.length;
+      all.push(...page);offset+=page.length;
       if(expected!==null&&offset>=expected)break;
     }
     const unique=[...new Map(all.map(row=>[row.id,row])).values()];
     if(expected!==null&&unique.length<expected)throw new Error('The queue changed while loading. Refresh again so every job can be included.');
-    const fresh=unique.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
-    if(accountId)reportRows=reportRows.filter(row=>reportAccountKey(row)!==accountId).concat(fresh);
-    else reportRows=fresh;
-    renderReport();
-    if(loading)loading.textContent='Loaded '+fresh.length+' saved jobs'+(accountId?' for '+reportAccountName:' across accounts')+'. Newest discoveries first.';
+    reportRows=unique.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
+    reportAccountLoading=false;renderReport();
+    if(loading)loading.textContent='Loaded '+reportRows.length+' saved jobs for '+reportAccountName+'. Newest discoveries first.';
   }catch(error){
-    if(request===loadReport.request&&loading)loading.textContent='Could not refresh the application queue: '+(error.message||'Connection error')+'. The previous list may be out of date.';
+    if(request===loadReport.request){
+      reportAccountLoading=false;renderReport();
+      if(!accountId&&(!reportOverview||reportOverview.key!==reportFilterKey()))$('#repAccounts').innerHTML='<div class="card empty">Could not load account cards. Use Refresh to retry.</div>';
+      if(accountId&&!reportRows.length)$('#repList').innerHTML='<div class="empty">Could not load this account’s jobs. Use Refresh to retry.</div>';
+      if(loading)loading.textContent='Could not refresh the application queue: '+(error.message||'Connection error')+'. Please retry; any displayed list may be out of date.';
+    }
   }
+}
+function reportStatsText(counts,total,label,matching){
+  const n=k=>Number(counts?.[k]||0);
+  return label+' — Saved discoveries: '+Number(total||0)+' · '+n('approved')+' user requests · '+n('pending')+' new · '+n('applied')+' completed · '+
+    '<b style="color:#ff8f8f">'+n('failed')+'</b> failed · '+
+    '<b style="color:var(--accent)">'+n('needs_manual_action')+'</b> needs manual · '+
+    '<b style="color:#f6c66c">'+n('captcha_blocked')+'</b> captcha blocked · '+
+    '<b style="color:#f6c66c">'+n('submission_unverified')+'</b> unverified · showing <b>'+Number(matching||0)+'</b>';
 }
 
 function renderReport(){
   const el = $('#repList');
   const stats = $('#repStats');
   if(!el) return;
+  const cards=$('#repAccounts'),accountView=$('#repAccountView');
+  if(cards)cards.classList.toggle('hidden',!!reportAccountId);
+  if(accountView)accountView.classList.toggle('hidden',!reportAccountId);
+  if(!reportAccountId){
+    el.innerHTML='';
+    if(!reportOverview||reportOverview.key!==reportFilterKey()){
+      if(cards)cards.innerHTML='<div class="card empty">Loading account cards…</div>';
+      if(stats)stats.textContent='';return;
+    }
+    const groups=reportOverview.accounts.slice().sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'})||String(a.id).localeCompare(String(b.id)));
+    if(stats)stats.innerHTML=reportStatsText(reportOverview.counts,reportOverview.total_saved,'All accounts',reportOverview.matching_jobs)+' jobs across <b>'+groups.length+'</b> accounts';
+    if(cards)cards.innerHTML=groups.length?groups.map(group=>{
+      const jobs=Number(group.job_count||0),requests=Number(group.request_count||0);
+      return '<button type="button" class="queue-account-card" data-report-account="'+esc(String(group.id||'unassigned'))+'" aria-label="Open application queue for '+esc(group.name)+'">'+
+        '<strong class="queue-account-name">'+esc(group.name)+'</strong>'+
+        (group.email?'<span class="queue-account-email">'+esc(group.email)+'</span>':'')+
+        '<span class="queue-account-meta"><span class="pill gray">'+jobs+' '+(jobs===1?'job':'jobs')+'</span>'+
+        (requests?'<span class="pill amber">'+requests+' '+(requests===1?'user request':'user requests')+'</span>':'')+'</span>'+
+        '<span class="queue-account-open">Open account →</span></button>';
+    }).join(''):'<div class="card empty">'+(reportOverview.total_saved?'No accounts match the current search, status and date filters.':'No application work is waiting.')+'</div>';
+    return;
+  }
   const q = ($('#repSearch')?.value || '').trim().toLowerCase();
   const filter = $('#repFilter')?.value || 'queue';
 
@@ -1084,45 +1144,21 @@ function renderReport(){
       const notes = (r.application_log||[]).map(l=>l.notes||'').join(' ');
       return (r.job_title||'').toLowerCase().includes(q) ||
              (r.company_name||'').toLowerCase().includes(q) ||
+             (r.skip_reason||'').toLowerCase().includes(q) ||
              seeker.toLowerCase().includes(q) ||
              email.toLowerCase().includes(q) ||
              notes.toLowerCase().includes(q);
     });
   }
 
-  // Stats line at the top: quick totals so eng sees the shape of the problems
-  const counts = { pending:0,approved:0,skipped:0,applied:0,failed:0,needs_manual_action:0,captcha_blocked:0,submission_unverified:0 };
-  for(const r of scope) if(counts[r.status] !== undefined) counts[r.status]++;
-  if(stats) stats.innerHTML = (reportAccountId?'This account — ':'All accounts — ')+'Saved discoveries: '+scope.length+' · '+counts.approved+' user requests · '+counts.pending+' new · '+counts.applied+' completed · '+
-    '<b style="color:#ff8f8f">'+counts.failed+'</b> failed · '+
-    '<b style="color:var(--accent)">'+counts.needs_manual_action+'</b> needs manual · '+
-    '<b style="color:#f6c66c">'+counts.captcha_blocked+'</b> captcha blocked · '+
-    '<b style="color:#f6c66c">'+counts.submission_unverified+'</b> unverified · '+
-    'showing <b>'+rows.length+'</b>';
-
-  const cards=$('#repAccounts'),accountView=$('#repAccountView');
-  if(cards)cards.classList.toggle('hidden',!!reportAccountId);
-  if(accountView)accountView.classList.toggle('hidden',!reportAccountId);
-  if(!reportAccountId){
-    const groups=groupReportAccounts(rows);
-    if(stats)stats.innerHTML+=' jobs across <b>'+groups.length+'</b> accounts';
-    if(cards)cards.innerHTML=groups.length?groups.map(group=>{
-      const requests=group.rows.filter(r=>r.status==='approved').length;
-      return '<button type="button" class="queue-account-card" data-report-account="'+esc(group.id)+'" aria-label="Open application queue for '+esc(group.name)+'">'+
-        '<strong class="queue-account-name">'+esc(group.name)+'</strong>'+
-        (group.email?'<span class="queue-account-email">'+esc(group.email)+'</span>':'')+
-        '<span class="queue-account-meta"><span class="pill gray">'+group.rows.length+' '+(group.rows.length===1?'job':'jobs')+'</span>'+
-        (requests?'<span class="pill amber">'+requests+' '+(requests===1?'user request':'user requests')+'</span>':'')+'</span>'+
-        '<span class="queue-account-open">Open account →</span></button>';
-    }).join(''):'<div class="card empty">'+(reportRows.length?'No accounts match the current search and status filter.':'No application work is waiting.')+'</div>';
-    el.innerHTML='';return;
-  }
+  const counts={};for(const r of scope)counts[r.status]=(counts[r.status]||0)+1;
+  if(stats)stats.innerHTML=reportStatsText(counts,scope.length,'This account',rows.length);
   const selected=groupReportAccounts(scope)[0];
   if(selected){reportAccountName=selected.name;reportAccountEmail=selected.email;}
   $('#repAccountName').textContent=reportAccountName||'Account unavailable';
   $('#repAccountEmail').textContent=reportAccountEmail;
   if(!rows.length){
-    el.innerHTML='<div class="empty">'+(scope.length?'No jobs for this account match the current search and status filter.':'No jobs remain for this account in the admin queue.')+'</div>';return;
+    el.innerHTML='<div class="empty">'+(reportAccountLoading?'Fetching this account’s latest jobs…':scope.length?'No jobs for this account match the current search and status filter.':'No jobs remain for this account in the admin queue.')+'</div>';return;
   }
 
   el.innerHTML = rows.map(r=>{
@@ -1171,9 +1207,23 @@ function renderReport(){
    company login credentials the agent uses (from job_custom_sources), and
    the seeker's profile fields with click-to-copy chips. Nothing is stored
    or sent — this is a read-only convenience surface. */
-function openApplyOnBehalf(reportId){
-  const r = reportRows.find(x => x.id === reportId);
-  if(!r){ alert('Row not found — try refreshing the report.'); return; }
+async function openApplyOnBehalf(reportId){
+  const row=reportRows.find(x=>x.id===reportId);
+  if(!row){toast('Job not found — refresh this account and retry','err');return;}
+  const request=++applyDetailRequest,accountId=reportAccountId;
+  const modal=document.getElementById('applyModal'),body=document.getElementById('applyBody');
+  body.innerHTML='<p role="status">Loading this application’s profile and login details…</p>';modal.classList.remove('hidden');
+  try{
+    const {data,error}=await sb.from('job_matches').select(REPORT_DETAIL_SELECT).eq('id',reportId).is('admin_queue_deleted_at',null).single();
+    if(request!==applyDetailRequest||accountId!==reportAccountId||modal.classList.contains('hidden'))return;
+    if(error)throw error;if(!data)throw new Error('This job is no longer in the admin queue');
+    renderApplyOnBehalf(data);
+  }catch(error){
+    if(request!==applyDetailRequest||modal.classList.contains('hidden'))return;
+    body.innerHTML='<p role="alert">Could not load application details: '+esc(error.message||'Connection error')+'</p><button class="btn" data-apply-report="'+esc(reportId)+'">Retry details</button>';
+  }
+}
+function renderApplyOnBehalf(r){
   const seeker = r.job_seekers || {};
   const creds  = r.job_custom_sources || null; // null for feed sources (Adzuna/Jobmail/RemoteOK)
   const employer = r.employer_name || r.company_name || '';
@@ -1332,6 +1382,8 @@ async function copyText(txt){
 }
 
 function closeApplyModal(){
+  applyDetailRequest++;
+  const body=document.getElementById('applyBody');if(body)body.innerHTML='';
   const m = document.getElementById('applyModal');
   if(m) m.classList.add('hidden');
 }
