@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="groq-hundred-slots-v1">
+<meta name="jobagent-build" content="approval-fast-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent — your job agent working even while you sleep</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
@@ -516,7 +516,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
-<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=groq-hundred-slots-v1">Return to admin / staff sign-in</a></section>
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=approval-fast-v1">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
   <div class="shell">
@@ -547,7 +547,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <div class="topbar-right"></div>
       </div>
 
-      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=groq-hundred-slots-v1">← Return to admin</a></div>
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=approval-fast-v1">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -938,7 +938,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 
 <div id="toasts"></div>
 
-<script src="supportAccess.js?v=groq-hundred-slots-v1"></script>
+<script src="supportAccess.js?v=approval-fast-v1"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -1038,12 +1038,13 @@ $$('.pw-toggle').forEach(btn=>{
 /* ================= APPLICATION CREDITS ================= */
 let creditBalance=null,creditReadEpoch=0;
 const approvalInFlight=new Set();
+let approvalNeedsCreditRefresh=false;
 function renderCredits(){
  const ready=Number.isInteger(creditBalance),dock=$('#creditDock');
  $('#creditBalance').textContent=ready?creditBalance.toLocaleString()+' tokens':'Balance unavailable';
  dock.setAttribute('aria-busy','false');dock.classList.toggle('low',ready&&creditBalance<10);
 }
-function resetCredits(){creditReadEpoch++;creditBalance=null;approvalInFlight.clear();renderCredits();document.querySelectorAll('.token-burst').forEach(el=>el.remove());}
+function resetCredits(){creditReadEpoch++;creditBalance=null;approvalInFlight.clear();approvalNeedsCreditRefresh=false;renderCredits();document.querySelectorAll('.token-burst').forEach(el=>el.remove());}
 async function loadCredits(){
  const userId=SUPPORT_REQUESTED?currentSeeker?.user_id:currentUser?.id,epoch=++creditReadEpoch;
  if(!userId){creditBalance=null;renderCredits();return;}
@@ -1227,14 +1228,14 @@ function showSupportFailure(message){
   PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
   $('#staffSupportName').textContent='';
   $('#supportGateMessage').textContent=message;
-  const url=new URL('admin.html',location.href);url.searchParams.set('v','groq-hundred-slots-v1');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  const url=new URL('admin.html',location.href);url.searchParams.set('v','approval-fast-v1');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
   $('#supportAdminLink').href=url.href;
 }
 async function enterApp(user){
   resetCredits();currentUser=user;
   if(SUPPORT_REQUESTED){
     const supportRequest=++supportAccessEpoch;
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: groq-hundred-slots-v1.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fast-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open the account from the admin app.');return;}
     try{
       const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
@@ -1277,7 +1278,7 @@ function startMatchLiveRefresh(){
   matchRefreshTimer=setInterval(refreshLiveMatchLists,60000);
 }
 async function refreshLiveMatchLists(){
-  if(matchRefreshBusy||document.hidden||!currentUser||!currentSeeker?.id)return;
+  if(matchRefreshBusy||approvalInFlight.size||document.hidden||!currentUser||!currentSeeker?.id)return;
   const userId=currentUser.id,seekerId=currentSeeker.id,epoch=matchRefreshEpoch;
   const controller=new AbortController();matchRefreshController=controller;matchRefreshBusy=true;
   const timeout=setTimeout(()=>controller.abort(),30000);
@@ -2188,14 +2189,20 @@ function renderMatches(){
     updateBulkBar();
     return;
   }
-  // Queued is an explicit user choice, not a confirmed application.
-  const statusPill = (s) => {
+  g.innerHTML = list.map(renderMatchCard).join('');
+  updateBulkBar();
+}
+
+// Approval changes no filters, locations, sort order or unrelated cards.
+// Reuse one renderer so targeted updates cannot drift from normal card markup.
+function matchStatusPill(s){
     if (s === 'applied') return '<span class="pill teal">✔ Applied</span>';
     if (s === 'approved') return '<span class="pill green">⏳ Queued for an agent</span>';
     if (s === 'skipped') return '<span class="pill skip">⏭ Skipped by agent</span>';
     return '<span class="pill gray">🔍 Discovered</span>'; // discovery stays saved through every outcome
-  };
-  g.innerHTML = list.map(m=>{
+}
+
+function renderMatchCard(m){
     // match_score is stored as an integer 0..100, not a fraction.
     const scoreHtml = m.match_score!=null
       ? '<span class="score">'+Math.round(m.match_score)+'% match</span>'
@@ -2203,10 +2210,10 @@ function renderMatches(){
     const requested=m.status==='approved';
     const uncertain=m.status==='submission_unverified';
     const canRequest=m.status!=='applied'&&!requested&&!uncertain;
-    return '<div class="mcard">'+
+    return '<div class="mcard" data-match-card="'+esc(m.id)+'">'+
       '<div class="mcard-top"><label style="display:flex;align-items:center;gap:8px">'+
       '<input type="checkbox" class="match-select" data-id="'+m.id+'" style="width:auto" '+(state.selected.has(m.id)?'checked':'')+'>'+
-      scoreHtml+'</label>'+statusPill(m.status)+'</div>'+
+      scoreHtml+'</label>'+matchStatusPill(m.status)+'</div>'+
       '<div><h4>'+esc(privateJobText(m.job_title))+'</h4>'+(employerLabel(m)?'<div class="co">'+esc(employerLabel(m))+'</div>':'')+'</div>'+
       '<div class="meta">'+(m.location?'<span>📍 '+esc(canonicalLocationLabel(cleanJobText(m.location)))+'</span>':'')+'</div>'+
       (isSkippedMatch(m) && m.skip_reason ? noteBox('skip-note',m.id,'⚠️ '+privateJobText(m.skip_reason),'') : '')+
@@ -2215,14 +2222,18 @@ function renderMatches(){
       (m.match_reason && !/^Matched from /i.test(m.match_reason) ? '<div class="blurb">"'+esc(privateJobText(m.match_reason))+'"</div>' : '')+
       '<div class="acts">'+
       '<div class="acts-btns">'+
-      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Approve this job" '+(approvalInFlight.has(m.id)?'disabled':'')+'>Approve</button>' : '')+
+      (canRequest ? '<button class="btn btn-primary btn-sm" data-action="apply" data-id="'+m.id+'" title="Approve this job" '+(approvalInFlight.has(m.id)?'disabled aria-busy="true"':'')+'>'+(approvalInFlight.has(m.id)?'Submitting…':'Approve')+'</button>' : '')+
       '<button class="btn btn-danger btn-sm" data-action="delete" data-id="'+m.id+'">Delete</button>'+
       '<button class="btn btn-ghost btn-sm" data-action="view" data-id="'+m.id+'">View</button>'+
       (coLabel(m.company_name) ? '<button class="btn btn-ghost btn-sm" title="Block company" data-quickblock-co="'+esc(m.company_name||'')+'">Block company</button>' : '')+
       '</div>'+
       '<span class="found">Discovered '+esc(discoveryDate(m.discovered_at))+'</span></div></div>';
-  }).join('');
-  updateBulkBar();
+
+}
+function updateMatchCard(id){
+  const match=matches.find(m=>m.id===id);
+  const card=[...$('#matchGrid').children].find(el=>el.dataset.matchCard===id);
+  if(match&&card)card.outerHTML=renderMatchCard(match);
 }
 
 let lastFilteredIds=[];
@@ -2293,23 +2304,34 @@ $('#matchGrid').addEventListener('click', async (e)=>{
     if(SUPPORT_REQUESTED){toast(window.JobAgentSupport.message,'warn');return;}
     if(approvalInFlight.has(id))return;
     const rect=btn.getBoundingClientRect(),userId=currentUser?.id,seekerId=currentSeeker?.id;
-    approvalInFlight.add(id);btn.disabled=true;btn.textContent='Submitting…';
+    if(approvalInFlight.size)approvalNeedsCreditRefresh=true;
+    // A background read started before this request must not restore stale status.
+    if(matchRefreshController)matchRefreshController.abort();
+    approvalInFlight.add(id);btn.disabled=true;btn.setAttribute('aria-busy','true');btn.textContent='Submitting…';
     try{
       const {data,error}=await sb.rpc('request_job_application',{p_match_id:id});
       if(userId!==currentUser?.id||seekerId!==currentSeeker?.id)return;
       if(error)throw error;
       if(data?.status!=='approved'||data.id!==id)throw Error('Approval was not confirmed. Refresh and try again.');
       creditReadEpoch++;
-      if(Number.isInteger(data.credit_balance)){creditBalance=data.credit_balance;renderCredits();}else{await loadCredits();}
-      if(mm){if(isSkippedMatch(mm)&&!mm.agent_skipped_at)mm.agent_skipped_at=new Date().toISOString();mm.status='approved';mm.admin_application_requested_at=mm.admin_application_requested_at||new Date().toISOString();}
+      if(Number.isInteger(data.credit_balance)){creditBalance=data.credit_balance;renderCredits();}else{approvalNeedsCreditRefresh=true;}
+      const match=matches.find(m=>m.id===id);
+      if(match){if(isSkippedMatch(match)&&!match.agent_skipped_at)match.agent_skipped_at=new Date().toISOString();match.status='approved';match.admin_application_requested_at=match.admin_application_requested_at||new Date().toISOString();}
       if(data.charged===true&&data.tokens_used===1)showTokenSpark(rect);
       toast('Approval queued.','ok queue-success');
-      renderMatches();renderDashboard();loadCredits();
+      renderDashboard();
     }catch(error){
       if(userId!==currentUser?.id||seekerId!==currentSeeker?.id)return;
       toast('⚠ '+(error.message||'Could not confirm approval. Please refresh before retrying.'),'err');
-      await loadCredits();
-    }finally{approvalInFlight.delete(id);if(userId===currentUser?.id&&seekerId===currentSeeker?.id)renderMatches();}
+      approvalNeedsCreditRefresh=true;
+    }finally{
+      if(userId===currentUser?.id&&seekerId===currentSeeker?.id){
+        approvalInFlight.delete(id);updateMatchCard(id);
+        // Concurrent responses can arrive out of order. Reconcile once, after
+        // all pending approvals settle, not after every successful click.
+        if(!approvalInFlight.size&&approvalNeedsCreditRefresh){approvalNeedsCreditRefresh=false;loadCredits();}
+      }
+    }
     return;
   }
   if(action==='delete'){
@@ -2820,7 +2842,7 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // password" screen.
   if(SUPPORT_REQUESTED){
     $('#authWrap').classList.add('hidden');
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: groq-hundred-slots-v1.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-fast-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open it from admin.');return;}
     try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
     return;
