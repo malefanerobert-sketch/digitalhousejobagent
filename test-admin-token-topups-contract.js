@@ -1,0 +1,16 @@
+'use strict';
+const fs=require('fs'),assert=require('assert/strict'),vm=require('vm');
+const html=fs.readFileSync('admin.html','utf8'),sql=fs.readFileSync('migration_admin_token_topups.sql','utf8');
+for(const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
+assert(html.includes('data-token-topup')&&html.includes('id="tokenTopupModal"'));
+assert(html.includes("sb.rpc('admin_top_up_application_credits',payload)"));
+assert(html.includes('context.pending')&&html.includes('crypto.randomUUID()')&&html.includes('sessionStorage.setItem(context.storageKey,JSON.stringify(context.pending))'));
+assert(html.includes('if(!context?.ready||context.busy)return'));
+assert.equal((sql.match(/Admin access is required/g)||[]).length,2);
+assert(sql.includes('WHERE user_id=target_user FOR UPDATE'));
+assert(sql.includes('CREATE UNIQUE INDEX application_credit_ledger_admin_request_unique'));
+assert(sql.includes('receipt.admin_actor_id<>staff_id')&&sql.includes('receipt.amount<>p_amount'));
+assert(sql.includes('INSERT INTO public.application_credit_ledger')&&sql.includes("'admin_topup',remaining,staff_id,p_request_id,trim(p_note)"));
+assert(!/GRANT\s+(?:ALL|INSERT|UPDATE|DELETE).*ON\s+(?:TABLE\s+)?public\.application_credit_(?:wallets|ledger)/i.test(sql));
+assert(sql.includes('2147483647')&&sql.includes("ERRCODE='22003'"));
+console.log('PASS staff-only RPCs, atomic wallet lock and audit, idempotency binding, input/overflow limits, no direct write grants, safe retry controls');

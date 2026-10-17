@@ -41,6 +41,8 @@ jobs:
           node --check test-approval-concurrency.js
           node --check test-approval-motion.js
           node test-approved-queue-contract.js
+          node test-admin-token-topups-contract.js
+          node --check test-admin-token-topups.js
           node --check test-lazy-queue.js
           node --check test-application-documents.js
 
@@ -52,7 +54,7 @@ jobs:
           mkdir -p _site
           cp index.html admin.html supportAccess.js _site/
           touch _site/.nojekyll
-          node -e 'require("fs").writeFileSync("_site/build.json", JSON.stringify({commit:process.env.GITHUB_SHA,version:"admin-approved-queue-v1"})+"\n")'
+          node -e 'require("fs").writeFileSync("_site/build.json", JSON.stringify({commit:process.env.GITHUB_SHA,version:"admin-token-topup-v1"})+"\n")'
           node validatePagesBuild.js _site
 
       - name: Upload artifact

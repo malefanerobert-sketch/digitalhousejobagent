@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="admin-approved-queue-v1">
+<meta name="jobagent-build" content="admin-token-topup-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -134,6 +134,11 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
  .application-copy-row{flex-wrap:wrap}
  .application-copy-label{min-width:0!important;flex:1 1 100%}
 }
+[data-token-topup]{min-height:44px}
+#tokenTopupReload[hidden]{display:none}
+#tokenTopupModal .btn,#tokenTopupClose{min-height:44px}
+#tokenTopupClose{min-width:44px}
+#tokenTopupModal .field label{font-size:13px}
 </style>
 </head>
 <body>
@@ -286,7 +291,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Approved-only queue · admin-approved-queue-v1</p>
+        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Approved-only queue · admin-token-topup-v1</p>
         <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
         <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
         <div id="repAccountView" class="hidden">
@@ -472,6 +477,23 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
 
 <div id="toasts"></div>
 
+<!-- Admin-only token top-up; database authorizes staff and records a receipt. -->
+<div id="tokenTopupModal" class="modal hidden" onclick="if(event.target===this)closeTokenTopup()">
+ <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tokenTopupTitle" style="max-width:460px">
+  <div class="modal-head"><h3 id="tokenTopupTitle">⚙ Top up tokens</h3><button type="button" id="tokenTopupClose" class="x-btn" onclick="closeTokenTopup()" aria-label="Close token top-up">&times;</button></div>
+  <p id="tokenTopupName" style="overflow-wrap:anywhere"></p><p id="tokenTopupEmail" class="sub" style="overflow-wrap:anywhere;margin:4px 0 16px"></p>
+  <p class="sub" style="font-size:13px">Current balance</p><p id="tokenTopupBalance" role="status" style="color:var(--ok);font-size:20px;margin:4px 0 24px">Loading balance…</p>
+  <form id="tokenTopupForm" onsubmit="submitTokenTopup(event)">
+   <div class="field"><label for="tokenTopupAmount">Tokens to add</label><input id="tokenTopupAmount" type="number" inputmode="numeric" min="1" max="1000000" step="1" required placeholder="e.g. 100"></div>
+   <div class="field"><label for="tokenTopupNote">Top-up reference / reason</label><textarea id="tokenTopupNote" required minlength="3" maxlength="500" rows="3" placeholder="e.g. Support credit or payment reference" style="resize:vertical"></textarea></div>
+   <p class="sub" style="font-size:13px;margin:12px 0 16px">Adds tokens to this account. Your staff identity, amount and reference are recorded.</p>
+   <button id="tokenTopupSave" type="submit" class="btn btn-primary" disabled>Add tokens</button>
+  </form>
+  <p id="tokenTopupMessage" role="status" aria-live="polite" style="font-size:14px;line-height:1.5;overflow-wrap:anywhere;margin-top:16px"></p>
+  <button id="tokenTopupReload" type="button" class="btn" hidden onclick="openTokenTopup(tokenTopupContext.seekerId,tokenTopupContext.opener)">Retry balance</button>
+ </div>
+</div>
+
 <!-- Apply-on-behalf modal: opened from the Application Report. Gives the admin
      the credentials + seeker details needed to finish a submission manually. -->
 <div id="applyModal" class="modal hidden" onclick="if(event.target===this) closeApplyModal()">
@@ -624,6 +646,7 @@ async function doSignin(){
 }
 
 async function signOut(){
+  closeTokenTopup(true);
   closeApplyModal();
   await sb.auth.signOut();
   $('#app').classList.add('hidden');
@@ -643,7 +666,7 @@ async function enterApp(){
   $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
   const supportReturn=new URLSearchParams(location.search).get('support');
   if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
-    const url=new URL('index.html',location.href);url.searchParams.set('v','admin-approved-queue-v1');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
+    const url=new URL('index.html',location.href);url.searchParams.set('v','admin-token-topup-v1');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -1991,6 +2014,75 @@ async function saveSettings(){
   toast('Saved ✓ — the Railway worker picks this up on its next run','ok');
 }
 
+/* ================= ADMIN TOKEN TOPUPS ================= */
+let tokenTopupContext=null,tokenTopupEpoch=0;
+function tokenTopupStorageKey(staffId,seekerId){return 'jobagent_topup_pending:'+staffId+':'+seekerId;}
+function tokenTopupActive(context){return tokenTopupContext===context&&!$('#tokenTopupModal').classList.contains('hidden');}
+function tokenTopupControls(){
+ const c=tokenTopupContext;if(!c)return;
+ $('#tokenTopupAmount').readOnly=!!c.busy||!!c.pending;$('#tokenTopupNote').readOnly=!!c.busy||!!c.pending;
+ $('#tokenTopupForm').setAttribute('aria-busy',String(!!c.busy));
+ $('#tokenTopupSave').disabled=!!c.busy||!c.ready;
+ $('#tokenTopupSave').textContent=c.busy?'Adding tokens…':c.pending?'Retry same top-up':'Add tokens';
+ $('#tokenTopupClose').disabled=!!c.busy;
+}
+function closeTokenTopup(force=false){
+ if(tokenTopupContext?.busy&&!force)return;
+ tokenTopupEpoch++;const focus=tokenTopupContext?.opener;tokenTopupContext=null;
+ $('#tokenTopupModal').classList.add('hidden');$('#tokenTopupForm').reset();$('#tokenTopupMessage').textContent='';
+ if(focus?.isConnected)focus.focus();
+}
+async function openTokenTopup(seekerId,opener=null){
+ if(tokenTopupContext?.busy)return;
+ const account=accounts.find(a=>a.id===seekerId);if(!account)return;
+ const context={seekerId,opener,epoch:++tokenTopupEpoch,ready:false,busy:false,pending:null};tokenTopupContext=context;
+ $('#tokenTopupForm').reset();$('#tokenTopupName').textContent=account.full_name||account.dedicated_email||'Account';
+ $('#tokenTopupEmail').textContent=account.dedicated_email||'';$('#tokenTopupBalance').textContent='Loading balance…';
+ $('#tokenTopupMessage').textContent='';$('#tokenTopupReload').hidden=true;$('#tokenTopupModal').classList.remove('hidden');tokenTopupControls();
+ try{
+  const {data,error}=await sb.rpc('admin_get_application_credit_balance',{p_job_seeker_id:seekerId});
+  if(!tokenTopupActive(context))return;if(error)throw error;
+  if(data?.job_seeker_id!==seekerId||!Number.isInteger(data.balance)||data.balance<0||!data.staff_id)throw Error('Could not confirm this account’s token balance');
+  context.staffId=data.staff_id;context.storageKey=tokenTopupStorageKey(data.staff_id,seekerId);
+  const saved=sessionStorage.getItem(context.storageKey);
+  if(saved){const draft=JSON.parse(saved);if(draft.p_job_seeker_id!==seekerId||!draft.p_request_id||!Number.isInteger(draft.p_amount)||draft.p_amount<1||draft.p_amount>1000000||typeof draft.p_note!=='string')throw Error('Pending top-up needs staff review');context.pending=draft;$('#tokenTopupAmount').value=draft.p_amount;$('#tokenTopupNote').value=draft.p_note;$('#tokenTopupMessage').textContent='A previous top-up has an unconfirmed result. Retry the same request safely; it cannot be added twice.';}
+  $('#tokenTopupBalance').textContent=data.balance.toLocaleString()+' tokens';context.ready=true;tokenTopupControls();$('#tokenTopupAmount').focus();
+ }catch(error){if(!tokenTopupActive(context))return;$('#tokenTopupBalance').textContent='Balance unavailable';$('#tokenTopupMessage').textContent=error.message||'Could not load balance';$('#tokenTopupReload').hidden=false;}
+}
+async function submitTokenTopup(event){
+ event?.preventDefault();const context=tokenTopupContext;if(!context?.ready||context.busy)return;
+ const amount=Number($('#tokenTopupAmount').value),note=$('#tokenTopupNote').value.trim();
+ if(!Number.isInteger(amount)||amount<1||amount>1000000||note.length<3||note.length>500){$('#tokenTopupMessage').textContent='Enter 1–1,000,000 whole tokens and a reference of 3–500 characters.';return;}
+ if(!context.pending){
+  if(!confirm('Add '+amount.toLocaleString()+' tokens to '+$('#tokenTopupName').textContent+'?'))return;
+  context.pending={p_job_seeker_id:context.seekerId,p_amount:amount,p_note:note,p_request_id:crypto.randomUUID()};
+  try{sessionStorage.setItem(context.storageKey,JSON.stringify(context.pending));}catch{context.pending=null;$('#tokenTopupMessage').textContent='Browser session storage is unavailable. Enable it before adding tokens safely.';return;}
+ }
+ const payload={...context.pending};context.busy=true;tokenTopupControls();$('#tokenTopupMessage').textContent='';
+ try{
+  const {data,error}=await sb.rpc('admin_top_up_application_credits',payload);
+  if(!tokenTopupActive(context))return;
+  if(error){if(['22023','22003','42501','P0001','23503','23514','23505','22P02'].includes(error.code)){try{sessionStorage.removeItem(context.storageKey);}catch{}context.pending=null;}throw error;}
+  if(data?.job_seeker_id!==context.seekerId||data.request_id!==payload.p_request_id||data.amount!==payload.p_amount||!Number.isInteger(data.balance)||data.balance<0||!data.receipt_id)throw Error('The server response could not be confirmed');
+  try{sessionStorage.removeItem(context.storageKey);}catch{}context.pending=null;
+  $('#tokenTopupBalance').textContent=data.balance.toLocaleString()+' tokens';$('#tokenTopupForm').reset();
+  $('#tokenTopupMessage').textContent=(data.already_processed?'Top-up already recorded':'Added '+data.amount.toLocaleString()+' tokens')+'. Current balance: '+data.balance.toLocaleString()+' tokens. Receipt: '+data.receipt_id;
+  toast('Token top-up recorded','ok');
+ }catch(error){if(tokenTopupActive(context))$('#tokenTopupMessage').textContent=(error.message||'Connection failed')+(context.pending?' — Result not confirmed. Retry the same top-up; it will not be added twice.':'');}
+ finally{if(tokenTopupActive(context)){context.busy=false;tokenTopupControls();}}
+}
+document.addEventListener('keydown',event=>{
+ if($('#tokenTopupModal').classList.contains('hidden'))return;
+ if(event.key==='Escape'){event.preventDefault();closeTokenTopup();return;}
+ if(event.key==='Tab'){
+  const controls=[...$('#tokenTopupModal').querySelectorAll('button,input,textarea')].filter(el=>!el.disabled&&el.getClientRects().length);
+  const first=controls[0],last=controls.at(-1);
+  if(event.shiftKey&&(document.activeElement===first||!$('#tokenTopupModal').contains(document.activeElement))){event.preventDefault();last?.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+ }
+});
+/* ================= END ADMIN TOKEN TOPUPS ================= */
+
 /* ================= ACCOUNTS ================= */
 // Per-seeker count of user messages the admin hasn't opened yet.
 let supportUnreadBy = {};
@@ -2022,12 +2114,13 @@ function renderAccounts(){
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
         '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
-        '<a class="support-account-link" href="index.html?v=admin-approved-queue-v1&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
+        '<a class="support-account-link" href="index.html?v=admin-token-topup-v1&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
       '<span class="pill '+(discoveryMode==='auto'?'amber':discoveryMode==='both'?'green':'gray')+'">'+esc(discoveryMode==='auto'?'Auto':(discoveryMode==='both'?'Manual+Auto':'Manual'))+'</span>'+
       '<span style="color:var(--muted);font-size:12px">Titles: '+esc((a.job_title_keywords||[]).join(', ')||'—')+'</span>'+
+      '<button class="btn btn-sm" data-token-topup="'+a.id+'">⚙ Top up tokens</button>'+
       '<button class="btn btn-sm" data-toggle-details="'+a.id+'">⚙ Settings</button>'+
       '<button class="btn btn-sm" data-toggle-status="'+a.id+'">'+(isPaused?'▶ Reactivate':'⏸ Pause')+'</button>'+
       '<button class="btn btn-danger btn-sm" data-delete-acct="'+a.id+'">🗑 Delete</button>'+
@@ -2241,6 +2334,7 @@ function renderAccounts(){
       renderAccounts();
     });
   });
+  el.querySelectorAll('[data-token-topup]').forEach(btn=>btn.addEventListener('click',()=>openTokenTopup(btn.dataset.tokenTopup,btn)));
   el.querySelectorAll('[data-delete-acct]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const id=btn.dataset.deleteAcct;

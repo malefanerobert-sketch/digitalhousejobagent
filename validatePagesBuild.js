@@ -7,7 +7,7 @@ function validate(directory){
  for(const name of fs.readdirSync(root))if(!allowed.has(name))throw new Error('Unexpected file in public artifact: '+name);
  for(const name of ['index.html','admin.html']){
   const html=fs.readFileSync(path.join(root,name),'utf8');
-  if(!html.includes('name="jobagent-build" content="admin-approved-queue-v1"'))throw new Error('Stale HTML build: '+name);
+  if(!html.includes('name="jobagent-build" content="admin-token-topup-v1"'))throw new Error('Stale HTML build: '+name);
   for(const match of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)){
    if(/^(?:https?:)?\/\//.test(match[1]))continue;
    const asset=decodeURIComponent(match[1].split(/[?#]/)[0]),resolved=path.resolve(root,asset);
@@ -18,7 +18,8 @@ function validate(directory){
  const index=fs.readFileSync(path.join(root,'index.html'),'utf8'),admin=fs.readFileSync(path.join(root,'admin.html'),'utf8');
  if(!index.includes('id="creditDock"')||!index.includes('data.credit_balance')||!index.includes('data.charged===true&&data.tokens_used===1'))throw new Error('Missing server-confirmed credit UI');
  if((admin.match(/\.not\('admin_application_requested_at','is',null\)/g)||[]).length!==2||!admin.includes('isUserRequestedMatch')||admin.includes('All saved matches'))throw new Error('Approved-only queue guards missing');
- if(!index.includes('supportAccess.js?v=admin-approved-queue-v1'))throw new Error('Support helper is not versioned');
+ if(!index.includes('supportAccess.js?v=admin-token-topup-v1'))throw new Error('Support helper is not versioned');
+ if(!admin.includes('id="tokenTopupModal"')||!admin.includes("sb.rpc('admin_top_up_application_credits'")||!admin.includes('data-token-topup'))throw new Error('Admin token top-up controls missing');
  if(!admin.includes("sb.rpc('admin_queue_account_summaries'")||!admin.includes('REPORT_LIST_SELECT'))throw new Error('Legacy admin queue in deployment artifact');
  if(!admin.includes('id="applyDocuments"')||!admin.includes("sb.from('job_seeker_documents')")||!admin.includes('createSignedUrl(location.path,3600)'))throw new Error('Missing applicant document review or short-lived signing');
  if(!admin.includes('const GROQ_SLOT_COUNT = 100;')||!admin.includes('K1–K100'))throw new Error('Stale Groq slot limit in admin artifact');
@@ -27,7 +28,7 @@ function validate(directory){
  new vm.Script(fs.readFileSync(path.join(root,'supportAccess.js'),'utf8'));
  const build=JSON.parse(fs.readFileSync(path.join(root,'build.json'),'utf8'));
  if(process.env.EXPECTED_PAGES_SHA&&build.commit!==process.env.EXPECTED_PAGES_SHA)throw new Error('Published manifest is not the requested commit');
- if(build.version!=='admin-approved-queue-v1'||!build.commit)throw new Error('Invalid build manifest');
+ if(build.version!=='admin-token-topup-v1'||!build.commit)throw new Error('Invalid build manifest');
  return 'PASS public artifact contains matched frontend builds, required support helper, lightweight queue and no extra worker files';
 }
 if(require.main===module){try{console.log(validate(process.argv[2]||'_site'));}catch(error){console.error(error.message);process.exitCode=1;}}
