@@ -9,8 +9,9 @@ const effect=document.querySelector('.token-burst'),label=effect.querySelector('
 const sample=t=>{animations.forEach(a=>{a.pause();a.currentTime=t;});const sm=new DOMMatrixReadOnly(getComputedStyle(spark).transform),lm=new DOMMatrixReadOnly(getComputedStyle(label).transform);return {sparkX:sm.m41,labelY:lm.m42,labelOpacity:Number(getComputedStyle(label).opacity),sparkOpacity:Number(getComputedStyle(spark).opacity)};};
 try{
  if(animations.length!==21||animations.some(a=>a.effect.getTiming().duration!==2000))throw Error('Both effects must be two seconds');
+ if(getComputedStyle(spark).width!=='3px'||getComputedStyle(spark).height!=='7px'||parseFloat(spark.style.getPropertyValue('--dx'))!==64)throw Error('Compact particle size or spread missing');
  const initial=sample(0),early=sample(500),middle=sample(1000),end=sample(2000);
- if(early.sparkX<60)throw Error('Burst still too slow in first second');
+ if(early.sparkX<parseFloat(spark.style.getPropertyValue('--dx'))*.77)throw Error('Burst still too slow in first second');
  if(initial.labelY-early.labelY<35)throw Error('Token text still drifts too slowly');
  if(early.sparkX<(middle.sparkX-early.sparkX)*3)throw Error('No distinct initial burst');
  if(end.labelOpacity!==0||end.sparkOpacity!==0)throw Error('Effects do not finish at two seconds');

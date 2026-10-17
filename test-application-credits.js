@@ -52,7 +52,7 @@ const tests=String.raw`
    check(effect.querySelectorAll('i').length===20,'Two radial rings of small firework sparks');
    const style=getComputedStyle(effect),sparkStyle=getComputedStyle(effect.querySelector('i'));
    check(style.backgroundColor==='rgba(0, 0, 0, 0)'&&style.borderTopWidth==='0px'&&style.width==='0px','No visible badge, card or box');
-   check(parseFloat(sparkStyle.width)===4&&parseFloat(sparkStyle.height)===9,'Slightly larger sparks rather than flame shapes');
+   check(parseFloat(sparkStyle.width)===3&&parseFloat(sparkStyle.height)===7,'Compact spark particles rather than flame shapes');
    const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(255, 241, 191)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
    const center=el=>{const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};const tokenInitial=center(label);
    if(!params.has('reduced')){const r=label.getBoundingClientRect();check(r.left>=0&&r.right<=innerWidth,'Token phrase fits viewport');}
