@@ -56,10 +56,10 @@ const tests=String.raw`
    const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(255, 241, 191)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
    const center=el=>{const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};const tokenInitial=center(label);
    if(!params.has('reduced')){const r=label.getBoundingClientRect();check(r.left>=0&&r.right<=innerWidth,'Token phrase fits viewport');}
-   if(!params.has('reduced'))check(ls.animationName==='token-spend-snap'&&ls.animationDuration==='4s','Token phrase finishes in four seconds');
+   if(!params.has('reduced'))check(ls.animationName==='token-spend-snap'&&ls.animationDuration==='2s','Token phrase finishes in two seconds');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
-   else check(sparkStyle.animationName==='token-firework-snap'&&sparkStyle.animationDuration==='4s','Four-second radial firework motion');
-   if(mode!=='snapshot'){await wait(1000);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');if(!params.has('reduced')){const a=center(label);check(a.x<tokenInitial.x,'Token phrase keeps its leftward drift');}await wait(3000);if(!params.has('reduced'))check(parseFloat(getComputedStyle(label).opacity)===0,'Token phrase finishes after four seconds');await wait(300);check(!document.querySelector('.token-burst'),'Fireworks cleaned up after four-second animation');}
+   else check(sparkStyle.animationName==='token-firework-snap'&&sparkStyle.animationDuration==='2s','Two-second radial firework motion');
+   if(mode!=='snapshot'){await wait(1000);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');if(!params.has('reduced')){const a=center(label);check(a.x<tokenInitial.x,'Token phrase keeps its leftward drift');}await wait(1300);check(!document.querySelector('.token-burst'),'Both animations cleaned up after two seconds');}
 
   }
  }

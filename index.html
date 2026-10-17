@@ -428,10 +428,10 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 #app main{min-width:0}
 #app .match-grid{grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr))}
 .token-burst{position:fixed;z-index:250;pointer-events:none;width:0;height:0;isolation:isolate}
-.token-burst i{position:absolute;left:0;top:0;width:4px;height:9px;border-radius:50%;color:#ffd65c;background:currentColor;box-shadow:0 0 4px currentColor,0 0 9px currentColor;animation:token-firework-snap 4s linear forwards}
+.token-burst i{position:absolute;left:0;top:0;width:4px;height:9px;border-radius:50%;color:#ffd65c;background:currentColor;box-shadow:0 0 4px currentColor,0 0 9px currentColor;animation:token-firework-snap 2s linear forwards}
 .token-burst i:nth-child(3n){color:#ff7355}.token-burst i:nth-child(4n){color:#fff1a6;width:3px;height:7px}
 .token-burst i::after{content:"";position:absolute;left:1px;top:1px;width:1px;height:3px;border-radius:50%;background:#fff8d0}
-.token-spend-label{position:absolute;left:0;top:0;display:block;white-space:nowrap;text-align:center;color:#fff1bf;font-size:10px;font-weight:400;line-height:1.2;text-shadow:-1px -1px 1px #0a0f1e,1px -1px 1px #0a0f1e,-1px 1px 1px #0a0f1e,1px 1px 1px #0a0f1e,0 0 7px rgba(255,174,54,.6);animation:token-spend-snap 4s linear forwards}
+.token-spend-label{position:absolute;left:0;top:0;display:block;white-space:nowrap;text-align:center;color:#fff1bf;font-size:10px;font-weight:400;line-height:1.2;text-shadow:-1px -1px 1px #0a0f1e,1px -1px 1px #0a0f1e,-1px 1px 1px #0a0f1e,1px 1px 1px #0a0f1e,0 0 7px rgba(255,174,54,.6);animation:token-spend-snap 2s linear forwards}
 @keyframes token-spend-snap{0%{opacity:0;transform:translate(calc(-50% + 90px),-8px) scale(.85)}5%{opacity:1}12%{transform:translate(calc(-50% + 70px),-28px) scale(1)}32%{transform:translate(calc(-50% + 50px),-56px) scale(1)}60%{transform:translate(calc(-50% + 30px),-76px) scale(1)}65%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + 10px),-88px) scale(.95)}}
 @keyframes token-firework-snap{0%{opacity:0;transform:translate(0,0) rotate(var(--angle)) scale(.3)}5%{opacity:1}20%{transform:translate(calc(var(--dx)*.78),calc(var(--dy)*.78)) rotate(var(--angle)) scale(1)}55%{opacity:1;transform:translate(var(--dx),var(--dy)) rotate(var(--angle)) scale(.75)}100%{opacity:0;transform:translate(calc(var(--dx)*1.12),calc(var(--dy)*1.12 + 18px)) rotate(var(--angle)) scale(.2)}}
 @media(max-width:920px){.credit-dock{padding:8px 12px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
@@ -1069,7 +1069,7 @@ function showTokenSpark(rect){
  const label=document.createElement('span');label.className='token-spend-label';label.textContent='−1 token';
  label.style.left=Math.min(0,innerWidth-70-parseFloat(el.style.left)-120)+'px';
  el.append(label);
- document.body.append(el);setTimeout(()=>el.remove(),4200);
+ document.body.append(el);setTimeout(()=>el.remove(),2200);
 }
 
 /* ================= AUTH ================= */

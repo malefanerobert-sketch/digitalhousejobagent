@@ -22,7 +22,7 @@ function validate(directory){
  if(!admin.includes('id="applyDocuments"')||!admin.includes("sb.from('job_seeker_documents')")||!admin.includes('createSignedUrl(location.path,3600)'))throw new Error('Missing applicant document review or short-lived signing');
  if(!admin.includes('const GROQ_SLOT_COUNT = 100;')||!admin.includes('K1–K100'))throw new Error('Stale Groq slot limit in admin artifact');
  if(!index.includes('function updateMatchCard(id)')||!index.includes('list.map(renderMatchCard)'))throw new Error('Missing targeted approval card updates');
- if(!index.includes('animation:token-firework-snap 4s linear forwards')||!index.includes('animation:token-spend-snap 4s linear forwards')||!index.includes('setTimeout(()=>el.remove(),4200)'))throw new Error('Stale approval animation in deployed artifact');
+ if(!index.includes('animation:token-firework-snap 2s linear forwards')||!index.includes('animation:token-spend-snap 2s linear forwards')||!index.includes('setTimeout(()=>el.remove(),2200)'))throw new Error('Stale approval animation in deployed artifact');
  new vm.Script(fs.readFileSync(path.join(root,'supportAccess.js'),'utf8'));
  const build=JSON.parse(fs.readFileSync(path.join(root,'build.json'),'utf8'));
  if(process.env.EXPECTED_PAGES_SHA&&build.commit!==process.env.EXPECTED_PAGES_SHA)throw new Error('Published manifest is not the requested commit');
