@@ -56,9 +56,9 @@ const tests=String.raw`
    const label=effect.querySelector('.token-spend-label'),ls=getComputedStyle(label);check(ls.fontSize==='10px'&&ls.fontWeight==='400'&&ls.color==='rgb(255, 241, 191)'&&ls.backgroundColor==='rgba(0, 0, 0, 0)'&&ls.borderTopWidth==='0px'&&ls.padding==='0px','Small unboxed phrase');
    const center=el=>{const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};const tokenInitial=center(label);
    if(!params.has('reduced')){const r=label.getBoundingClientRect();check(r.left>=0&&r.right<=innerWidth,'Token phrase fits viewport');}
-   if(!params.has('reduced'))check(ls.animationName==='token-spend-drift'&&ls.animationDuration==='4s','Token phrase finishes in four seconds');
+   if(!params.has('reduced'))check(ls.animationName==='token-spend-snap'&&ls.animationDuration==='4s','Token phrase finishes in four seconds');
    if(params.has('reduced'))check(style.display==='none','Reduced-motion preference respected');
-   else check(sparkStyle.animationName==='token-firework'&&sparkStyle.animationDuration==='4s','Four-second radial firework motion');
+   else check(sparkStyle.animationName==='token-firework-snap'&&sparkStyle.animationDuration==='4s','Four-second radial firework motion');
    if(mode!=='snapshot'){await wait(1000);check(!!document.querySelector('.token-burst'),'Sparks remain after one second');if(!params.has('reduced')){const a=center(label);check(a.x<tokenInitial.x,'Token phrase keeps its leftward drift');}await wait(3000);if(!params.has('reduced'))check(parseFloat(getComputedStyle(label).opacity)===0,'Token phrase finishes after four seconds');await wait(300);check(!document.querySelector('.token-burst'),'Fireworks cleaned up after four-second animation');}
 
   }
@@ -70,7 +70,7 @@ const tests=String.raw`
 })().catch(e=>{const out=document.createElement('pre');out.id='test-result';out.textContent='FAIL '+e.stack;document.body.append(out);});
 `;
 let fixture=input.replace(/<link[^>]+(?:href="https:|rel="preconnect")[^>]*>/g,'').replace(/<script src="https:[^>]+><\/script>/g,'');
-fixture=fixture.replace('<script src="supportAccess.js?v=approval-fast-v1"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
+fixture=fixture.replace('<script src="supportAccess.js?v=approval-motion-v2"></script>',`<script>${setup.replaceAll('</script','<\\/script')}</script><script src="${site}/supportAccess.js"></script>`);
 fixture=fixture.replace('</body>',`<script>${tests.replaceAll('</script','<\\/script')}</script></body>`);fs.writeFileSync(root+'/credits-fixture.html',fixture);
 (async()=>{
 for(const [mode,width,reduced] of [['dashboard',1280],['dashboard',390],['success',1280],['success',390],['success',320],['zero',390],['retry',390],['network',1280],['snapshot',390],['snapshot',1280],['snapshot',320],['snapshot',390,true],['success',390,true]]){
