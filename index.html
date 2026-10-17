@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="approval-motion-v2">
+<meta name="jobagent-build" content="admin-approved-queue-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent — your job agent working even while you sleep</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
@@ -516,7 +516,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
   </div>
 </div>
 
-<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=approval-motion-v2">Return to admin / staff sign-in</a></section>
+<section id="supportGate" class="hidden" role="alert"><h2>Staff troubleshooting access</h2><p id="supportGateMessage" style="margin:16px 0"></p><a class="btn btn-primary" id="supportAdminLink" href="admin.html?v=admin-approved-queue-v1">Return to admin / staff sign-in</a></section>
 <!-- ======================= APP ======================= -->
 <div id="app" class="hidden">
   <div class="shell">
@@ -547,7 +547,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
         <div class="topbar-right"></div>
       </div>
 
-      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=approval-motion-v2">← Return to admin</a></div>
+      <div id="staffSupportBanner" class="support-banner hidden" role="status"><div><b id="staffSupportName"></b><div class="sub2">Staff troubleshooting · Read-only · Access logged. You are using your own staff session.</div></div><a class="btn btn-ghost btn-sm" href="admin.html?v=admin-approved-queue-v1">← Return to admin</a></div>
       <!-- DASHBOARD -->
       <section id="view-dashboard">
         <div class="banner hidden" id="setupBanner">
@@ -938,7 +938,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 
 <div id="toasts"></div>
 
-<script src="supportAccess.js?v=approval-motion-v2"></script>
+<script src="supportAccess.js?v=admin-approved-queue-v1"></script>
 <script>
 /* Script sits at the end of <body> (after all elements are parsed) and the
    Supabase CDN script above has no `defer`, so both are guaranteed ready by
@@ -1227,14 +1227,14 @@ function showSupportFailure(message){
   PF_FIELDS.forEach(([id,,kind])=>pfSetVal(id,null,kind));
   $('#staffSupportName').textContent='';
   $('#supportGateMessage').textContent=message;
-  const url=new URL('admin.html',location.href);url.searchParams.set('v','approval-motion-v2');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
+  const url=new URL('admin.html',location.href);url.searchParams.set('v','admin-approved-queue-v1');if(window.JobAgentSupport?.validId(SUPPORT_TARGET))url.searchParams.set('support',SUPPORT_TARGET);
   $('#supportAdminLink').href=url.href;
 }
 async function enterApp(user){
   resetCredits();currentUser=user;
   if(SUPPORT_REQUESTED){
     const supportRequest=++supportAccessEpoch;
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-motion-v2.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: admin-approved-queue-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open the account from the admin app.');return;}
     try{
       const {data,error}=await sb.rpc('admin_open_user_support',{p_seeker_id:SUPPORT_TARGET});
@@ -2841,7 +2841,7 @@ $('#cfYes').addEventListener('click', ()=>{ closeModal('confirmModal'); if(cfCb)
   // password" screen.
   if(SUPPORT_REQUESTED){
     $('#authWrap').classList.add('hidden');
-    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: approval-motion-v2.');return;}
+    if(!window.JobAgentSupport){showSupportFailure('The staff support component did not load. Refresh this page or return to admin. Build: admin-approved-queue-v1.');return;}
     if(!window.JobAgentSupport.validId(SUPPORT_TARGET)){showSupportFailure('This troubleshooting link has an invalid account ID. Open it from admin.');return;}
     try{const {data:{session}}=await sb.auth.getSession();if(!session){showSupportFailure('Your authorized staff session is required. Sign in through admin; no user password is needed.');return;}await enterApp(session.user);}catch(error){showSupportFailure(error.message||'Staff access could not be checked');}
     return;

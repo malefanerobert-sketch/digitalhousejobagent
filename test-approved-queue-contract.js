@@ -1,0 +1,15 @@
+'use strict';
+const fs=require('fs'),assert=require('assert/strict');
+const html=fs.readFileSync('admin.html','utf8');
+const sql=fs.readFileSync('migration_admin_approved_queue.sql','utf8');
+assert(sql.includes('AND m.admin_application_requested_at IS NOT NULL'));
+assert(sql.indexOf('AND m.admin_application_requested_at IS NOT NULL')<sql.indexOf('), filtered AS'));
+assert(sql.includes('user_id=auth.uid()')&&sql.includes("ERRCODE='42501'"));
+assert.equal((html.match(/\.not\('admin_application_requested_at','is',null\)/g)||[]).length,2);
+assert(html.includes('unique.filter(r=>isUserRequestedMatch(r)'));
+assert(html.includes('reportRows.filter(r=>isUserRequestedMatch(r)&&reportAccountKey(r)===reportAccountId)'));
+assert(html.includes('if(!row||!isUserRequestedMatch(row))'));
+assert(html.includes('if(!data||!isUserRequestedMatch(data))'));
+assert(!html.includes('All saved matches')&&!html.includes('value="pending">New discoveries'));
+assert(!/\b(?:UPDATE|DELETE FROM|INSERT INTO)\s+(?:public\.)?job_matches\b/i.test(sql),'No matches changed by queue migration');
+console.log('PASS approval provenance enforced in summary, list, render and review; no discovery mutation');

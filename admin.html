@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="jobagent-build" content="approval-motion-v2">
+<meta name="jobagent-build" content="admin-approved-queue-v1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JobAgent Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -268,12 +268,12 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
         <div class="card" style="margin-bottom:18px">
           <h3 style="margin-bottom:6px;font-size:15px">📋 Admin application queue</h3>
           <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-            Choose an account to see and manage its jobs. Account cards load first; jobs and application details load when opened. Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
+            Only jobs approved by the user appear here. Choose an account to manage its application requests. Account cards load first; jobs and application details load when opened. Railway discovers South African jobs only. US/global ATS company discovery is frozen; saved international records are retained. Admins complete all applications here. User-requested skipped jobs are labelled Queued for admin; uncertain earlier submissions must be checked before applying again.
           </p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <input class="search" id="repSearch" placeholder="🔍 Search user, company, title, error…" oninput="onReportFiltersChanged(true)" style="flex:1;min-width:min(260px,100%);max-width:none;margin-bottom:0">
             <select id="repFilter" onchange="onReportFiltersChanged()" style="width:auto;max-width:100%;padding:9px 12px;background:#182347;color:var(--text);border:1px solid var(--line);border-radius:8px">
-              <option value="queue">Open application work</option><option value="all">All saved matches</option><option value="pending">New discoveries</option><option value="approved">User requests</option><option value="skipped">Skipped by agent</option><option value="applied">Completed applications</option>
+              <option value="queue">Open application work</option><option value="all">All user-approved jobs</option><option value="approved">User requests</option><option value="skipped">Skipped by agent</option><option value="applied">Completed applications</option>
               <option value="failed">Failed</option>
               <option value="needs_manual_action">Needs manual action</option>
               <option value="captcha_blocked">CAPTCHA blocked</option>
@@ -286,7 +286,7 @@ main{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
           </div>
           <div id="repStats" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
         </div>
-        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Account-first queue · approval-motion-v2</p>
+        <p class="sub" id="queueBuild" style="font-size:11px;margin-bottom:8px">Approved-only queue · admin-approved-queue-v1</p>
         <p id="repLoadStatus" role="status" style="color:var(--muted);font-size:13px;margin-bottom:12px"></p>
         <div id="repAccounts" class="queue-account-grid" aria-label="Application queue accounts"></div>
         <div id="repAccountView" class="hidden">
@@ -643,7 +643,7 @@ async function enterApp(){
   $('#mainBox').classList.remove('hidden');$('#deniedBox').classList.add('hidden');
   const supportReturn=new URLSearchParams(location.search).get('support');
   if(supportReturn&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(supportReturn)){
-    const url=new URL('index.html',location.href);url.searchParams.set('v','approval-motion-v2');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
+    const url=new URL('index.html',location.href);url.searchParams.set('v','admin-approved-queue-v1');url.searchParams.set('support',supportReturn);location.replace(url.href);return;
   }
   await loadAccounts();
   await loadSettings();
@@ -1029,6 +1029,7 @@ function onReportFiltersChanged(debounce=false){
 let reportAccountId = null;
 let reportAccountName = '';
 let reportAccountEmail = '';
+function isUserRequestedMatch(row){return row.admin_application_requested_at!=null;}
 function reportAccountKey(row){return String(row.job_seeker_id||row.job_seekers?.id||'unassigned');}
 function groupReportAccounts(rows){
   const groups=new Map();
@@ -1086,7 +1087,7 @@ async function loadReport(){
     reportAccountLoading=true;
     const all=[];const size=300;let offset=0;let expected=null;
     for(;;){
-      let query=sb.from('job_matches').select(REPORT_LIST_SELECT,offset===0?{count:'exact'}:{}).is('admin_queue_deleted_at',null);
+      let query=sb.from('job_matches').select(REPORT_LIST_SELECT,offset===0?{count:'exact'}:{}).is('admin_queue_deleted_at',null).not('admin_application_requested_at','is',null);
       query=accountId==='unassigned'?query.is('job_seeker_id',null):query.eq('job_seeker_id',accountId);
       const {data,error,count}=await query.order('discovered_at',{ascending:false}).order('id',{ascending:true}).range(offset,offset+size-1);
       if(request!==loadReport.request||accountId!==reportAccountId)return;
@@ -1102,9 +1103,9 @@ async function loadReport(){
     }
     const unique=[...new Map(all.map(row=>[row.id,row])).values()];
     if(expected!==null&&unique.length<expected)throw new Error('The queue changed while loading. Refresh again so every job can be included.');
-    reportRows=unique.filter(r=>r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
+    reportRows=unique.filter(r=>isUserRequestedMatch(r)&&r.job_title!=='⚠ Watched page could not be read (not a job)'&&r.job_title!=='(watched page)');
     reportAccountLoading=false;renderReport();
-    if(loading)loading.textContent='Loaded '+reportRows.length+' saved jobs for '+reportAccountName+'. Newest discoveries first.';
+    if(loading)loading.textContent='Loaded '+reportRows.length+' user-approved jobs for '+reportAccountName+'. Newest discoveries first.';
   }catch(error){
     if(request===loadReport.request){
       reportAccountLoading=false;renderReport();
@@ -1116,7 +1117,7 @@ async function loadReport(){
 }
 function reportStatsText(counts,total,label,matching){
   const n=k=>Number(counts?.[k]||0);
-  return label+' — Saved discoveries: '+Number(total||0)+' · '+n('approved')+' user requests · '+n('pending')+' new · '+n('applied')+' completed · '+
+  return label+' — User-approved jobs: '+Number(total||0)+' · '+n('approved')+' awaiting admin · '+n('applied')+' completed · '+
     '<b style="color:#ff8f8f">'+n('failed')+'</b> failed · '+
     '<b style="color:var(--accent)">'+n('needs_manual_action')+'</b> needs manual · '+
     '<b style="color:#f6c66c">'+n('captcha_blocked')+'</b> captcha blocked · '+
@@ -1152,9 +1153,9 @@ function renderReport(){
   const q = ($('#repSearch')?.value || '').trim().toLowerCase();
   const filter = $('#repFilter')?.value || 'queue';
 
-  const scope=reportAccountId?reportRows.filter(r=>reportAccountKey(r)===reportAccountId):reportRows;
+  const scope=reportAccountId?reportRows.filter(r=>isUserRequestedMatch(r)&&reportAccountKey(r)===reportAccountId):reportRows.filter(isUserRequestedMatch);
   let rows = scope;
-  if(filter==='queue')rows=rows.filter(r=>['pending','approved','failed','needs_manual_action','captcha_blocked','submission_unverified'].includes(r.status));
+  if(filter==='queue')rows=rows.filter(r=>['approved','failed','needs_manual_action','captcha_blocked','submission_unverified'].includes(r.status));
   else if(filter !== 'all') rows = rows.filter(r => r.status === filter);
   // Today's discoveries must not sit below older user requests. Requests
   // still have their badge and dedicated status filter.
@@ -1190,7 +1191,7 @@ function renderReport(){
     // application_log is ordered as returned — take the most recent (highest created_at)
     const logs = (r.application_log||[]).slice().sort((a,b)=> new Date(b.attempted_at||0) - new Date(a.attempted_at||0));
     const lastLog = logs[0];
-    const errText = lastLog?.notes || r.skip_reason || 'New discovery — awaiting admin handling.';
+    const errText = lastLog?.notes || r.skip_reason || 'User approved — awaiting admin handling.';
     const when = r.decided_at || r.discovered_at;
     const statusPill = r.status==='approved' ? '<span class="pill amber">Queued for admin</span>'
       : r.status==='pending' ? '<span class="pill gray">New discovery</span>'
@@ -1300,15 +1301,15 @@ async function loadApplyDocuments(context){
 
 async function openApplyOnBehalf(reportId){
   const row=reportRows.find(x=>x.id===reportId);
-  if(!row){toast('Job not found — refresh this account and retry','err');return;}
+  if(!row||!isUserRequestedMatch(row)){toast('Job not found — refresh this account and retry','err');return;}
   const request=++applyDetailRequest,accountId=reportAccountId;
   applyDocumentsRequest++;applyDocumentsContext=null;
   const modal=document.getElementById('applyModal'),body=document.getElementById('applyBody');
   body.innerHTML='<p role="status">Loading this application’s profile and login details…</p>';modal.classList.remove('hidden');
   try{
-    const {data,error}=await sb.from('job_matches').select(REPORT_DETAIL_SELECT).eq('id',reportId).is('admin_queue_deleted_at',null).single();
+    const {data,error}=await sb.from('job_matches').select(REPORT_DETAIL_SELECT).eq('id',reportId).is('admin_queue_deleted_at',null).not('admin_application_requested_at','is',null).single();
     if(request!==applyDetailRequest||accountId!==reportAccountId||modal.classList.contains('hidden'))return;
-    if(error)throw error;if(!data)throw new Error('This job is no longer in the admin queue');
+    if(error)throw error;if(!data||!isUserRequestedMatch(data))throw new Error('This job is no longer in the approved application queue');
     if(data.id!==reportId||data.job_seeker_id!==row.job_seeker_id)throw new Error('Application account did not match');
     renderApplyOnBehalf(data);
     await loadApplyDocuments({reviewRequest:request,accountId,seekerId:data.job_seeker_id,userId:data.job_seekers?.user_id||null,resumeUrl:data.job_seekers?.resume_url||null});
@@ -2021,7 +2022,7 @@ function renderAccounts(){
       '<div class="grow"><b>'+esc(a.full_name||'(no name)')+'</b> '+
         '<button type="button" class="btn btn-sm" style="padding:2px 7px;margin-left:4px;vertical-align:middle" data-support-thread="'+a.id+'" title="'+esc(envTitle)+'">✉️'+envBadge+'</button>'+
         '<div class="sub">'+esc(a.dedicated_email||'')+'</div>'+
-        '<a class="support-account-link" href="index.html?v=approval-motion-v2&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
+        '<a class="support-account-link" href="index.html?v=admin-approved-queue-v1&amp;support='+encodeURIComponent(a.id)+'" aria-label="Open read-only user app for '+esc(a.full_name||a.dedicated_email||'account')+'">🛠 Open user app<small>Staff troubleshooting · read-only</small></a></div>'+
       '<span class="pill '+(isPaused?'gray':'green')+'">'+(isPaused?'paused':'active')+'</span>'+
       '<span class="pill '+'gray'+'">Admin applications only'+'</span>'+
       '<span class="pill '+(apiProvider==='user'?'amber':'gray')+'">'+esc(apiProvider==='user'?'User API':'Company API')+'</span>'+
