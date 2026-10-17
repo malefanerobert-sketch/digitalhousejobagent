@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const {isDiscoveryProfileReady}=require('./discoveryEligibility');
 const zaScope=require('./zaJobScope');
 const jobDetails=require('./jobDetails');
 const candidateQueue=require('./candidateQueue');
@@ -1029,7 +1030,7 @@ async function run() {
   // means "watched pages AND autonomous search" — it must be included here,
   // not just 'auto', or a seeker who picked "Both" in the admin panel
   // silently never gets autonomous board search at all.
-  const { data: users, error: usersErr } = await sb
+  const { data: loadedUsers, error: usersErr } = await sb
     .from('job_seekers')
     .select('*')
     .eq('status', 'active')
@@ -1041,6 +1042,8 @@ async function run() {
     return;
   }
 
+  const users=(loadedUsers||[]).filter(isDiscoveryProfileReady);
+  console.log(`[discoverAuto] ${(loadedUsers||[]).length-users.length} account(s) waiting for existing profile requirements`);
   console.log(`📋 Found ${users?.length || 0} users to process`);
 
   // Get all job sources

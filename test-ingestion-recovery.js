@@ -9,7 +9,7 @@ const fit={titleSkipReason:()=>null,locationInScope:()=>true,skipMessage:x=>x};
 const scope={isZAJob:row=>row.location==='Johannesburg'||row.country_code==='ZA'};
 const clone=x=>JSON.parse(JSON.stringify(x));
 function database(){
- let id=0;const tables={job_discovery_candidates:[],job_matches:[],job_seekers:[{id:'u1',status:'active',auto_search_enabled:true,discovery_mode:'both',api_provider:'shared',blocked_companies:[],preferred_locations:[]}],job_sources:[{id:'s1',active:true}],user_job_sources:[{user_id:'u1',job_source_id:'s1',enabled:true}],job_custom_sources:[],job_custom_source_optouts:[]};
+ let id=0;const tables={job_discovery_candidates:[],job_matches:[],job_seekers:[{full_name:'Synthetic Applicant',date_of_birth:'1990-01-01',gender:'Other',id_type:'passport',id_number:'FIXTURE123',nationality:'South African',phone:'0123456789',job_title_keywords:['Finance Officer'],apply_qualifications:['Diploma'],apply_experience_ranges:['0-1'],id:'u1',status:'active',auto_search_enabled:true,discovery_mode:'both',api_provider:'shared',blocked_companies:[],preferred_locations:[]}],job_sources:[{id:'s1',active:true}],user_job_sources:[{user_id:'u1',job_source_id:'s1',enabled:true}],job_custom_sources:[],job_custom_source_optouts:[]};
  let failInsert=false;
  return {tables,failNextInsert(){failInsert=true;},from(table){
   let action='select',values,opts={},filters=[],max=Infinity,single=false,sorts=[];
@@ -39,6 +39,14 @@ function row(overrides={}){return {job_seeker_id:'u1',job_source_id:'s1',job_url
  clock+=600001;result=await queue.processCandidates(db,{...opts,capture:async()=>complete});assert.equal(result.published,1);assert.equal(db.tables.job_discovery_candidates.length,0);assert.equal(db.tables.job_matches[0].job_description,full);assert(details.canPublishJobDetails(db.tables.job_matches[0],'Finance Officer'));assert(!('_discovery_country' in db.tables.job_matches[0]));
  // A duplicate must not overwrite any applicant/admin decisions.
  db.tables.job_matches[0].status='applied';await queue.deferCandidates(db,[row()],opts);clock+=300001;await queue.processCandidates(db,{...opts,capture:async()=>complete});assert.equal(db.tables.job_matches.length,1);assert.equal(db.tables.job_matches[0].status,'applied');assert.equal(db.tables.job_discovery_candidates.length,0);
+ // An empty signup must never be captured or published; completing the existing
+ // fields enables the same preserved candidate without requiring a CV file.
+ db=database();const completed=clone(db.tables.job_seekers[0]);db.tables.job_seekers[0]={id:'u1',full_name:'New Signup',status:'active',api_provider:'shared',auto_search_enabled:true,discovery_mode:'both'};
+ await queue.deferCandidates(db,[row()],opts);clock+=300001;let blankCaptures=0;
+ result=await queue.processCandidates(db,{...opts,capture:async()=>{blankCaptures++;return complete;}});
+ assert.equal(blankCaptures,0);assert.equal(result.published,0);assert.equal(db.tables.job_matches.length,0);
+ assert.match(db.tables.job_discovery_candidates[0].last_error,/profile requirements/);
+ db.tables.job_seekers[0]=completed;clock+=300001;result=await queue.processCandidates(db,{...opts,capture:async()=>complete});assert.equal(result.published,1);
  for(const mode of ['disabled-account','disabled-feed','opted-out','blocked-employer','partial']){
   db=database();let value=row(),captures=0;if(mode==='disabled-account')db.tables.job_seekers[0].status='paused';if(mode==='disabled-feed')db.tables.user_job_sources=[];
   if(mode==='opted-out'){value=row({job_source_id:null,is_custom_source:true,job_custom_source_id:'w1'});db.tables.job_custom_sources=[{id:'w1',active:true}];db.tables.job_custom_source_optouts=[{job_seeker_id:'u1',job_custom_source_id:'w1'}];}

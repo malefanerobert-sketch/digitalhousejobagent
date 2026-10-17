@@ -32,6 +32,7 @@ jobs:
 
       - name: Verify 100-slot admin and worker pool
         run: |
+          node test-discovery-eligibility.js
           node test-groq-admin-slots.js
           node test-groq-pool.js
 

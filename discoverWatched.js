@@ -1,3 +1,4 @@
+const {isDiscoveryProfileReady}=require('./discoveryEligibility');
 const zaScope=require('./zaJobScope');
 const jobDetails=require('./jobDetails');
 const candidateQueue=require('./candidateQueue');
@@ -409,12 +410,14 @@ async function run() {
   }
 
   // 2. Fetch all active seekers
-  const { data: seekers, error: kErr } = await supabase
+  const { data: loadedSeekers, error: kErr } = await supabase
     .from('job_seekers')
     .select('*')
     .eq('status', 'active');
 
   if (kErr) { console.error('[discoverWatched] failed to load seekers:', kErr.message); return; }
+  const seekers=(loadedSeekers||[]).filter(isDiscoveryProfileReady);
+  console.log(`[discoverWatched] ${(loadedSeekers||[]).length-seekers.length} account(s) waiting for existing profile requirements`);
   if (!seekers || seekers.length === 0) {
     console.log('[discoverWatched] no active seekers found.');
     return;

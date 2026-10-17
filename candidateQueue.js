@@ -1,4 +1,5 @@
 'use strict';
+const {isDiscoveryProfileReady}=require('./discoveryEligibility');
 // Worker-only holding area. Incomplete candidates are durable, but never appear
 // in applicant Matches or the admin application queue until capture succeeds.
 const details=require('./jobDetails');
@@ -35,9 +36,10 @@ async function drain(sb,{limit=8,now=()=>Date.now(),capture=details.captureJobDe
    if(error)throw new Error('Could not reschedule preserved candidate: '+error.message);
   };
   try{
-   const {data:seeker,error:seekerError}=await sb.from('job_seekers').select('id,status,auto_search_enabled,discovery_mode,api_provider,blocked_companies,blocked_locations,preferred_locations,job_title_keywords,highest_qualification,apply_qualifications,apply_experience_ranges').eq('id',candidate.job_seeker_id).maybeSingle();
+   const {data:seeker,error:seekerError}=await sb.from('job_seekers').select('full_name,date_of_birth,gender,id_type,id_number,nationality,phone,id,status,auto_search_enabled,discovery_mode,api_provider,blocked_companies,blocked_locations,preferred_locations,job_title_keywords,highest_qualification,apply_qualifications,apply_experience_ranges').eq('id',candidate.job_seeker_id).maybeSingle();
    if(seekerError)throw seekerError;
    if(!seeker||seeker.status!=='active'){await hold('Account is not active');continue;}
+   if(!isDiscoveryProfileReady(seeker)){await hold('Account is waiting for existing profile requirements');continue;}
    const payload=cleanPayload(candidate.payload||{});
    if(!payload.is_custom_source&&(!seeker.auto_search_enabled||!['auto','both'].includes(seeker.discovery_mode))){await hold('Autonomous discovery is disabled for this account');continue;}
    if(seeker.api_provider==='none'){await hold('Account agent is disabled');continue;}
