@@ -432,7 +432,7 @@ body.staff-support #view-profile :disabled{opacity:1;color:var(--text)}
 .token-burst i:nth-child(3n){color:#ff7355}.token-burst i:nth-child(4n){color:#fff1a6;width:1.5px;height:4px}
 .token-burst i::after{content:"";position:absolute;left:.5px;top:.5px;width:1px;height:2px;border-radius:50%;background:#fff8d0}
 .token-spend-label{position:absolute;left:0;top:0;display:block;white-space:nowrap;text-align:center;color:#fff1bf;font-size:10px;font-weight:400;line-height:1.2;text-shadow:-1px -1px 1px #0a0f1e,1px -1px 1px #0a0f1e,-1px 1px 1px #0a0f1e,1px 1px 1px #0a0f1e,0 0 7px rgba(255,174,54,.6);animation:token-spend-snap 2s linear forwards}
-@keyframes token-spend-snap{0%{opacity:0;transform:translate(calc(-50% + 90px),-8px) scale(.85)}5%{opacity:1}12%{transform:translate(calc(-50% + 70px),-28px) scale(1)}32%{transform:translate(calc(-50% + 50px),-56px) scale(1)}60%{transform:translate(calc(-50% + 30px),-76px) scale(1)}65%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + 10px),-88px) scale(.95)}}
+@keyframes token-spend-snap{0%{opacity:0;transform:translate(-50%,0) scale(.85)}5%{opacity:1}12%{transform:translate(calc(-50% + 20px),-24px) scale(1)}32%{transform:translate(calc(-50% + 50px),-52px) scale(1)}60%{transform:translate(calc(-50% + 76px),-74px) scale(1)}65%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + 96px),-88px) scale(.95)}}
 @keyframes token-firework-snap{0%{opacity:0;transform:translate(0,0) rotate(var(--angle)) scale(.3)}5%{opacity:1}20%{transform:translate(calc(var(--dx)*.78),calc(var(--dy)*.78)) rotate(var(--angle)) scale(1)}55%{opacity:1;transform:translate(var(--dx),var(--dy)) rotate(var(--angle)) scale(.75)}100%{opacity:0;transform:translate(calc(var(--dx)*1.12),calc(var(--dy)*1.12)) rotate(var(--angle)) scale(.2)}}
 @media(max-width:920px){.credit-dock{padding:8px 12px}#toasts{bottom:80px;right:16px;max-width:calc(100vw - 32px)}}
 @media(prefers-reduced-motion:reduce){.token-burst{display:none}}
@@ -1063,11 +1063,10 @@ function showTokenSpark(rect){
  for(let i=0;i<20;i++){
   const spark=document.createElement('i'),angle=(i%10)*Math.PI*2/10+(i>=10?.17:0),radius=i<10?52:68;
   spark.style.setProperty('--dx',Math.round(Math.cos(angle)*radius)+'px');
-  spark.style.setProperty('--dy',(-Math.round(24+Math.abs(Math.sin(angle))*radius*.82))+'px');
+  spark.style.setProperty('--dy',Math.round(Math.sin(angle)*radius*.82+12)+'px');
   spark.style.setProperty('--angle',(angle*180/Math.PI+90)+'deg');el.append(spark);
  }
  const label=document.createElement('span');label.className='token-spend-label';label.textContent='−1 token';
- label.style.left=Math.min(0,innerWidth-70-parseFloat(el.style.left)-120)+'px';
  el.append(label);
  document.body.append(el);setTimeout(()=>el.remove(),2200);
 }
