@@ -13,8 +13,9 @@ try{
  const initial=sample(0),early=sample(500),middle=sample(1000),end=sample(2000);
  if(early.sparkX<parseFloat(spark.style.getPropertyValue('--dx'))*.77)throw Error('Burst still too slow in first second');
  if(early.labelX<=initial.labelX)throw Error('Token phrase must move right');
- if(initial.labelY-early.labelY<35)throw Error('Token text still drifts too slowly');
+ if(initial.labelY-early.labelY<18)throw Error('Token text still drifts too slowly');
  if(early.sparkX<(middle.sparkX-early.sparkX)*3)throw Error('No distinct initial burst');
+ if(Math.abs(end.labelX-initial.labelX-57.6)>.1||Math.abs(end.labelY-initial.labelY+52.8)>.1)throw Error('Token flight must be exactly 40 percent shorter');
  if(end.labelOpacity!==0||end.sparkOpacity!==0)throw Error('Effects do not finish at two seconds');
  const particles=[...effect.querySelectorAll('i')];
  if(!particles.some(p=>parseFloat(p.style.getPropertyValue('--dy'))<0)||!particles.some(p=>parseFloat(p.style.getPropertyValue('--dy'))>0))throw Error('Restore the full round burst, including downward sparks');
