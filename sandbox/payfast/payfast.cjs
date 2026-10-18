@@ -119,11 +119,15 @@ function clientIP(remoteAddress, forwardedFor, trustedProxies = []) {
   throw fail('Missing original client address');
 }
 async function verifySource(ip, resolve = lookup) {
-  let addresses;
-  try {
-    addresses = (await Promise.all(PAYFAST_DOMAINS.map(host => resolve(host, {all: true})))).flat();
-  } catch { throw fail('Payment source check temporarily unavailable', 503); }
-  if (!addresses.some(a => normalizeIP(a.address) === normalizeIP(ip))) throw fail('Invalid payment source', 403);
+  // An obsolete/unavailable documented hostname must not discard positive
+  // source-IP evidence from another official hostname. Never accept arbitrary IPs.
+  const results = await Promise.allSettled(PAYFAST_DOMAINS.map(host => resolve(host, {all: true})));
+  const addresses = results.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
+  if (addresses.some(a => normalizeIP(a.address) === normalizeIP(ip))) return;
+  if (!addresses.length || results.some(r => r.status === 'rejected')) {
+    throw fail('Payment source check temporarily unavailable', 503);
+  }
+  throw fail('Invalid payment source', 403);
 }
 async function verifyNotification(raw, ip, cfg, dependencies = {}) {
   const parsed = parseNotification(raw);

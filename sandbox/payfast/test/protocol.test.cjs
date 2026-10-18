@@ -108,3 +108,16 @@ test('provider INVALID, HTTP error and network failure request a retry without c
     await assert.rejects(p.verifyNotification(notification(), '192.0.2.8', cfg, {resolve, fetch: fetcher}), e => e.status === 503);
   }
 });
+
+test('one unavailable official hostname does not discard a positive official IP match', async () => {
+  await p.verifySource('192.0.2.8', async host => {
+    if (host === 'w2w.payfast.co.za') throw Error('DNS fixture unavailable');
+    return [{address: '192.0.2.8'}];
+  });
+});
+test('partial DNS failure with no official IP match remains fail-closed and retryable', async () => {
+  await assert.rejects(p.verifySource('198.51.100.9', async host => {
+    if (host === 'w2w.payfast.co.za') throw Error('DNS fixture unavailable');
+    return [{address: '192.0.2.8'}];
+  }), e => e.status === 503);
+});

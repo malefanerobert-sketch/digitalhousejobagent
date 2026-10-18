@@ -12,7 +12,8 @@ Implemented locally:
 - Fixed server-side catalog: R200/month = 600 monthly tokens; R50/R100/R150 = 100/200/300 purchased tokens. ZAR only.
 - Signed Sandbox checkout, including initial subscription fields (`subscription_type=1`, `frequency=3`, `cycles=0`). No passphrase sent to the browser.
 - Private, single-operator test UI with a separate random access key and HttpOnly, Secure, SameSite=Strict session cookie.
-- Payment notification validation: signature, merchant, source IP against official PayFast DNS, expected amount/package/order, optional currency, and server-to-server Sandbox validation.
+- Payment notification validation: signature, merchant, positive source-IP match against official PayFast DNS, expected amount/package/order, optional currency, and server-to-server Sandbox validation. One unavailable official hostname does not discard a positive match from another; an unmatched/indeterminate source remains fail-closed.
+- Read-only `queryPaidTransaction` recovery helper binds an authenticated Sandbox API `COMPLETE` response to the exact stored order, provider payment ID and integer-cent amount. API recovery is audited distinctly from ITNs. A transaction token is never assumed to be a subscription token; subscription linkage can remain pending, and a later verified matching ITN can link it without granting twice.
 - Atomic SQLite wallet + ledger + receipt updates; unique PayFast transaction IDs, immutable receipt binding and checkout request UUIDs.
 - Zero starting test tokens. Initial verified subscription credits 600 monthly tokens. Top-ups credit only the separate purchased balance.
 - Internal synthetic-wallet spending tests use monthly tokens first. Purchased tokens never expire; a due-date-based three-day grace permits spending, then freezes use without deleting either balance.
@@ -21,8 +22,8 @@ Implemented locally:
 - No changes to `index.html`, `admin.html`, existing credit SQL/RPCs, Railway worker, production Pages workflow or public asset allowlist.
 
 **Not implemented / not verified:**
-- No actual PayFast Sandbox transaction or real ITN delivery has been run. Automated tests use synthetic DNS/provider responses and no user credentials.
-- No public test URL, reverse proxy, TLS certificate or cloud deployment has been provisioned.
+- Actual Sandbox testing is now recorded in `VERIFICATION-2026-10-18.md`: the initial R200 payment was recovered through an authenticated provider API lookup; the R50 top-up passed via a genuine verified ITN. Offline automated tests still use synthetic DNS/provider responses and no user credentials.
+- A temporary Cloudflare Quick Tunnel was used for the actual Sandbox test. It is not permanent hosting, has no uptime guarantee and stops if the development environment or tunnel process ends. No Railway service, paid hosting, DNS change or production deployment was created.
 - No app-level Supabase authentication, RLS policies or migrations have been added/applied.
 - **Renewals are deliberately held for review and do not grant/reset tokens.** ITN receipt time is not evidence of which anniversary period was paid. A cycle reconciliation adapter against authoritative provider subscription data is still required. Original-anniversary/no-rollover renewal allocation, reactivation, missed cycles and out-of-order renewals must be implemented and tested before billing is complete.
 - Cancellation, refunds, disputes, failed-charge lifecycle notifications and customer payment-method changes are not implemented. Unknown/refund-like statuses fail closed; this is a live-launch blocker, not completed refund handling.
@@ -45,10 +46,10 @@ The new `payfast-sandbox-tests.yml` workflow only runs tests. It cannot deploy a
 
 ## Local verification — 18 October 2026
 
-- 47 Node tests passed locally (protocol, wallet transactions and HTTP endpoints).
+- 59 Node tests passed locally, including the partial-DNS-failure regression and authenticated API recovery/idempotency tests.
 - Syntax checks passed for the server and browser script.
 - Local Chromium check passed: operator login, unpaid top-up gating, signed form capture, zero credit from checkout alone, server-confirmed synthetic wallet display, and desktop/mobile widths. Form submission was intercepted in the browser; no PayFast request was made. This browser check is not part of the dependency-free CI suite.
-- Real Sandbox checkout, webhook delivery, recurring settlement behavior and GitHub Actions results are not established by these local checks.
+- Real Sandbox results are documented separately in `VERIFICATION-2026-10-18.md`; automatic renewals/recurring settlement and GitHub Actions results are not established by local tests.
 
 ## Later: run a hosted Sandbox checkout
 

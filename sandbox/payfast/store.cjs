@@ -68,9 +68,10 @@ class Store {
     this.db.prepare('INSERT INTO sandbox_ledger VALUES(?,?,?,?,?,?,?,?)')
       .run(randomUUID(), reference, kind, monthlyDelta, purchasedDelta, w.monthly, w.purchased, new Date(now).toISOString());
   }
-  // Only invoke AFTER verifyNotification (signature, merchant, source IP, PayFast server).
+  // Trusted callers only: verified ITN or queryPaidTransaction via the authenticated Sandbox API.
   // Private server module; never exposed as a client-callable credit endpoint.
-  recordVerifiedPayment(data, now = new Date()) {
+  recordVerifiedPayment(data, now = new Date(), verificationSource = 'itn') {
+    if (!['itn', 'api_reconciliation'].includes(verificationSource)) throw fail('Invalid verification source');
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(data.pf_payment_id || '') || !UUID.test(data.m_payment_id || '')) throw fail('Invalid payment reference');
     const amount = cents(data.amount_gross);
     if (!['COMPLETE', 'FAILED', 'CANCELLED', 'PENDING'].includes(data.payment_status)) throw fail('Unsupported payment status; manual review required');
@@ -78,12 +79,17 @@ class Store {
       const order = this.order(data.m_payment_id);
       if (!order || amount !== order.amount_cents || (data.custom_str1 && data.custom_str1 !== 'jobagent-sandbox-only')) throw fail('Payment does not match the stored order');
       const prior = this.db.prepare('SELECT * FROM sandbox_payments WHERE pf_payment_id=?').get(data.pf_payment_id);
-      if (prior && (prior.order_id !== order.id || prior.amount_cents !== amount || (prior.subscription_token || '') !== (data.token || ''))) throw fail('Payment ID reused with different details', 409);
-      if (prior) return {outcome: prior.outcome, duplicate: true};
+      if (prior && (prior.order_id !== order.id || prior.amount_cents !== amount || (prior.subscription_token && data.token && prior.subscription_token !== data.token))) throw fail('Payment ID reused with different details', 409);
+      if (prior) {
+        if (verificationSource === 'itn' && order.package_id === 'monthly' && data.payment_status === 'COMPLETE' && !prior.subscription_token && /^[A-Za-z0-9-]{36}$/.test(data.token || '')) {
+          this.db.prepare('UPDATE sandbox_payments SET subscription_token=? WHERE pf_payment_id=? AND subscription_token IS NULL').run(data.token, data.pf_payment_id);
+        }
+        return {outcome: prior.outcome, duplicate: true};
+      }
       if (data.payment_status !== 'COMPLETE') return {outcome: 'not_complete', duplicate: false};
       const product = CATALOG[order.package_id];
-      if (product.kind === 'subscription' && !/^[A-Za-z0-9-]{36}$/.test(data.token || '')) throw fail('Missing subscription token');
-      let outcome = 'credited', reason = 'verified_initial_payment';
+      if (product.kind === 'subscription' && verificationSource === 'itn' && !/^[A-Za-z0-9-]{36}$/.test(data.token || '')) throw fail('Missing subscription token');
+      let outcome = 'credited', reason = verificationSource === 'api_reconciliation' ? (product.kind === 'subscription' ? 'verified_api_reconciliation_subscription_link_pending' : 'verified_api_reconciliation') : 'verified_initial_payment';
       const w = this.wallet();
       // A second transaction against one-off checkout must NEVER mint tokens again.
       // A recurring transaction needs an authoritative cycle reconciliation adapter;
