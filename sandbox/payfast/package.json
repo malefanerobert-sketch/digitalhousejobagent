@@ -1,0 +1,8 @@
+{
+  "name": "jobagent-payfast-sandbox",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated PayFast Sandbox integration harness; never connects to production JobAgent",
+  "engines": {"node": ">=24"},
+  "scripts": {"test": "node --test test/*.test.cjs", "start": "node --env-file=.env server.cjs"}
+}

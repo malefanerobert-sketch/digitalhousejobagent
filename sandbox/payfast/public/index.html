@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JobAgent — isolated payment test</title><link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="banner">PAYFAST SANDBOX · TEST TOKENS ONLY · NO LIVE MONEY</p>
+  <h1>JobAgent payment test</h1>
+  <p>This is a separate test harness, not your JobAgent account. Nothing here changes your real balance.</p>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <section id="login">
+    <h2>Private test access</h2>
+    <p>Use the separate operator access key configured on this test server. Do not enter your PayFast password or passphrase.</p>
+    <form id="login-form"><label for="access-key">Test operator access key</label>
+      <input id="access-key" type="password" autocomplete="off" required>
+      <button type="submit">Open test harness</button>
+    </form>
+  </section>
+  <section id="dashboard" hidden>
+    <h2>Synthetic test wallet</h2><p id="wallet"></p><p id="subscription"></p>
+    <p class="warning">First milestone: initial subscription and top-ups only. Renewals are held for review. Cancellation, refunds and disputes are not implemented. Do not use for live sales.</p>
+    <h2>Test checkout</h2>
+    <p>All prices are ZAR. A paid test subscription is required before top-ups. Checkout opens PayFast’s virtual-wallet Sandbox, not its live payment page.</p>
+    <div id="packages"></div>
+    <p id="pending"></p>
+    <button id="refresh" type="button">Refresh verified payment status</button>
+    <button id="logout" type="button">Sign out</button>
+    <h2>Verified test payments</h2><pre id="history">No payments yet.</pre>
+  </section>
+</main>
+</body>
+</html>

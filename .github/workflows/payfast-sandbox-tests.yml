@@ -1,0 +1,21 @@
+name: PayFast sandbox tests (no deployment)
+on:
+  push:
+    branches: [feature/payfast-sandbox-billing]
+    paths: ['sandbox/payfast/**', '.github/workflows/payfast-sandbox-tests.yml']
+  pull_request:
+    paths: ['sandbox/payfast/**', '.github/workflows/payfast-sandbox-tests.yml']
+permissions:
+  contents: read
+jobs:
+  sandbox-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run isolated tests without credentials or production services
+        working-directory: sandbox/payfast
+        run: npm test
