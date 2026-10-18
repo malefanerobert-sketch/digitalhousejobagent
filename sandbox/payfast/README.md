@@ -68,6 +68,14 @@ The test UI keeps an uncertain checkout's request UUID in tab-scoped session sto
 
 Only a synthetic account exists, so there is no production identity mapping or customer-facing multi-user security claim. The harness must not be exposed as a production customer portal.
 
+## Private test access handoff
+
+An authorized tester can receive a private link file with a `#test-access=` fragment instead of manually copying the operator key. The browser exchanges it only with the same-origin session endpoint, removes the fragment from the address bar/history before sending the request, and then uses the ordinary HttpOnly session cookie. URL fragments are not part of the HTTP request URL. This is a temporary test-only bearer link, not an account invitation system or production authentication feature.
+
+Keep any such link/file private; never commit it, publish it or put it in a query parameter. Anyone with the complete link has the same synthetic test access. It expires when the temporary server/key is replaced. It cannot access live JobAgent accounts. Manual key input trims only surrounding whitespace.
+
+Fresh-browser verification passed without pre-existing cookies, and the private fragment was cleared. No payment was made during that access check.
+
 ## Before production integration / launch
 
 - Provision an explicitly authorized, isolated Supabase staging project and app preview. Do not restore real CVs, IDs, documents or customer data into it.

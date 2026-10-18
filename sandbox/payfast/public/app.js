@@ -59,10 +59,24 @@ async function checkout(packageId, button) {
 }
 $('login-form').addEventListener('submit', async event => {
   event.preventDefault(); const input = $('access-key');
-  try { await api('/session', {accessKey: input.value}); input.value = ''; notice('Signed in to the isolated test harness.'); await refresh(); }
+  try { await api('/session', {accessKey: input.value.trim()}); input.value = ''; notice('Signed in to the isolated test harness.'); await refresh(); }
   catch (e) { input.value = ''; notice(e.message); }
 });
 $('refresh').addEventListener('click', refresh);
 $('logout').addEventListener('click', async () => { try { await api('/logout', {}); await refresh(); } catch (e) { notice(e.message); } });
 if (new URLSearchParams(location.search).has('result')) notice('Returned from checkout. This is NOT proof of payment. Refresh to check the verified server notification.');
-refresh();
+async function initialize() {
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const access = fragment.get('test-access');
+  if (access !== null) {
+    // Fragments are not sent to the server. Remove the private link value from
+    // the address bar/history before any request or navigation is initiated.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      await api('/session', {accessKey: access.trim()});
+      notice('Private test access opened. Sandbox only; no live money.');
+    } catch (e) { notice(e.message); }
+  }
+  await refresh();
+}
+initialize();
